@@ -1,0 +1,351 @@
+// Prisma schema for pi runtime persistence.
+// Run `npx prisma generate --schema packages/storage/prisma/schema.prisma` after changes.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model PiAgentSession {
+  id                   String    @id @db.VarChar(64)
+  tenantId             String    @map("tenant_id") @db.VarChar(64)
+  userId               String    @map("user_id") @db.VarChar(64)
+  workspaceId          String?   @map("workspace_id") @db.VarChar(128)
+  sessionId            String    @map("session_id") @db.VarChar(160)
+  conversationId       String    @map("conversation_id") @db.VarChar(160)
+  rootSessionId        String?   @map("root_session_id") @db.VarChar(160)
+  parentSessionId      String?   @map("parent_session_id") @db.VarChar(160)
+  childSessionId       String?   @map("child_session_id") @db.VarChar(160)
+  taskRunId            String?   @map("task_run_id") @db.VarChar(64)
+  runId                String?   @map("run_id") @db.VarChar(64)
+  spawnBatchId         String?   @map("spawn_batch_id") @db.VarChar(64)
+  triggerType          String    @map("trigger_type") @db.VarChar(32)
+  status               String    @db.VarChar(32)
+  title                String?   @db.VarChar(255)
+  turnCount            BigInt    @default(0) @map("turn_count")
+  firstUserMessage     String?   @map("first_user_message") @db.Text
+  lastUserMessage      String?   @map("last_user_message") @db.Text
+  lastAssistantMessage String?   @map("last_assistant_message") @db.Text
+  lastMessageAt        DateTime? @map("last_message_at") @db.DateTime(6)
+  modelProvider        String    @map("model_provider") @db.VarChar(64)
+  modelName            String    @map("model_name") @db.VarChar(128)
+  thinkingLevel        String?   @map("thinking_level") @db.VarChar(32)
+  toolPolicyProfile    String    @map("tool_policy_profile") @db.VarChar(64)
+  sandboxSessionId     String?   @map("sandbox_session_id") @db.VarChar(160)
+  sandboxStatus        String?   @map("sandbox_status") @db.VarChar(32)
+  piSessionRef         String?   @map("pi_session_ref") @db.VarChar(512)
+  metadataJson         Json?     @map("metadata_json")
+  createdAt            DateTime  @map("created_at") @db.DateTime(6)
+  updatedAt            DateTime  @map("updated_at") @db.DateTime(6)
+  lastActiveAt         DateTime? @map("last_active_at") @db.DateTime(6)
+  archivedAt           DateTime? @map("archived_at") @db.DateTime(6)
+  deletedAt            DateTime? @map("deleted_at") @db.DateTime(6)
+
+  @@unique([sessionId], map: "uq_pi_agent_sessions_session")
+  @@unique([tenantId, sessionId], map: "uq_pi_agent_sessions_tenant_session")
+  @@index([tenantId, userId, updatedAt], map: "idx_pi_agent_sessions_user_updated")
+  @@index([tenantId, workspaceId, updatedAt], map: "idx_pi_agent_sessions_workspace_updated")
+  @@index([tenantId, userId, lastMessageAt], map: "idx_pi_agent_sessions_user_last_message")
+  @@index([tenantId, userId, deletedAt, lastMessageAt], map: "idx_pi_agent_sessions_user_visible")
+  @@index([tenantId, parentSessionId], map: "idx_pi_agent_sessions_parent")
+  @@index([tenantId, status], map: "idx_pi_agent_sessions_status")
+  @@map("pi_agent_sessions")
+}
+
+model PiAgentTurn {
+  id                String    @id @db.VarChar(64)
+  tenantId          String    @map("tenant_id") @db.VarChar(64)
+  userId            String    @map("user_id") @db.VarChar(64)
+  workspaceId       String?   @map("workspace_id") @db.VarChar(128)
+  sessionId         String    @map("session_id") @db.VarChar(160)
+  conversationId    String    @map("conversation_id") @db.VarChar(160)
+  traceId           String?   @map("trace_id") @db.VarChar(64)
+  turnSeq           BigInt    @map("turn_seq")
+  sourceType        String    @map("source_type") @db.VarChar(32)
+  status            String    @db.VarChar(32)
+  inputText         String?   @map("input_text") @db.LongText
+  inputJson         Json?     @map("input_json")
+  outputText        String?   @map("output_text") @db.LongText
+  outputJson        Json?     @map("output_json")
+  errorJson         Json?     @map("error_json")
+  modelJson         Json?     @map("model_json")
+  toolPolicyProfile String?   @map("tool_policy_profile") @db.VarChar(64)
+  startedAt         DateTime? @map("started_at") @db.DateTime(6)
+  completedAt       DateTime? @map("completed_at") @db.DateTime(6)
+  createdAt         DateTime  @map("created_at") @db.DateTime(6)
+  updatedAt         DateTime  @map("updated_at") @db.DateTime(6)
+
+  @@unique([tenantId, sessionId, turnSeq], map: "uq_pi_agent_turns_tenant_session_seq")
+  @@index([tenantId, sessionId, turnSeq], map: "idx_pi_agent_turns_session_seq")
+  @@index([tenantId, userId, createdAt], map: "idx_pi_agent_turns_user_created")
+  @@index([tenantId, traceId], map: "idx_pi_agent_turns_trace")
+  @@index([tenantId, status, createdAt], map: "idx_pi_agent_turns_status")
+  @@map("pi_agent_turns")
+}
+
+model PiAgentMessage {
+  id              String    @id @db.VarChar(64)
+  tenantId        String    @map("tenant_id") @db.VarChar(64)
+  userId          String    @map("user_id") @db.VarChar(64)
+  workspaceId     String?   @map("workspace_id") @db.VarChar(128)
+  sessionId       String    @map("session_id") @db.VarChar(160)
+  conversationId  String    @map("conversation_id") @db.VarChar(160)
+  turnId          String?   @map("turn_id") @db.VarChar(64)
+  role            String    @db.VarChar(32)
+  agentId         String?   @map("agent_id") @db.VarChar(160)
+  contentText     String?   @map("content_text") @db.LongText
+  contentJson     Json?     @map("content_json")
+  thoughtsJson    Json?     @map("thoughts_json")
+  toolCallsJson   Json?     @map("tool_calls_json")
+  tokenUsageJson  Json?     @map("token_usage_json")
+  modelProvider   String?   @map("model_provider") @db.VarChar(64)
+  modelName       String?   @map("model_name") @db.VarChar(128)
+  messageSeq      BigInt    @map("message_seq")
+  createdAt       DateTime  @map("created_at") @db.DateTime(6)
+  deletedAt       DateTime? @map("deleted_at") @db.DateTime(6)
+
+  @@unique([tenantId, sessionId, messageSeq], map: "uq_pi_agent_messages_tenant_session_seq")
+  @@index([tenantId, sessionId, messageSeq], map: "idx_pi_agent_messages_session_seq")
+  @@index([tenantId, turnId], map: "idx_pi_agent_messages_turn")
+  @@index([tenantId, userId, createdAt], map: "idx_pi_agent_messages_user_created")
+  @@map("pi_agent_messages")
+}
+
+model PiAgentTurnQueue {
+  id             String    @id @db.VarChar(64)
+  tenantId       String    @map("tenant_id") @db.VarChar(64)
+  userId         String    @map("user_id") @db.VarChar(64)
+  workspaceId    String?   @map("workspace_id") @db.VarChar(128)
+  sessionId      String    @map("session_id") @db.VarChar(160)
+  turnId         String    @map("turn_id") @db.VarChar(64)
+  sourceType     String    @map("source_type") @db.VarChar(32)
+  status         String    @db.VarChar(32)
+  priority       Int       @default(0)
+  leaseOwner     String?   @map("lease_owner") @db.VarChar(128)
+  leaseExpiresAt DateTime? @map("lease_expires_at") @db.DateTime(6)
+  attemptCount   Int       @default(0) @map("attempt_count")
+  availableAt    DateTime  @map("available_at") @db.DateTime(6)
+  createdAt      DateTime  @map("created_at") @db.DateTime(6)
+  updatedAt      DateTime  @map("updated_at") @db.DateTime(6)
+
+  @@unique([tenantId, turnId], map: "uq_pi_agent_turn_queue_turn")
+  @@index([tenantId, status, priority, availableAt], map: "idx_pi_agent_turn_queue_ready")
+  @@index([tenantId, status, priority, availableAt, createdAt], map: "idx_pi_agent_turn_queue_ready_order")
+  @@index([tenantId, sessionId, status], map: "idx_pi_agent_turn_queue_session")
+  @@index([tenantId, sourceType, status], map: "idx_pi_agent_turn_queue_source")
+  @@index([tenantId, leaseOwner, leaseExpiresAt], map: "idx_pi_agent_turn_queue_lease")
+  @@map("pi_agent_turn_queue")
+}
+
+model PiAgentTurnSignal {
+  id             String    @id @db.VarChar(64)
+  tenantId       String    @map("tenant_id") @db.VarChar(64)
+  userId         String    @map("user_id") @db.VarChar(64)
+  actorUserId    String?   @map("actor_user_id") @db.VarChar(64)
+  sessionId      String    @map("session_id") @db.VarChar(160)
+  turnId         String?   @map("turn_id") @db.VarChar(64)
+  signalType     String    @map("signal_type") @db.VarChar(32)
+  status         String    @db.VarChar(32)
+  payloadJson    Json?     @map("payload_json")
+  reason         String?   @db.VarChar(512)
+  createdAt      DateTime  @map("created_at") @db.DateTime(6)
+  deliveredAt    DateTime? @map("delivered_at") @db.DateTime(6)
+  acknowledgedAt DateTime? @map("acknowledged_at") @db.DateTime(6)
+
+  @@index([tenantId, sessionId, status, createdAt], map: "idx_pi_agent_turn_signals_session")
+  @@index([tenantId, turnId, status], map: "idx_pi_agent_turn_signals_turn")
+  @@index([tenantId, actorUserId, createdAt], map: "idx_pi_agent_turn_signals_actor")
+  @@map("pi_agent_turn_signals")
+}
+
+model PiAgentEvent {
+  id          String   @id @db.VarChar(64)
+  tenantId    String   @map("tenant_id") @db.VarChar(64)
+  userId      String?  @map("user_id") @db.VarChar(64)
+  workspaceId String?  @map("workspace_id") @db.VarChar(128)
+  sessionId   String?  @map("session_id") @db.VarChar(160)
+  turnId      String?  @map("turn_id") @db.VarChar(64)
+  traceId     String?  @map("trace_id") @db.VarChar(64)
+  eventSeq    BigInt   @map("event_seq")
+  eventSource String   @map("event_source") @db.VarChar(32)
+  eventType   String   @map("event_type") @db.VarChar(64)
+  eventName   String   @map("event_name") @db.VarChar(64)
+  severity    String   @default("info") @db.VarChar(16)
+  payloadJson Json?    @map("payload_json")
+  createdAt   DateTime @map("created_at") @db.DateTime(6)
+
+  @@unique([tenantId, sessionId, eventSeq], map: "uq_pi_agent_events_tenant_session_seq")
+  @@index([tenantId, sessionId, eventSeq], map: "idx_pi_agent_events_session_seq")
+  @@index([tenantId, sessionId, createdAt], map: "idx_pi_agent_events_session_created")
+  @@index([tenantId, turnId, eventSeq], map: "idx_pi_agent_events_turn_seq")
+  @@index([tenantId, turnId, createdAt], map: "idx_pi_agent_events_turn_created")
+  @@index([tenantId, traceId, createdAt], map: "idx_pi_agent_events_trace_created")
+  @@index([tenantId, eventType, createdAt], map: "idx_pi_agent_events_type_created")
+  @@index([tenantId, eventSource, sessionId, eventSeq], map: "idx_pi_agent_events_source_session_seq")
+  @@index([tenantId, eventSource, traceId, createdAt], map: "idx_pi_agent_events_source_trace_created")
+  @@index([tenantId, eventSource, eventType, createdAt], map: "idx_pi_agent_events_source_type_created")
+  @@map("pi_agent_events")
+}
+
+model PiAgentSubagentRun {
+  id                String    @id @db.VarChar(64)
+  tenantId          String    @map("tenant_id") @db.VarChar(64)
+  userId            String    @map("user_id") @db.VarChar(64)
+  workspaceId       String?   @map("workspace_id") @db.VarChar(128)
+  runId             String    @map("run_id") @db.VarChar(64)
+  taskRunId         String?   @map("task_run_id") @db.VarChar(64)
+  spawnBatchId      String?   @map("spawn_batch_id") @db.VarChar(64)
+  traceId           String?   @map("trace_id") @db.VarChar(64)
+  parentSessionId   String    @map("parent_session_id") @db.VarChar(160)
+  childSessionId    String    @map("child_session_id") @db.VarChar(160)
+  parentTurnId      String?   @map("parent_turn_id") @db.VarChar(64)
+  parentToolCallId  String?   @map("parent_tool_call_id") @db.VarChar(160)
+  agentName         String?   @map("agent_name") @db.VarChar(128)
+  label             String?   @db.VarChar(255)
+  taskText          String    @map("task_text") @db.LongText
+  status            String    @db.VarChar(32)
+  depth             Int       @default(0)
+  modelJson         Json?     @map("model_json")
+  toolPolicyProfile String?   @map("tool_policy_profile") @db.VarChar(64)
+  resultText        String?   @map("result_text") @db.LongText
+  errorJson         Json?     @map("error_json")
+  createdAt         DateTime  @map("created_at") @db.DateTime(6)
+  startedAt         DateTime? @map("started_at") @db.DateTime(6)
+  endedAt           DateTime? @map("ended_at") @db.DateTime(6)
+  updatedAt         DateTime  @map("updated_at") @db.DateTime(6)
+
+  @@unique([runId], map: "uq_pi_agent_subagent_runs_run_global")
+  @@unique([tenantId, runId], map: "uq_pi_agent_subagent_runs_run")
+  @@index([tenantId, parentSessionId, status], map: "idx_pi_agent_subagent_runs_parent")
+  @@index([tenantId, childSessionId], map: "idx_pi_agent_subagent_runs_child")
+  @@index([tenantId, traceId], map: "idx_pi_agent_subagent_runs_trace")
+  @@map("pi_agent_subagent_runs")
+}
+
+model PiAgentApproval {
+  id           String    @id @db.VarChar(64)
+  tenantId     String    @map("tenant_id") @db.VarChar(64)
+  userId       String    @map("user_id") @db.VarChar(64)
+  actorUserId  String?   @map("actor_user_id") @db.VarChar(64)
+  workspaceId  String?   @map("workspace_id") @db.VarChar(128)
+  sessionId    String    @map("session_id") @db.VarChar(160)
+  turnId       String?   @map("turn_id") @db.VarChar(64)
+  toolCallId   String?   @map("tool_call_id") @db.VarChar(160)
+  approvalType String    @map("approval_type") @db.VarChar(64)
+  status       String    @db.VarChar(32)
+  requestJson  Json      @map("request_json")
+  decisionJson Json?     @map("decision_json")
+  requestedAt  DateTime  @map("requested_at") @db.DateTime(6)
+  decidedAt    DateTime? @map("decided_at") @db.DateTime(6)
+  expiresAt    DateTime? @map("expires_at") @db.DateTime(6)
+
+  @@index([tenantId, sessionId, status, requestedAt], map: "idx_pi_agent_approvals_session")
+  @@index([tenantId, actorUserId, requestedAt], map: "idx_pi_agent_approvals_actor")
+  @@index([tenantId, status, expiresAt], map: "idx_pi_agent_approvals_expiry")
+  @@map("pi_agent_approvals")
+}
+
+model PiAgentMemory {
+  id           String    @id @db.VarChar(64)
+  tenantId     String    @map("tenant_id") @db.VarChar(64)
+  userId       String    @map("user_id") @db.VarChar(64)
+  workspaceId  String?   @map("workspace_id") @db.VarChar(128)
+  sessionId    String?   @map("session_id") @db.VarChar(160)
+  scope        String    @db.VarChar(32)
+  text         String    @db.LongText
+  tagsJson     Json?     @map("tags_json")
+  metadataJson Json?     @map("metadata_json")
+  embeddingRef String?   @map("embedding_ref") @db.VarChar(256)
+  createdAt    DateTime  @map("created_at") @db.DateTime(6)
+  updatedAt    DateTime  @map("updated_at") @db.DateTime(6)
+  deletedAt    DateTime? @map("deleted_at") @db.DateTime(6)
+
+  @@index([tenantId, sessionId, createdAt], map: "idx_pi_agent_memory_session")
+  @@index([tenantId, userId, scope, createdAt], map: "idx_pi_agent_memory_user_scope")
+  @@index([tenantId, workspaceId, scope, createdAt], map: "idx_pi_agent_memory_workspace_scope")
+  @@map("pi_agent_memory")
+}
+
+model PiAgentScheduledTask {
+  id                String    @id @db.VarChar(64)
+  tenantId          String    @map("tenant_id") @db.VarChar(64)
+  userId            String    @map("user_id") @db.VarChar(64)
+  workspaceId       String?   @map("workspace_id") @db.VarChar(128)
+  sessionId         String    @map("session_id") @db.VarChar(160)
+  name              String?   @db.VarChar(255)
+  description       String?   @db.Text
+  prompt            String    @db.LongText
+  taskType          String    @map("task_type") @db.VarChar(32)
+  schedule          String?   @db.VarChar(255)
+  intervalSeconds   Int?      @map("interval_seconds")
+  enabled           Boolean   @default(true)
+  modelJson         Json?     @map("model_json")
+  toolPolicyProfile String?   @map("tool_policy_profile") @db.VarChar(64)
+  workspaceDir      String?   @map("workspace_dir") @db.VarChar(1024)
+  lastRunAt         DateTime? @map("last_run_at") @db.DateTime(6)
+  nextRunAt         DateTime? @map("next_run_at") @db.DateTime(6)
+  runCount          BigInt    @default(0) @map("run_count")
+  lastStatus        String?   @map("last_status") @db.VarChar(32)
+  lastError         String?   @map("last_error") @db.Text
+  createdAt         DateTime  @map("created_at") @db.DateTime(6)
+  updatedAt         DateTime  @map("updated_at") @db.DateTime(6)
+  deletedAt         DateTime? @map("deleted_at") @db.DateTime(6)
+
+  @@index([tenantId, enabled, nextRunAt], map: "idx_pi_agent_scheduled_tasks_due")
+  @@index([tenantId, userId, updatedAt], map: "idx_pi_agent_scheduled_tasks_user")
+  @@index([tenantId, userId, deletedAt, updatedAt], map: "idx_pi_agent_scheduled_tasks_user_visible")
+  @@index([tenantId, sessionId], map: "idx_pi_agent_scheduled_tasks_session")
+  @@map("pi_agent_scheduled_tasks")
+}
+
+model PiAgentTaskRun {
+  id          String    @id @db.VarChar(64)
+  tenantId    String    @map("tenant_id") @db.VarChar(64)
+  userId      String    @map("user_id") @db.VarChar(64)
+  workspaceId String?   @map("workspace_id") @db.VarChar(128)
+  taskId      String    @map("task_id") @db.VarChar(64)
+  sessionId   String    @map("session_id") @db.VarChar(160)
+  turnId      String?   @map("turn_id") @db.VarChar(64)
+  status      String    @db.VarChar(32)
+  message     String?   @db.Text
+  errorJson   Json?     @map("error_json")
+  startedAt   DateTime? @map("started_at") @db.DateTime(6)
+  endedAt     DateTime? @map("ended_at") @db.DateTime(6)
+  createdAt   DateTime  @map("created_at") @db.DateTime(6)
+
+  @@index([tenantId, taskId, createdAt], map: "idx_pi_agent_task_runs_task_created")
+  @@index([tenantId, status, createdAt], map: "idx_pi_agent_task_runs_status_created")
+  @@index([tenantId, turnId], map: "idx_pi_agent_task_runs_turn")
+  @@map("pi_agent_task_runs")
+}
+
+model PiAgentArtifact {
+  id           String    @id @db.VarChar(64)
+  tenantId     String    @map("tenant_id") @db.VarChar(64)
+  userId       String    @map("user_id") @db.VarChar(64)
+  workspaceId  String?   @map("workspace_id") @db.VarChar(128)
+  sessionId    String    @map("session_id") @db.VarChar(160)
+  turnId       String?   @map("turn_id") @db.VarChar(64)
+  toolCallId   String?   @map("tool_call_id") @db.VarChar(160)
+  artifactType String    @map("artifact_type") @db.VarChar(64)
+  name         String?   @db.VarChar(512)
+  mimeType     String?   @map("mime_type") @db.VarChar(128)
+  sizeBytes    BigInt?   @map("size_bytes")
+  sha256       String?   @db.VarChar(64)
+  storageUri   String    @map("storage_uri") @db.VarChar(1024)
+  previewUri   String?   @map("preview_uri") @db.VarChar(1024)
+  metadataJson Json?     @map("metadata_json")
+  createdAt    DateTime  @map("created_at") @db.DateTime(6)
+  deletedAt    DateTime? @map("deleted_at") @db.DateTime(6)
+
+  @@index([tenantId, sessionId, createdAt], map: "idx_pi_agent_artifacts_session_created")
+  @@index([tenantId, userId, deletedAt, sessionId, createdAt], map: "idx_pi_agent_artifacts_user_session_visible")
+  @@index([tenantId, turnId, createdAt], map: "idx_pi_agent_artifacts_turn_created")
+  @@index([tenantId, toolCallId], map: "idx_pi_agent_artifacts_tool_call")
+  @@index([tenantId, sha256], map: "idx_pi_agent_artifacts_hash")
+  @@map("pi_agent_artifacts")
+}

@@ -9,8 +9,8 @@
     "node": ">=24.0.0"
   },
   "scripts": {
-    "build": "tsc -b packages/*",
-    "typecheck": "tsc -b packages/* --pretty false",
+    "build": "pnpm --filter @amaster.ai/pi-storage prisma:generate && tsc -b packages/*",
+    "typecheck": "pnpm --filter @amaster.ai/pi-storage prisma:generate && tsc -b packages/* --pretty false",
     "test": "vitest run"
   },
   "devDependencies": {
