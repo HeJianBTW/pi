@@ -1,14 +1,14 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { type TextContent as AiTextContent, complete } from '@earendil-works/pi-ai';
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
-import { complete, type TextContent as AiTextContent } from '@earendil-works/pi-ai';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import { Type } from 'typebox';
 import {
-  VISUAL_SYSTEM_PROMPT,
   handleAnalyzeScreenshot,
+  VISUAL_SYSTEM_PROMPT,
   type VisionCaller,
 } from './analyze-screenshot.js';
 import {
@@ -254,22 +254,26 @@ export default function browserUseExtension(pi: ExtensionAPI): void {
       if (auth.apiKey) options.apiKey = auth.apiKey;
       if (auth.headers) options.headers = auth.headers;
 
-      const result = await complete(model, {
-        systemPrompt: VISUAL_SYSTEM_PROMPT,
-        messages: [
-          {
-            role: 'user' as const,
-            content: [
-              {
-                type: 'text' as const,
-                text: `Analyze this screenshot and respond to the following instruction:\n\n${instruction}`,
-              },
-              { type: 'image' as const, data: imageBase64, mimeType },
-            ],
-            timestamp: Date.now(),
-          },
-        ],
-      }, options);
+      const result = await complete(
+        model,
+        {
+          systemPrompt: VISUAL_SYSTEM_PROMPT,
+          messages: [
+            {
+              role: 'user' as const,
+              content: [
+                {
+                  type: 'text' as const,
+                  text: `Analyze this screenshot and respond to the following instruction:\n\n${instruction}`,
+                },
+                { type: 'image' as const, data: imageBase64, mimeType },
+              ],
+              timestamp: Date.now(),
+            },
+          ],
+        },
+        options,
+      );
 
       return result.content
         .filter((c): c is AiTextContent => c.type === 'text')

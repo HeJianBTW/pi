@@ -1,9 +1,9 @@
-import { createHash, randomUUID } from "node:crypto";
-import { readdir, readFile, stat } from "node:fs/promises";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { PrismaClient } from "@prisma/client";
-import { RedisLockManager } from "./redis-locks.js";
+import { createHash, randomUUID } from 'node:crypto';
+import { readdir, readFile, stat } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { PrismaClient } from '@prisma/client';
+import { RedisLockManager } from './redis-locks.js';
 
 type MigrationRow = {
   migration_name: string;
@@ -25,7 +25,7 @@ export async function runDbMigrations(input: {
   const locks = new RedisLockManager(input.redisUrl);
   try {
     return await locks.withLock({
-      key: "pi:db-migration",
+      key: 'pi:db-migration',
       ttlMs: Math.max(60_000, (input.lockTimeoutSeconds ?? 60) * 1000),
       timeoutMs: (input.lockTimeoutSeconds ?? 60) * 1000,
       retryMs: 500,
@@ -33,7 +33,7 @@ export async function runDbMigrations(input: {
         await ensureMigrationTable(prisma);
         const migrations = await readMigrationFiles(input.migrationsDir ?? defaultMigrationsDir());
         const appliedRows = await prisma.$queryRawUnsafe<Array<MigrationRow>>(
-          "SELECT migration_name, checksum FROM _prisma_migrations",
+          'SELECT migration_name, checksum FROM _prisma_migrations',
         );
         const appliedByName = new Map(appliedRows.map((row) => [row.migration_name, row.checksum]));
         const result: DbMigrationResult = { applied: [], skipped: [] };
@@ -72,60 +72,60 @@ export async function runDbMigrations(input: {
 
 export function splitSqlStatements(sql: string): string[] {
   const statements: string[] = [];
-  let current = "";
+  let current = '';
   let inSingleQuote = false;
   let inDoubleQuote = false;
   let inBacktick = false;
   let inLineComment = false;
   let inBlockComment = false;
   for (let index = 0; index < sql.length; index += 1) {
-    const char = sql[index] ?? "";
-    const next = sql[index + 1] ?? "";
+    const char = sql[index] ?? '';
+    const next = sql[index + 1] ?? '';
     if (inLineComment) {
-      if (char === "\n") {
+      if (char === '\n') {
         inLineComment = false;
         current += char;
       }
       continue;
     }
     if (inBlockComment) {
-      if (char === "*" && next === "/") {
+      if (char === '*' && next === '/') {
         inBlockComment = false;
         index += 1;
       }
       continue;
     }
-    if (!inSingleQuote && !inDoubleQuote && !inBacktick && char === "-" && next === "-") {
+    if (!inSingleQuote && !inDoubleQuote && !inBacktick && char === '-' && next === '-') {
       inLineComment = true;
       index += 1;
       continue;
     }
-    if (!inSingleQuote && !inDoubleQuote && !inBacktick && char === "/" && next === "*") {
+    if (!inSingleQuote && !inDoubleQuote && !inBacktick && char === '/' && next === '*') {
       inBlockComment = true;
       index += 1;
       continue;
     }
     current += char;
-    const previous = sql[index - 1] ?? "";
-    const escaped = previous === "\\" && sql[index - 2] !== "\\";
+    const previous = sql[index - 1] ?? '';
+    const escaped = previous === '\\' && sql[index - 2] !== '\\';
     if (!inDoubleQuote && !inBacktick && char === "'" && !escaped) {
       inSingleQuote = !inSingleQuote;
       continue;
     }
-    if (!inSingleQuote && !inBacktick && char === "\"" && !escaped) {
+    if (!inSingleQuote && !inBacktick && char === '"' && !escaped) {
       inDoubleQuote = !inDoubleQuote;
       continue;
     }
-    if (!inSingleQuote && !inDoubleQuote && char === "`") {
+    if (!inSingleQuote && !inDoubleQuote && char === '`') {
       inBacktick = !inBacktick;
       continue;
     }
-    if (!inSingleQuote && !inDoubleQuote && !inBacktick && char === ";") {
+    if (!inSingleQuote && !inDoubleQuote && !inBacktick && char === ';') {
       const statement = current.trim();
       if (statement) {
         statements.push(statement.slice(0, -1).trim());
       }
-      current = "";
+      current = '';
     }
   }
   const finalStatement = current.trim();
@@ -150,7 +150,9 @@ async function ensureMigrationTable(prisma: PrismaClient): Promise<void> {
   `);
 }
 
-async function readMigrationFiles(migrationsDir: string): Promise<Array<{ name: string; sql: string; checksum: string }>> {
+async function readMigrationFiles(
+  migrationsDir: string,
+): Promise<Array<{ name: string; sql: string; checksum: string }>> {
   const entries = await readdir(migrationsDir);
   const migrations: Array<{ name: string; sql: string; checksum: string }> = [];
   for (const entry of entries.sort()) {
@@ -158,11 +160,11 @@ async function readMigrationFiles(migrationsDir: string): Promise<Array<{ name: 
     if (!(await stat(dir)).isDirectory()) {
       continue;
     }
-    const sql = await readFile(path.join(dir, "migration.sql"), "utf8");
+    const sql = await readFile(path.join(dir, 'migration.sql'), 'utf8');
     migrations.push({
       name: entry,
       sql,
-      checksum: createHash("sha256").update(sql).digest("hex"),
+      checksum: createHash('sha256').update(sql).digest('hex'),
     });
   }
   if (migrations.length === 0) {
@@ -173,5 +175,5 @@ async function readMigrationFiles(migrationsDir: string): Promise<Array<{ name: 
 
 function defaultMigrationsDir(): string {
   const dirname = path.dirname(fileURLToPath(import.meta.url));
-  return path.resolve(dirname, "../prisma/migrations/mysql");
+  return path.resolve(dirname, '../prisma/migrations/mysql');
 }

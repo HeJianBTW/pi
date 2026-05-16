@@ -4,10 +4,10 @@
  * Owns global/session/subagent concurrency limits, busy strategies, queue
  * timeouts, and observable turn status. It does not execute chat logic itself.
  */
-import type { JsonObject, RuntimeScope } from "@amaster.ai/pi-types";
+import type { JsonObject, RuntimeScope } from '@amaster.ai/pi-types';
 
-export type SessionBusyStrategy = "reject" | "queue";
-export type TurnSource = "chat" | "scheduled" | "subagent";
+export type SessionBusyStrategy = 'reject' | 'queue';
+export type TurnSource = 'chat' | 'scheduled' | 'subagent';
 export type MaybePromise<T> = T | Promise<T>;
 
 export type TurnCoordinatorOptions = {
@@ -64,35 +64,40 @@ export class TurnCoordinatorError extends Error {
     readonly retryAfterMs?: number,
   ) {
     super(message);
-    this.name = "TurnCoordinatorError";
+    this.name = 'TurnCoordinatorError';
   }
 }
 
 export class SessionBusyError extends TurnCoordinatorError {
   constructor(sessionId: string) {
-    super(`Session ${sessionId} already has a running or queued turn`, "session_busy", 409, 1000);
-    this.name = "SessionBusyError";
+    super(`Session ${sessionId} already has a running or queued turn`, 'session_busy', 409, 1000);
+    this.name = 'SessionBusyError';
   }
 }
 
 export class TurnQueueFullError extends TurnCoordinatorError {
   constructor() {
-    super("Copilot turn queue is full", "turn_queue_full", 429, 1000);
-    this.name = "TurnQueueFullError";
+    super('Copilot turn queue is full', 'turn_queue_full', 429, 1000);
+    this.name = 'TurnQueueFullError';
   }
 }
 
 export class TurnQueueTimeoutError extends TurnCoordinatorError {
   constructor(timeoutMs: number) {
-    super(`Copilot turn waited in queue longer than ${timeoutMs}ms`, "turn_queue_timeout", 503, 1000);
-    this.name = "TurnQueueTimeoutError";
+    super(
+      `Copilot turn waited in queue longer than ${timeoutMs}ms`,
+      'turn_queue_timeout',
+      503,
+      1000,
+    );
+    this.name = 'TurnQueueTimeoutError';
   }
 }
 
 export class TurnCancelledError extends TurnCoordinatorError {
   constructor(sessionId: string, reason: string) {
-    super(`Session ${sessionId} queued turn was cancelled: ${reason}`, "turn_cancelled", 409);
-    this.name = "TurnCancelledError";
+    super(`Session ${sessionId} queued turn was cancelled: ${reason}`, 'turn_cancelled', 409);
+    this.name = 'TurnCancelledError';
   }
 }
 
@@ -106,17 +111,15 @@ export class TurnCoordinator implements TurnCoordinatorLike {
 
   constructor(private readonly options: TurnCoordinatorOptions) {}
 
-  run<T>(
-    input: TurnCoordinatorRunInput,
-    task: () => Promise<T>,
-  ): Promise<T> {
+  run<T>(input: TurnCoordinatorRunInput, task: () => Promise<T>): Promise<T> {
     const pendingForSession = this.pendingBySession.get(input.sessionId) ?? 0;
     const busyStrategy = input.busyStrategy ?? this.options.sessionBusyStrategy;
     if (pendingForSession > 0) {
-      if (busyStrategy === "reject") {
+      if (busyStrategy === 'reject') {
         return Promise.reject(new SessionBusyError(input.sessionId));
       }
-      const queuedForSession = pendingForSession - (this.activeSessions.has(input.sessionId) ? 1 : 0);
+      const queuedForSession =
+        pendingForSession - (this.activeSessions.has(input.sessionId) ? 1 : 0);
       if (queuedForSession >= this.options.maxQueuedTurnsPerSession) {
         return Promise.reject(new SessionBusyError(input.sessionId));
       }
@@ -142,9 +145,10 @@ export class TurnCoordinator implements TurnCoordinatorLike {
         this.start(entry);
         return;
       }
-      const queueTimeoutMs = input.queueTimeoutMs === null
-        ? undefined
-        : input.queueTimeoutMs ?? this.options.queueTimeoutMs;
+      const queueTimeoutMs =
+        input.queueTimeoutMs === null
+          ? undefined
+          : (input.queueTimeoutMs ?? this.options.queueTimeoutMs);
       if (queueTimeoutMs !== undefined) {
         entry.timeout = setTimeout(() => {
           if (entry.started) {
@@ -165,7 +169,7 @@ export class TurnCoordinator implements TurnCoordinatorLike {
   }
 
   cancelSession(input: TurnCancelInput): number {
-    const reason = input.reason ?? "cancelled by request";
+    const reason = input.reason ?? 'cancelled by request';
     let cancelled = 0;
     for (let index = this.queue.length - 1; index >= 0; index -= 1) {
       const entry = this.queue[index];
@@ -210,7 +214,7 @@ export class TurnCoordinator implements TurnCoordinatorLike {
     if (this.activeSessions.has(sessionId)) {
       return false;
     }
-    return source === "subagent"
+    return source === 'subagent'
       ? this.activeSubagentTurnCount < this.options.maxConcurrentSubagents
       : this.activeMainTurnCount < this.options.maxConcurrentTurns;
   }
@@ -220,7 +224,7 @@ export class TurnCoordinator implements TurnCoordinatorLike {
     if (entry.timeout) {
       clearTimeout(entry.timeout);
     }
-    if (entry.source === "subagent") {
+    if (entry.source === 'subagent') {
       this.activeSubagentTurnCount += 1;
     } else {
       this.activeMainTurnCount += 1;
@@ -233,7 +237,7 @@ export class TurnCoordinator implements TurnCoordinatorLike {
       } catch (error) {
         entry.reject(error);
       } finally {
-        if (entry.source === "subagent") {
+        if (entry.source === 'subagent') {
           this.activeSubagentTurnCount -= 1;
         } else {
           this.activeMainTurnCount -= 1;

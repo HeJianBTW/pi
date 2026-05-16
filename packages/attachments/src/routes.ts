@@ -1,9 +1,9 @@
-import type { IncomingMessage, ServerResponse } from "node:http";
-import type { AttachmentContext } from "./types.js";
-import type { AttachmentService } from "./service.js";
-import { AttachmentHttpError, readRequestBody, writeJson } from "./http.js";
-import { parseMultipartBoundary, parseMultipartFiles } from "./multipart.js";
-import { proxyAttachmentUpload, type AttachmentUploadAuth } from "./upload-proxy.js";
+import type { IncomingMessage, ServerResponse } from 'node:http';
+import { AttachmentHttpError, readRequestBody, writeJson } from './http.js';
+import { parseMultipartBoundary, parseMultipartFiles } from './multipart.js';
+import type { AttachmentService } from './service.js';
+import type { AttachmentContext } from './types.js';
+import { type AttachmentUploadAuth, proxyAttachmentUpload } from './upload-proxy.js';
 
 export async function handleAttachmentRoutes(input: {
   request: IncomingMessage;
@@ -14,8 +14,8 @@ export async function handleAttachmentRoutes(input: {
   maxUploadBodyBytes: number;
   context: AttachmentContext;
 }): Promise<boolean> {
-  if (input.request.method === "POST" && input.url.pathname === "/v1/attachments/upload") {
-    if (input.service.config.storageMode === "platform") {
+  if (input.request.method === 'POST' && input.url.pathname === '/v1/attachments/upload') {
+    if (input.service.config.storageMode === 'platform') {
       await proxyAttachmentUpload({
         request: input.request,
         response: input.response,
@@ -45,20 +45,24 @@ export async function handleAttachmentRoutes(input: {
     return true;
   }
 
-  if (input.request.method === "POST" && input.url.pathname === "/v1/attachments/register-local") {
+  if (input.request.method === 'POST' && input.url.pathname === '/v1/attachments/register-local') {
     if (!input.service.config.desktopEnabled) {
-      writeJson(input.response, 404, { error: "local attachment registration is only available in desktop mode" });
+      writeJson(input.response, 404, {
+        error: 'local attachment registration is only available in desktop mode',
+      });
       return true;
     }
     try {
-      const body = JSON.parse((await readRequestBody(input.request, input.maxUploadBodyBytes)).toString("utf8")) as {
+      const body = JSON.parse(
+        (await readRequestBody(input.request, input.maxUploadBodyBytes)).toString('utf8'),
+      ) as {
         files?: Array<{ path?: string; name?: string; mimeType?: string }>;
       };
       const files = Array.isArray(body.files) ? body.files : [];
       const attachments = [];
       for (const file of files) {
         if (!file.path) {
-          throw new Error("file path is required");
+          throw new Error('file path is required');
         }
         const record = await input.service.store.putFile({
           sourcePath: file.path,
@@ -79,9 +83,13 @@ export async function handleAttachmentRoutes(input: {
 }
 
 async function readMultipartFiles(request: IncomingMessage, maxBytes: number) {
-  const boundary = parseMultipartBoundary(request.headers["content-type"]);
+  const boundary = parseMultipartBoundary(request.headers['content-type']);
   if (!boundary) {
-    throw new AttachmentHttpError(400, "multipart_boundary_required", "multipart boundary is required");
+    throw new AttachmentHttpError(
+      400,
+      'multipart_boundary_required',
+      'multipart boundary is required',
+    );
   }
   return parseMultipartFiles(await readRequestBody(request, maxBytes), boundary);
 }
@@ -97,7 +105,7 @@ function toStoredAttachment(record: {
     name: record.name,
     ...(record.mimeType ? { mimeType: record.mimeType } : {}),
     size: record.size,
-    source: { kind: "storedFile", attachmentId: record.attachmentId },
+    source: { kind: 'storedFile', attachmentId: record.attachmentId },
   };
 }
 

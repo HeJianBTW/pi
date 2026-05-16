@@ -1,24 +1,21 @@
-import { randomUUID } from "node:crypto";
-import { Type } from "@earendil-works/pi-ai";
-import {
-  defineTool,
-  type ToolDefinition,
-} from "@earendil-works/pi-coding-agent";
+import { randomUUID } from 'node:crypto';
 import type {
+  RuntimeLifecycleEvent as CoreRuntimeLifecycleEvent,
+  RuntimeSession as CoreRuntimeSession,
+  TranscriptStore as CoreTranscriptStore,
   JsonObject,
   JsonValue,
-  RuntimeLifecycleEvent as CoreRuntimeLifecycleEvent,
   RuntimeLlmGenerationEvent,
   RuntimeModelConfig,
   RuntimeRequestContext,
   RuntimeScope,
-  RuntimeSession as CoreRuntimeSession,
   SubagentRun,
   SubagentRunStatus,
   SubagentRunStore,
   ToolSource,
-  TranscriptStore as CoreTranscriptStore,
-} from "@amaster.ai/pi-types";
+} from '@amaster.ai/pi-types';
+import { Type } from '@earendil-works/pi-ai';
+import { defineTool, type ToolDefinition } from '@earendil-works/pi-coding-agent';
 
 export type {
   JsonObject,
@@ -32,17 +29,21 @@ export type {
   SubagentRunStore,
 };
 
-export type RuntimeSession = Omit<CoreRuntimeSession, "sandboxStatus" | "piSessionFile"> &
-  Partial<Pick<CoreRuntimeSession, "sandboxStatus" | "piSessionFile">>;
+export type RuntimeSession = Omit<CoreRuntimeSession, 'sandboxStatus' | 'piSessionFile'> &
+  Partial<Pick<CoreRuntimeSession, 'sandboxStatus' | 'piSessionFile'>>;
 
 export type RuntimeLifecycleEvent = CoreRuntimeLifecycleEvent & {
   type: Extract<
-    CoreRuntimeLifecycleEvent["type"],
-    "subagent_spawned" | "subagent_started" | "subagent_completed" | "subagent_failed" | "subagent_cancelled"
+    CoreRuntimeLifecycleEvent['type'],
+    | 'subagent_spawned'
+    | 'subagent_started'
+    | 'subagent_completed'
+    | 'subagent_failed'
+    | 'subagent_cancelled'
   >;
 };
 
-export type TranscriptStore = Pick<CoreTranscriptStore, "appendTurn">;
+export type TranscriptStore = Pick<CoreTranscriptStore, 'appendTurn'>;
 
 export type SubagentRuntime = {
   createOrResumeSession(input: {
@@ -57,12 +58,12 @@ export type SubagentPolicyEngine = {
     request: RuntimeRequestContext;
     toolCall: {
       id: string;
-      name: "sessions_spawn";
-      source: Extract<ToolSource, "runtime">;
+      name: 'sessions_spawn';
+      source: Extract<ToolSource, 'runtime'>;
       args: JsonObject;
     };
   }): {
-    kind: "allow" | "allow_with_constraints" | "sandbox_only" | "ask" | "deny";
+    kind: 'allow' | 'allow_with_constraints' | 'sandbox_only' | 'ask' | 'deny';
     reason?: string;
   };
 };
@@ -80,7 +81,7 @@ export type SubagentRegistry = {
   byName: Map<string, SubagentRole>;
 };
 
-export type SubagentRoutingMode = "auto" | "force" | "off";
+export type SubagentRoutingMode = 'auto' | 'force' | 'off';
 
 export type SpawnSubagentInput = {
   task: string;
@@ -90,15 +91,15 @@ export type SpawnSubagentInput = {
   taskRunId?: string;
   model?: Partial<RuntimeModelConfig> | string;
   provider?: string;
-  thinkingLevel?: RuntimeModelConfig["thinkingLevel"];
+  thinkingLevel?: RuntimeModelConfig['thinkingLevel'];
   runTimeoutMs?: number;
   toolPolicyProfile?: string;
-  context?: "isolated";
+  context?: 'isolated';
 };
 
 export type SpawnSubagentResult =
-  | { status: "completed"; run: SubagentRun; result: string }
-  | { status: "forbidden" | "error"; error: string };
+  | { status: 'completed'; run: SubagentRun; result: string }
+  | { status: 'forbidden' | 'error'; error: string };
 
 export type SubagentActivePiSession = {
   messages: readonly unknown[];
@@ -119,8 +120,8 @@ export type ActiveSessionInput = {
   sessionId: string;
   conversationId: string;
   traceId?: string;
-  trigger?: RuntimeRequestContext["trigger"];
-  senderTrust?: RuntimeRequestContext["senderTrust"];
+  trigger?: RuntimeRequestContext['trigger'];
+  senderTrust?: RuntimeRequestContext['senderTrust'];
   interactive?: boolean;
   model: RuntimeModelConfig;
   toolPolicyProfile: string;
@@ -185,13 +186,16 @@ export type SpawnSubagentDeps = {
   subagents: SubagentRunStore;
   subagentRegistry: SubagentRegistry;
   turnCoordinator: {
-    run<T>(input: {
-      sessionId: string;
-      source: "subagent";
-      tenantId: string;
-      userId?: string;
-      workspaceId?: string;
-    }, handler: () => Promise<T>): Promise<T>;
+    run<T>(
+      input: {
+        sessionId: string;
+        source: 'subagent';
+        tenantId: string;
+        userId?: string;
+        workspaceId?: string;
+      },
+      handler: () => Promise<T>,
+    ): Promise<T>;
   };
   ensureRuntimeModelAvailable: (model: RuntimeModelConfig) => void;
   limits: { maxDepth: number; maxChildrenPerSession: number; timeoutMs: number };
@@ -202,7 +206,11 @@ export type SpawnSubagentDeps = {
   recordLlmGenerationEvent: RuntimeLlmGenerationEventRecorder;
   logger: SubagentLogger;
   metrics: SubagentMetrics;
-  cancelChildSubagentsForParent: (scope: RuntimeScope, parentSessionId: string, reason: string) => Promise<number>;
+  cancelChildSubagentsForParent: (
+    scope: RuntimeScope,
+    parentSessionId: string,
+    reason: string,
+  ) => Promise<number>;
   promptSubagentTurn: PromptSubagentTurn;
   extractLastAssistant: (messages: readonly unknown[]) => AssistantOutput;
 };
@@ -212,7 +220,9 @@ export function createSubagentToolDefinitions(options: {
   getActive?: () => SubagentActiveSession | undefined;
   policy: SubagentPolicyEngine;
   subagents: SubagentRegistry;
-  parseThinkingLevel: (value: string | undefined) => NonNullable<RuntimeModelConfig["thinkingLevel"]>;
+  parseThinkingLevel: (
+    value: string | undefined,
+  ) => NonNullable<RuntimeModelConfig['thinkingLevel']>;
   spawnSubagent: (
     input: SpawnSubagentInput,
     parentActive?: SubagentActiveSession,
@@ -220,38 +230,56 @@ export function createSubagentToolDefinitions(options: {
   ) => Promise<SpawnSubagentResult>;
 }): ToolDefinition[] {
   const parameters = Type.Object({
-    agent: Type.Optional(Type.String({ description: subagentToolAgentDescription(options.subagents) })),
-    task: Type.String({ description: "Task to run in an isolated child subagent session. The parent turn waits for the final result." }),
-    label: Type.Optional(Type.String({ description: "Short human-readable label for the subagent run." })),
-    model: Type.Optional(Type.String({ description: "Optional model override. Use model or provider/model." })),
-    provider: Type.Optional(Type.String({ description: "Optional provider override when model has no provider prefix." })),
-    thinkingLevel: Type.Optional(Type.String({ description: "Optional thinking level override." })),
+    agent: Type.Optional(
+      Type.String({ description: subagentToolAgentDescription(options.subagents) }),
+    ),
+    task: Type.String({
+      description:
+        'Task to run in an isolated child subagent session. The parent turn waits for the final result.',
+    }),
+    label: Type.Optional(
+      Type.String({ description: 'Short human-readable label for the subagent run.' }),
+    ),
+    model: Type.Optional(
+      Type.String({ description: 'Optional model override. Use model or provider/model.' }),
+    ),
+    provider: Type.Optional(
+      Type.String({ description: 'Optional provider override when model has no provider prefix.' }),
+    ),
+    thinkingLevel: Type.Optional(Type.String({ description: 'Optional thinking level override.' })),
     runTimeoutMs: Type.Optional(Type.Number({ minimum: 1 })),
-    context: Type.Optional(Type.String({ description: 'Only "isolated" is supported in this runtime slice.' })),
+    context: Type.Optional(
+      Type.String({ description: 'Only "isolated" is supported in this runtime slice.' }),
+    ),
   });
 
   return [
     defineTool({
-      name: "sessions_spawn",
-      label: "spawn subagent",
+      name: 'sessions_spawn',
+      label: 'spawn subagent',
       description: subagentToolDescription(options.subagents),
       promptSnippet: subagentToolPromptSnippet(options.subagents),
       parameters,
       async execute(toolCallId, params) {
-        assertSubagentToolAllowed(options.policy, options.request, toolCallId, params as JsonObject);
-        if (params.context !== undefined && params.context !== "isolated") {
+        assertSubagentToolAllowed(
+          options.policy,
+          options.request,
+          toolCallId,
+          params as JsonObject,
+        );
+        if (params.context !== undefined && params.context !== 'isolated') {
           return {
             content: [
               {
-                type: "text",
+                type: 'text',
                 text: JSON.stringify(
-                  { status: "forbidden", error: 'Only context="isolated" is currently supported' },
+                  { status: 'forbidden', error: 'Only context="isolated" is currently supported' },
                   null,
                   2,
                 ),
               },
             ],
-            details: { status: "forbidden" },
+            details: { status: 'forbidden' },
           };
         }
         const result = await options.spawnSubagent(
@@ -261,15 +289,17 @@ export function createSubagentToolDefinitions(options: {
             ...(params.label ? { label: params.label } : {}),
             ...(params.model ? { model: params.model } : {}),
             ...(params.provider ? { provider: params.provider } : {}),
-            ...(params.thinkingLevel ? { thinkingLevel: options.parseThinkingLevel(params.thinkingLevel) } : {}),
+            ...(params.thinkingLevel
+              ? { thinkingLevel: options.parseThinkingLevel(params.thinkingLevel) }
+              : {}),
             ...(params.runTimeoutMs ? { runTimeoutMs: params.runTimeoutMs } : {}),
-            ...(params.context === "isolated" ? { context: "isolated" } : {}),
+            ...(params.context === 'isolated' ? { context: 'isolated' } : {}),
           },
           options.getActive?.(),
           toolCallId,
         );
         return {
-          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+          content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
           details: summarizeSubagentToolResult(result),
         };
       },
@@ -291,56 +321,56 @@ export async function spawnSubagentRun(deps: SpawnSubagentDeps): Promise<SpawnSu
     taskChars: task.length,
   };
   const scope: RuntimeScope = {
-    tenantId: deps.request.tenantId ?? "default",
+    tenantId: deps.request.tenantId ?? 'default',
     ...(deps.request.userId ? { userId: deps.request.userId } : {}),
   };
   if (!task) {
-    deps.logger.warn("subagent_spawn_rejected", {
+    deps.logger.warn('subagent_spawn_rejected', {
       ...baseLogFields,
-      reason: "task is required",
+      reason: 'task is required',
     });
-    return { status: "error", error: "task is required" };
+    return { status: 'error', error: 'task is required' };
   }
-  if (deps.input.context && deps.input.context !== "isolated") {
-    deps.logger.warn("subagent_spawn_rejected", {
+  if (deps.input.context && deps.input.context !== 'isolated') {
+    deps.logger.warn('subagent_spawn_rejected', {
       ...baseLogFields,
       context: deps.input.context,
       reason: 'Only context="isolated" is currently supported',
     });
-    return { status: "forbidden", error: 'Only context="isolated" is currently supported' };
+    return { status: 'forbidden', error: 'Only context="isolated" is currently supported' };
   }
   const role = resolveSubagentRole(deps.subagentRegistry, deps.input.agent);
-  if (typeof role === "string") {
-    deps.logger.warn("subagent_spawn_rejected", {
+  if (typeof role === 'string') {
+    deps.logger.warn('subagent_spawn_rejected', {
       ...baseLogFields,
       reason: role,
     });
-    return { status: "error", error: role };
+    return { status: 'error', error: role };
   }
 
   const parentDepth = await deps.subagents.getDepthForSession(scope, deps.request.sessionId);
   if (parentDepth >= deps.limits.maxDepth) {
-    deps.logger.warn("subagent_spawn_rejected", {
+    deps.logger.warn('subagent_spawn_rejected', {
       ...baseLogFields,
       parentDepth,
       maxDepth: deps.limits.maxDepth,
-      reason: "max depth reached",
+      reason: 'max depth reached',
     });
     return {
-      status: "forbidden",
+      status: 'forbidden',
       error: `sessions_spawn is not allowed at this depth (current depth: ${parentDepth}, max: ${deps.limits.maxDepth})`,
     };
   }
   const activeChildren = await deps.subagents.countActiveChildren(scope, deps.request.sessionId);
   if (activeChildren >= deps.limits.maxChildrenPerSession) {
-    deps.logger.warn("subagent_spawn_rejected", {
+    deps.logger.warn('subagent_spawn_rejected', {
       ...baseLogFields,
       activeChildren,
       maxChildrenPerSession: deps.limits.maxChildrenPerSession,
-      reason: "max active children reached",
+      reason: 'max active children reached',
     });
     return {
-      status: "forbidden",
+      status: 'forbidden',
       error: `sessions_spawn has reached max active children for this session (${activeChildren}/${deps.limits.maxChildrenPerSession})`,
     };
   }
@@ -349,12 +379,12 @@ export async function spawnSubagentRun(deps: SpawnSubagentDeps): Promise<SpawnSu
   try {
     deps.ensureRuntimeModelAvailable(model);
   } catch (error) {
-    deps.logger.warn("subagent_spawn_rejected", {
+    deps.logger.warn('subagent_spawn_rejected', {
       ...baseLogFields,
       model,
       ...errorLogFields(error),
     });
-    return { status: "error", error: error instanceof Error ? error.message : String(error) };
+    return { status: 'error', error: error instanceof Error ? error.message : String(error) };
   }
 
   const childSessionId = `${deps.request.sessionId}:subagent:${randomUUID()}`;
@@ -372,10 +402,10 @@ export async function spawnSubagentRun(deps: SpawnSubagentDeps): Promise<SpawnSu
     ...(deps.input.label ? { label: deps.input.label } : {}),
     depth: parentDepth + 1,
     model,
-    toolPolicyProfile: deps.input.toolPolicyProfile ?? "subagent",
-    context: "isolated",
+    toolPolicyProfile: deps.input.toolPolicyProfile ?? 'subagent',
+    context: 'isolated',
   });
-  deps.logger.info("subagent_spawned", {
+  deps.logger.info('subagent_spawned', {
     ...baseLogFields,
     runId: run.runId,
     taskRunId: run.taskRunId ?? run.runId,
@@ -390,7 +420,7 @@ export async function spawnSubagentRun(deps: SpawnSubagentDeps): Promise<SpawnSu
   await deps.recordRuntimeEvent({
     id: randomUUID(),
     ...(run.traceId ? { traceId: run.traceId } : {}),
-    type: "subagent_spawned",
+    type: 'subagent_spawned',
     sessionId: run.parentSessionId,
     conversationId: deps.request.conversationId,
     parentSessionId: run.parentSessionId,
@@ -419,164 +449,216 @@ export async function spawnSubagentRun(deps: SpawnSubagentDeps): Promise<SpawnSu
 
   try {
     const completed = await runSubagentTurn(deps, run);
-    if (completed.status === "completed") {
+    if (completed.status === 'completed') {
       if (deps.parentActive) {
         deps.parentActive.completedSubagentRunIds ??= [];
         deps.parentActive.completedSubagentRunIds.push(completed.runId);
       }
-      return { status: "completed", run: completed, result: completed.result ?? "" };
+      return { status: 'completed', run: completed, result: completed.result ?? '' };
     }
-    if (completed.status === "failed") {
-      deps.logger.error("subagent_run_returned_failed", {
+    if (completed.status === 'failed') {
+      deps.logger.error('subagent_run_returned_failed', {
         ...baseLogFields,
         runId: completed.runId,
         childSessionId: completed.childSessionId,
         errorMessage: completed.error,
       });
-      return { status: "error", error: completed.error ?? "subagent failed" };
+      return { status: 'error', error: completed.error ?? 'subagent failed' };
     }
-    if (completed.status === "cancelled") {
-      deps.logger.warn("subagent_run_returned_cancelled", {
+    if (completed.status === 'cancelled') {
+      deps.logger.warn('subagent_run_returned_cancelled', {
         ...baseLogFields,
         runId: completed.runId,
         childSessionId: completed.childSessionId,
         errorMessage: completed.error,
       });
-      return { status: "error", error: completed.error ?? "subagent cancelled" };
+      return { status: 'error', error: completed.error ?? 'subagent cancelled' };
     }
-    deps.logger.warn("subagent_run_returned_unexpected_status", {
+    deps.logger.warn('subagent_run_returned_unexpected_status', {
       ...baseLogFields,
       runId: completed.runId,
       childSessionId: completed.childSessionId,
       status: completed.status,
     });
-    return { status: "error", error: `subagent ended with unexpected status: ${completed.status}` };
+    return { status: 'error', error: `subagent ended with unexpected status: ${completed.status}` };
   } finally {
     deps.parentActive?.childRunIds?.delete(run.runId);
   }
 }
 
-export async function runSubagentTurn(deps: SpawnSubagentDeps, run: SubagentRun): Promise<SubagentRun> {
+export async function runSubagentTurn(
+  deps: SpawnSubagentDeps,
+  run: SubagentRun,
+): Promise<SubagentRun> {
   if (!deps.request.tenantId) {
-    throw new Error("Subagent turn requires tenantId");
+    throw new Error('Subagent turn requires tenantId');
   }
   const tenantId = deps.request.tenantId;
-  return await deps.turnCoordinator.run({
-    sessionId: run.childSessionId,
-    source: "subagent",
-    tenantId,
-    ...(deps.request.userId ? { userId: deps.request.userId } : {}),
-    ...(deps.request.workspaceId ? { workspaceId: deps.request.workspaceId } : {}),
-  }, async () => {
-    const scope: RuntimeScope = {
+  return await deps.turnCoordinator.run(
+    {
+      sessionId: run.childSessionId,
+      source: 'subagent',
       tenantId,
       ...(deps.request.userId ? { userId: deps.request.userId } : {}),
-    };
-    const latest = await deps.subagents.get(scope, run.runId);
-    if (!latest || latest.status === "cancelled") {
-      deps.logger.warn("subagent_turn_skipped", {
+      ...(deps.request.workspaceId ? { workspaceId: deps.request.workspaceId } : {}),
+    },
+    async () => {
+      const scope: RuntimeScope = {
+        tenantId,
+        ...(deps.request.userId ? { userId: deps.request.userId } : {}),
+      };
+      const latest = await deps.subagents.get(scope, run.runId);
+      if (!latest || latest.status === 'cancelled') {
+        deps.logger.warn('subagent_turn_skipped', {
+          traceId: run.traceId,
+          runId: run.runId,
+          parentSessionId: run.parentSessionId,
+          childSessionId: run.childSessionId,
+          status: latest?.status ?? 'missing',
+        });
+        return latest ?? run;
+      }
+      await deps.subagents.markRunning(scope, run.runId);
+      deps.logger.info('subagent_turn_started', {
         traceId: run.traceId,
         runId: run.runId,
+        taskRunId: run.taskRunId ?? run.runId,
+        spawnBatchId: run.spawnBatchId,
+        parentToolCallId: run.parentToolCallId,
         parentSessionId: run.parentSessionId,
         childSessionId: run.childSessionId,
-        status: latest?.status ?? "missing",
-      });
-      return latest ?? run;
-    }
-    await deps.subagents.markRunning(scope, run.runId);
-    deps.logger.info("subagent_turn_started", {
-      traceId: run.traceId,
-      runId: run.runId,
-      taskRunId: run.taskRunId ?? run.runId,
-      spawnBatchId: run.spawnBatchId,
-      parentToolCallId: run.parentToolCallId,
-      parentSessionId: run.parentSessionId,
-      childSessionId: run.childSessionId,
-      agent: run.agent,
-      label: run.label,
-      depth: run.depth,
-      model: run.model,
-      toolPolicyProfile: run.toolPolicyProfile,
-      taskChars: run.task.length,
-    });
-    const startedAt = Date.now();
-    let active: SubagentActiveSession | undefined;
-    try {
-      active = await getOrCreateActiveSession(deps.activeSessions, deps.runtime, {
-        sessionId: run.childSessionId,
-        conversationId: run.childSessionId,
-        ...(run.traceId ? { traceId: run.traceId } : {}),
-        trigger: deps.request.trigger,
-        senderTrust: deps.request.senderTrust,
-        interactive: deps.request.interactive,
+        agent: run.agent,
+        label: run.label,
+        depth: run.depth,
         model: run.model,
         toolPolicyProfile: run.toolPolicyProfile,
-        parentSessionId: run.parentSessionId,
-        childSessionId: run.childSessionId,
-        runId: run.runId,
-        taskRunId: run.taskRunId ?? run.runId,
-        ...(run.spawnBatchId ? { spawnBatchId: run.spawnBatchId } : {}),
-        ...(deps.request.tenantId ? { tenantId: deps.request.tenantId } : {}),
-        ...(deps.request.userId ? { userId: deps.request.userId } : {}),
-        ...(deps.request.workspaceId ? { workspaceId: deps.request.workspaceId } : {}),
+        taskChars: run.task.length,
       });
-      await deps.recordRuntimeEvent({
-        id: randomUUID(),
-        ...(run.traceId ? { traceId: run.traceId } : {}),
-        type: "subagent_started",
-        sessionId: run.childSessionId,
-        conversationId: run.childSessionId,
-        parentSessionId: run.parentSessionId,
-        childSessionId: run.childSessionId,
-        runId: run.runId,
-        taskRunId: run.taskRunId ?? run.runId,
-        ...(run.spawnBatchId ? { spawnBatchId: run.spawnBatchId } : {}),
-        ...(run.parentToolCallId ? { parentToolCallId: run.parentToolCallId } : {}),
-        createdAt: new Date().toISOString(),
-        model: run.model,
-        toolPolicyProfile: run.toolPolicyProfile,
-        details: {
-          ...(run.agent ? { agent: run.agent } : {}),
-        },
-      });
-      const role = run.agent ? deps.subagentRegistry.byName.get(run.agent) : undefined;
-      const subagentPrompt = buildSubagentPrompt({
-        parentSessionId: run.parentSessionId,
-        ...(role ? { role } : {}),
-        ...(run.label ? { label: run.label } : {}),
-        task: run.task,
-      });
-      await deps.promptSubagentTurn(
-        active,
-        subagentPrompt,
-        resolveSubagentTurnTimeoutMs(deps.input.runTimeoutMs, deps.limits.timeoutMs, deps.chatTurnTimeoutMs),
-        deps.maxSubagentToolResultsPerTurn,
-        [],
-        {
-          input: toTelemetryText(run.task),
-          recordRuntimeEvent: deps.recordRuntimeEvent,
-          recordLlmGenerationEvent: deps.recordLlmGenerationEvent,
+      const startedAt = Date.now();
+      let active: SubagentActiveSession | undefined;
+      try {
+        active = await getOrCreateActiveSession(deps.activeSessions, deps.runtime, {
+          sessionId: run.childSessionId,
+          conversationId: run.childSessionId,
+          ...(run.traceId ? { traceId: run.traceId } : {}),
+          trigger: deps.request.trigger,
+          senderTrust: deps.request.senderTrust,
+          interactive: deps.request.interactive,
+          model: run.model,
+          toolPolicyProfile: run.toolPolicyProfile,
           parentSessionId: run.parentSessionId,
           childSessionId: run.childSessionId,
           runId: run.runId,
           taskRunId: run.taskRunId ?? run.runId,
           ...(run.spawnBatchId ? { spawnBatchId: run.spawnBatchId } : {}),
-        },
-      );
-      const assistant = deps.extractLastAssistant(active.pi.messages);
-      await deps.transcripts.appendTurn({
-        id: randomUUID(),
-        sessionId: run.childSessionId,
-        conversationId: run.childSessionId,
-        userMessage: run.task,
-        assistantMessage: assistant.text,
-        model: run.model,
-        ...(run.traceId ? { traceId: run.traceId } : {}),
-        createdAt: new Date().toISOString(),
-      });
-      if (assistant.errorMessage) {
-        const failed = await deps.subagents.markFailed(scope, run.runId, assistant.errorMessage);
-        deps.logger.error("subagent_turn_failed", {
+          ...(deps.request.tenantId ? { tenantId: deps.request.tenantId } : {}),
+          ...(deps.request.userId ? { userId: deps.request.userId } : {}),
+          ...(deps.request.workspaceId ? { workspaceId: deps.request.workspaceId } : {}),
+        });
+        await deps.recordRuntimeEvent({
+          id: randomUUID(),
+          ...(run.traceId ? { traceId: run.traceId } : {}),
+          type: 'subagent_started',
+          sessionId: run.childSessionId,
+          conversationId: run.childSessionId,
+          parentSessionId: run.parentSessionId,
+          childSessionId: run.childSessionId,
+          runId: run.runId,
+          taskRunId: run.taskRunId ?? run.runId,
+          ...(run.spawnBatchId ? { spawnBatchId: run.spawnBatchId } : {}),
+          ...(run.parentToolCallId ? { parentToolCallId: run.parentToolCallId } : {}),
+          createdAt: new Date().toISOString(),
+          model: run.model,
+          toolPolicyProfile: run.toolPolicyProfile,
+          details: {
+            ...(run.agent ? { agent: run.agent } : {}),
+          },
+        });
+        const role = run.agent ? deps.subagentRegistry.byName.get(run.agent) : undefined;
+        const subagentPrompt = buildSubagentPrompt({
+          parentSessionId: run.parentSessionId,
+          ...(role ? { role } : {}),
+          ...(run.label ? { label: run.label } : {}),
+          task: run.task,
+        });
+        await deps.promptSubagentTurn(
+          active,
+          subagentPrompt,
+          resolveSubagentTurnTimeoutMs(
+            deps.input.runTimeoutMs,
+            deps.limits.timeoutMs,
+            deps.chatTurnTimeoutMs,
+          ),
+          deps.maxSubagentToolResultsPerTurn,
+          [],
+          {
+            input: toTelemetryText(run.task),
+            recordRuntimeEvent: deps.recordRuntimeEvent,
+            recordLlmGenerationEvent: deps.recordLlmGenerationEvent,
+            parentSessionId: run.parentSessionId,
+            childSessionId: run.childSessionId,
+            runId: run.runId,
+            taskRunId: run.taskRunId ?? run.runId,
+            ...(run.spawnBatchId ? { spawnBatchId: run.spawnBatchId } : {}),
+          },
+        );
+        const assistant = deps.extractLastAssistant(active.pi.messages);
+        await deps.transcripts.appendTurn({
+          id: randomUUID(),
+          sessionId: run.childSessionId,
+          conversationId: run.childSessionId,
+          userMessage: run.task,
+          assistantMessage: assistant.text,
+          model: run.model,
+          ...(run.traceId ? { traceId: run.traceId } : {}),
+          createdAt: new Date().toISOString(),
+        });
+        if (assistant.errorMessage) {
+          const failed = await deps.subagents.markFailed(scope, run.runId, assistant.errorMessage);
+          deps.logger.error('subagent_turn_failed', {
+            traceId: run.traceId,
+            runId: run.runId,
+            taskRunId: run.taskRunId ?? run.runId,
+            spawnBatchId: run.spawnBatchId,
+            parentSessionId: run.parentSessionId,
+            childSessionId: run.childSessionId,
+            agent: run.agent,
+            model: run.model,
+            toolPolicyProfile: run.toolPolicyProfile,
+            durationMs: Date.now() - startedAt,
+            stopReason: assistant.stopReason,
+            errorMessage: assistant.errorMessage,
+          });
+          deps.metrics.subagentTurnsFailedTotal += 1;
+          await deps.recordRuntimeEvent({
+            id: randomUUID(),
+            ...(run.traceId ? { traceId: run.traceId } : {}),
+            type: 'subagent_failed',
+            sessionId: run.childSessionId,
+            conversationId: run.childSessionId,
+            parentSessionId: run.parentSessionId,
+            childSessionId: run.childSessionId,
+            runId: run.runId,
+            taskRunId: run.taskRunId ?? run.runId,
+            ...(run.spawnBatchId ? { spawnBatchId: run.spawnBatchId } : {}),
+            ...(run.parentToolCallId ? { parentToolCallId: run.parentToolCallId } : {}),
+            createdAt: new Date().toISOString(),
+            durationMs: Date.now() - startedAt,
+            model: run.model,
+            toolPolicyProfile: run.toolPolicyProfile,
+            error: assistant.errorMessage,
+            details: {
+              output: { error: assistant.errorMessage },
+              taskRunId: run.taskRunId ?? run.runId,
+              ...(run.spawnBatchId ? { spawnBatchId: run.spawnBatchId } : {}),
+              ...(run.agent ? { agent: run.agent } : {}),
+              ...(assistant.stopReason ? { stopReason: assistant.stopReason } : {}),
+            },
+          });
+          return failed ?? run;
+        }
+        const completed = await deps.subagents.markCompleted(scope, run.runId, assistant.text);
+        deps.logger.info('subagent_turn_completed', {
           traceId: run.traceId,
           runId: run.runId,
           taskRunId: run.taskRunId ?? run.runId,
@@ -587,14 +669,13 @@ export async function runSubagentTurn(deps: SpawnSubagentDeps, run: SubagentRun)
           model: run.model,
           toolPolicyProfile: run.toolPolicyProfile,
           durationMs: Date.now() - startedAt,
-          stopReason: assistant.stopReason,
-          errorMessage: assistant.errorMessage,
+          outputChars: assistant.text.length,
         });
-        deps.metrics.subagentTurnsFailedTotal += 1;
+        deps.metrics.subagentTurnsCompletedTotal += 1;
         await deps.recordRuntimeEvent({
           id: randomUUID(),
           ...(run.traceId ? { traceId: run.traceId } : {}),
-          type: "subagent_failed",
+          type: 'subagent_completed',
           sessionId: run.childSessionId,
           conversationId: run.childSessionId,
           parentSessionId: run.parentSessionId,
@@ -607,111 +688,70 @@ export async function runSubagentTurn(deps: SpawnSubagentDeps, run: SubagentRun)
           durationMs: Date.now() - startedAt,
           model: run.model,
           toolPolicyProfile: run.toolPolicyProfile,
-          error: assistant.errorMessage,
           details: {
-            output: { error: assistant.errorMessage },
+            output: toTelemetryText(assistant.text),
             taskRunId: run.taskRunId ?? run.runId,
             ...(run.spawnBatchId ? { spawnBatchId: run.spawnBatchId } : {}),
             ...(run.agent ? { agent: run.agent } : {}),
-            ...(assistant.stopReason ? { stopReason: assistant.stopReason } : {}),
           },
         });
-        return failed ?? run;
-      }
-      const completed = await deps.subagents.markCompleted(scope, run.runId, assistant.text);
-      deps.logger.info("subagent_turn_completed", {
-        traceId: run.traceId,
-        runId: run.runId,
-        taskRunId: run.taskRunId ?? run.runId,
-        spawnBatchId: run.spawnBatchId,
-        parentSessionId: run.parentSessionId,
-        childSessionId: run.childSessionId,
-        agent: run.agent,
-        model: run.model,
-        toolPolicyProfile: run.toolPolicyProfile,
-        durationMs: Date.now() - startedAt,
-        outputChars: assistant.text.length,
-      });
-      deps.metrics.subagentTurnsCompletedTotal += 1;
-      await deps.recordRuntimeEvent({
-        id: randomUUID(),
-        ...(run.traceId ? { traceId: run.traceId } : {}),
-        type: "subagent_completed",
-        sessionId: run.childSessionId,
-        conversationId: run.childSessionId,
-        parentSessionId: run.parentSessionId,
-        childSessionId: run.childSessionId,
-        runId: run.runId,
-        taskRunId: run.taskRunId ?? run.runId,
-        ...(run.spawnBatchId ? { spawnBatchId: run.spawnBatchId } : {}),
-        ...(run.parentToolCallId ? { parentToolCallId: run.parentToolCallId } : {}),
-        createdAt: new Date().toISOString(),
-        durationMs: Date.now() - startedAt,
-        model: run.model,
-        toolPolicyProfile: run.toolPolicyProfile,
-        details: {
-          output: toTelemetryText(assistant.text),
-          taskRunId: run.taskRunId ?? run.runId,
-          ...(run.spawnBatchId ? { spawnBatchId: run.spawnBatchId } : {}),
-          ...(run.agent ? { agent: run.agent } : {}),
-        },
-      });
-      return completed ?? run;
-    } catch (error) {
-      const current = await deps.subagents.get(scope, run.runId);
-      if (current?.status === "cancelled") {
-        deps.logger.warn("subagent_turn_cancelled", {
+        return completed ?? run;
+      } catch (error) {
+        const current = await deps.subagents.get(scope, run.runId);
+        if (current?.status === 'cancelled') {
+          deps.logger.warn('subagent_turn_cancelled', {
+            traceId: run.traceId,
+            runId: run.runId,
+            parentSessionId: run.parentSessionId,
+            childSessionId: run.childSessionId,
+            durationMs: Date.now() - startedAt,
+            errorMessage: current.error,
+          });
+          return current;
+        }
+        const message = error instanceof Error ? error.message : String(error);
+        const failed = await deps.subagents.markFailed(scope, run.runId, message);
+        deps.logger.error('subagent_turn_failed', {
           traceId: run.traceId,
           runId: run.runId,
+          taskRunId: run.taskRunId ?? run.runId,
+          spawnBatchId: run.spawnBatchId,
           parentSessionId: run.parentSessionId,
           childSessionId: run.childSessionId,
+          agent: run.agent,
+          model: run.model,
+          toolPolicyProfile: run.toolPolicyProfile,
           durationMs: Date.now() - startedAt,
-          errorMessage: current.error,
+          ...errorLogFields(error),
         });
-        return current;
+        deps.metrics.subagentTurnsFailedTotal += 1;
+        await deps.recordRuntimeEvent({
+          id: randomUUID(),
+          ...(run.traceId ? { traceId: run.traceId } : {}),
+          type: 'subagent_failed',
+          sessionId: run.childSessionId,
+          conversationId: run.childSessionId,
+          parentSessionId: run.parentSessionId,
+          childSessionId: run.childSessionId,
+          runId: run.runId,
+          taskRunId: run.taskRunId ?? run.runId,
+          ...(run.spawnBatchId ? { spawnBatchId: run.spawnBatchId } : {}),
+          ...(run.parentToolCallId ? { parentToolCallId: run.parentToolCallId } : {}),
+          createdAt: new Date().toISOString(),
+          durationMs: Date.now() - startedAt,
+          model: run.model,
+          toolPolicyProfile: run.toolPolicyProfile,
+          error: message,
+        });
+        return failed ?? run;
+      } finally {
+        if (active) {
+          active.pi.dispose();
+          deps.activeSessions.delete(run.childSessionId);
+        }
       }
-      const message = error instanceof Error ? error.message : String(error);
-      const failed = await deps.subagents.markFailed(scope, run.runId, message);
-      deps.logger.error("subagent_turn_failed", {
-        traceId: run.traceId,
-        runId: run.runId,
-        taskRunId: run.taskRunId ?? run.runId,
-        spawnBatchId: run.spawnBatchId,
-        parentSessionId: run.parentSessionId,
-        childSessionId: run.childSessionId,
-        agent: run.agent,
-        model: run.model,
-        toolPolicyProfile: run.toolPolicyProfile,
-        durationMs: Date.now() - startedAt,
-        ...errorLogFields(error),
-      });
-      deps.metrics.subagentTurnsFailedTotal += 1;
-      await deps.recordRuntimeEvent({
-        id: randomUUID(),
-        ...(run.traceId ? { traceId: run.traceId } : {}),
-        type: "subagent_failed",
-        sessionId: run.childSessionId,
-        conversationId: run.childSessionId,
-        parentSessionId: run.parentSessionId,
-        childSessionId: run.childSessionId,
-        runId: run.runId,
-        taskRunId: run.taskRunId ?? run.runId,
-        ...(run.spawnBatchId ? { spawnBatchId: run.spawnBatchId } : {}),
-        ...(run.parentToolCallId ? { parentToolCallId: run.parentToolCallId } : {}),
-        createdAt: new Date().toISOString(),
-        durationMs: Date.now() - startedAt,
-        model: run.model,
-        toolPolicyProfile: run.toolPolicyProfile,
-        error: message,
-      });
-      return failed ?? run;
-    } finally {
-      if (active) {
-        active.pi.dispose();
-        deps.activeSessions.delete(run.childSessionId);
-      }
-    }
-  });
+    },
+  );
 }
 
 export function resolveSubagentTurnTimeoutMs(
@@ -733,30 +773,29 @@ export function buildSubagentPrompt(input: {
   task: string;
 }): string {
   return [
-    "You are a child subagent spawned by a parent copilot session.",
+    'You are a child subagent spawned by a parent copilot session.',
     `Parent session: ${input.parentSessionId}`,
     ...(input.role
-      ? [
-          `Subagent role: ${input.role.name}`,
-          `Role description: ${input.role.description}`,
-        ]
+      ? [`Subagent role: ${input.role.name}`, `Role description: ${input.role.description}`]
       : []),
     ...(input.label ? [`Label: ${input.label}`] : []),
-    "Work independently. Use tools when useful, but keep tool use focused and stop once you have enough information.",
-    "Return a concise final result for the parent session. Do not write memory unless the task explicitly asks for it.",
-    "For analysis tasks, do not scaffold demo projects or write files unless the task explicitly requires file changes.",
-    "You are already a child subagent. Do not spawn additional subagents.",
-    ...(input.role ? ["", "Role instructions:", input.role.prompt] : []),
-    "",
-    "Task:",
+    'Work independently. Use tools when useful, but keep tool use focused and stop once you have enough information.',
+    'Return a concise final result for the parent session. Do not write memory unless the task explicitly asks for it.',
+    'For analysis tasks, do not scaffold demo projects or write files unless the task explicitly requires file changes.',
+    'You are already a child subagent. Do not spawn additional subagents.',
+    ...(input.role ? ['', 'Role instructions:', input.role.prompt] : []),
+    '',
+    'Task:',
     input.task,
-  ].join("\n");
+  ].join('\n');
 }
 
-export function resolveSubagentModel(parentModel: RuntimeModelConfig, input: SpawnSubagentInput): RuntimeModelConfig {
-  const override = typeof input.model === "string"
-    ? parseModelRef(input.model, input.provider)
-    : input.model;
+export function resolveSubagentModel(
+  parentModel: RuntimeModelConfig,
+  input: SpawnSubagentInput,
+): RuntimeModelConfig {
+  const override =
+    typeof input.model === 'string' ? parseModelRef(input.model, input.provider) : input.model;
   return mergeModel(parentModel, {
     ...(override ?? {}),
     ...(input.thinkingLevel ? { thinkingLevel: input.thinkingLevel } : {}),
@@ -775,7 +814,7 @@ export async function getCompletedSubagentResults(
   const scope = runtimeScope(active.runtime);
   for (const runId of runIds) {
     const run = await subagents.get(scope, runId);
-    if (!run || run.status !== "completed") {
+    if (!run || run.status !== 'completed') {
       continue;
     }
     results.push({
@@ -787,7 +826,7 @@ export async function getCompletedSubagentResults(
       ...(run.label ? { label: run.label } : {}),
       status: run.status,
       task: toTelemetryText(run.task),
-      result: toTelemetryText(run.result ?? ""),
+      result: toTelemetryText(run.result ?? ''),
       createdAt: run.createdAt,
       ...(run.startedAt ? { startedAt: run.startedAt } : {}),
       ...(run.endedAt ? { endedAt: run.endedAt } : {}),
@@ -815,12 +854,12 @@ export async function cancelActiveChildSubagents(input: {
       continue;
     }
     const marked = await input.subagents.markCancelled(input.scope, run.runId, input.reason);
-    if (!marked || marked.status !== "cancelled") {
+    if (!marked || marked.status !== 'cancelled') {
       continue;
     }
     cancelled += 1;
     input.metrics.subagentsCancelledTotal += 1;
-    input.logger.warn("subagent_cancelled", {
+    input.logger.warn('subagent_cancelled', {
       traceId: run.traceId,
       runId: run.runId,
       taskRunId: run.taskRunId ?? run.runId,
@@ -841,7 +880,7 @@ export async function cancelActiveChildSubagents(input: {
     await input.recordRuntimeEvent({
       id: randomUUID(),
       ...(run.traceId ? { traceId: run.traceId } : {}),
-      type: "subagent_cancelled",
+      type: 'subagent_cancelled',
       sessionId: run.childSessionId,
       conversationId: run.childSessionId,
       parentSessionId: run.parentSessionId,
@@ -863,31 +902,34 @@ export function formatSubagentRoleSummary(role: SubagentRole): JsonObject {
     name: role.name,
     description: role.description,
     ...(role.frontmatter.thinking ? { thinking: role.frontmatter.thinking } : {}),
-    ...(role.frontmatter.systemPromptMode ? { systemPromptMode: role.frontmatter.systemPromptMode } : {}),
+    ...(role.frontmatter.systemPromptMode
+      ? { systemPromptMode: role.frontmatter.systemPromptMode }
+      : {}),
     ...(role.frontmatter.defaultContext ? { defaultContext: role.frontmatter.defaultContext } : {}),
   };
 }
 
 export function subagentToolAgentDescription(subagents: SubagentRegistry): string {
   if (subagents.roles.length === 0) {
-    return "Optional named subagent role. Omit for a generic isolated child agent.";
+    return 'Optional named subagent role. Omit for a generic isolated child agent.';
   }
-  return `Optional named subagent role. Available roles: ${subagents.roles.map((role) => role.name).join(", ")}. Omit for a generic isolated child agent.`;
+  return `Optional named subagent role. Available roles: ${subagents.roles.map((role) => role.name).join(', ')}. Omit for a generic isolated child agent.`;
 }
 
 export function subagentToolDescription(subagents: SubagentRegistry): string {
-  const base = "Run an isolated child subagent for focused work and wait for its concise final result before continuing the parent turn.";
+  const base =
+    'Run an isolated child subagent for focused work and wait for its concise final result before continuing the parent turn.';
   if (subagents.roles.length === 0) {
     return base;
   }
-  return `${base} You may set agent to one of: ${subagents.roles.map((role) => `${role.name} (${role.description})`).join("; ")}.`;
+  return `${base} You may set agent to one of: ${subagents.roles.map((role) => `${role.name} (${role.description})`).join('; ')}.`;
 }
 
 export function subagentToolPromptSnippet(subagents: SubagentRegistry): string {
   if (subagents.roles.length === 0) {
-    return "Use sessions_spawn to delegate focused work to a child subagent and wait for the result.";
+    return 'Use sessions_spawn to delegate focused work to a child subagent and wait for the result.';
   }
-  return `Use sessions_spawn to delegate focused work. Choose a named agent when a role fits: ${subagents.roles.map((role) => role.name).join(", ")}.`;
+  return `Use sessions_spawn to delegate focused work. Choose a named agent when a role fits: ${subagents.roles.map((role) => role.name).join(', ')}.`;
 }
 
 export function resolveSubagentRole(
@@ -900,7 +942,7 @@ export function resolveSubagentRole(
   }
   const role = registry.byName.get(name) ?? registry.byName.get(name.toLowerCase());
   if (!role) {
-    const available = registry.roles.map((candidate) => candidate.name).join(", ");
+    const available = registry.roles.map((candidate) => candidate.name).join(', ');
     return available
       ? `subagent role not found: ${name}. Available roles: ${available}`
       : `subagent role not found: ${name}. No roles are configured.`;
@@ -909,21 +951,23 @@ export function resolveSubagentRole(
 }
 
 export function isSubagentSessionId(sessionId: string | undefined): boolean {
-  return Boolean(sessionId?.includes(":subagent:"));
+  return Boolean(sessionId?.includes(':subagent:'));
 }
 
 export function isSubagentRuntimeSession(session: RuntimeSession | undefined): boolean {
   return Boolean(session?.parentSessionId) || isSubagentSessionId(session?.sessionId);
 }
 
-export function runtimeScope(runtime: Pick<RuntimeSession, "tenantId" | "userId">): RuntimeScope {
+export function runtimeScope(runtime: Pick<RuntimeSession, 'tenantId' | 'userId'>): RuntimeScope {
   return {
-    tenantId: runtime.tenantId ?? "default",
+    tenantId: runtime.tenantId ?? 'default',
     ...(runtime.userId ? { userId: runtime.userId } : {}),
   };
 }
 
-export function isSubagentRuntimeRequest(request: Pick<RuntimeRequestContext, "sessionId" | "parentSessionId">): boolean {
+export function isSubagentRuntimeRequest(
+  request: Pick<RuntimeRequestContext, 'sessionId' | 'parentSessionId'>,
+): boolean {
   return Boolean(request.parentSessionId) || isSubagentSessionId(request.sessionId);
 }
 
@@ -936,7 +980,7 @@ export function shouldExposeSubagentTool(
   if (maxDepth <= 0) {
     return false;
   }
-  return isToolExposed("sessions_spawn", resolveToolExposurePolicy(toolPolicyProfile));
+  return isToolExposed('sessions_spawn', resolveToolExposurePolicy(toolPolicyProfile));
 }
 
 export function applySubagentRoutingGuidance(
@@ -947,27 +991,28 @@ export function applySubagentRoutingGuidance(
     canUseSubagent: boolean;
   },
 ): { message: string; applied: boolean; reason?: string } {
-  if (!options.canUseSubagent || options.subagentMode === "off") {
+  if (!options.canUseSubagent || options.subagentMode === 'off') {
     return { message, applied: false };
   }
-  const reason = options.subagentMode === "force"
-    ? "force"
-    : inferSubagentRoutingReason(options.originalMessage);
+  const reason =
+    options.subagentMode === 'force'
+      ? 'force'
+      : inferSubagentRoutingReason(options.originalMessage);
   if (!reason) {
     return { message, applied: false };
   }
   return {
     message: [
-      "<copilot-routing-hint>",
-      "The backend classified this request as likely decomposable, but you should still use your own judgment.",
-      "If independent subtasks would improve quality or latency, call `sessions_spawn` early with narrow tasks and then continue in the parent session using the child results.",
-      "Prefer one child per genuinely independent slice, such as UX/page mapping, data and mock planning, implementation slicing, research, or validation.",
-      "When multiple slices are independent, spawn them in the same tool-use step so they can run in parallel.",
+      '<copilot-routing-hint>',
+      'The backend classified this request as likely decomposable, but you should still use your own judgment.',
+      'If independent subtasks would improve quality or latency, call `sessions_spawn` early with narrow tasks and then continue in the parent session using the child results.',
+      'Prefer one child per genuinely independent slice, such as UX/page mapping, data and mock planning, implementation slicing, research, or validation.',
+      'When multiple slices are independent, spawn them in the same tool-use step so they can run in parallel.',
       `Routing reason: ${reason}.`,
-      "</copilot-routing-hint>",
-      "",
+      '</copilot-routing-hint>',
+      '',
       message,
-    ].join("\n"),
+    ].join('\n'),
     applied: true,
     reason,
   };
@@ -975,31 +1020,42 @@ export function applySubagentRoutingGuidance(
 
 export function inferSubagentRoutingReason(message: string): string | undefined {
   const normalized = message.toLowerCase();
-  const hasResearch = /深度|调研|研究|分析|对比|评估|梳理|research|investigate|analysis|compare/.test(normalized);
+  const hasResearch =
+    /深度|调研|研究|分析|对比|评估|梳理|research|investigate|analysis|compare/.test(normalized);
   const hasReport = /报告|方案|总结|文档|report|proposal|document/.test(normalized);
   const hasPresentation = /ppt|presentation|slide|slides|演示|汇报/.test(normalized);
-  const hasImplementation = /实现|开发|创建|生成|写一份|write|create|build|implement/.test(normalized);
-  const hasAppSurface = /系统|平台|应用|app|网站|后台|前端|页面|dashboard|console|portal|管理|crm|erp|saas/.test(normalized);
-  const hasMultipleFeatureCue = /包含|包括|基础功能|功能|模块|页面|流程|工作流|增删改查|crud|列表|表单|详情|权限|角色|mock|数据|后端|frontend|backend/.test(normalized);
+  const hasImplementation = /实现|开发|创建|生成|写一份|write|create|build|implement/.test(
+    normalized,
+  );
+  const hasAppSurface =
+    /系统|平台|应用|app|网站|后台|前端|页面|dashboard|console|portal|管理|crm|erp|saas/.test(
+      normalized,
+    );
+  const hasMultipleFeatureCue =
+    /包含|包括|基础功能|功能|模块|页面|流程|工作流|增删改查|crud|列表|表单|详情|权限|角色|mock|数据|后端|frontend|backend/.test(
+      normalized,
+    );
   if (hasResearch && hasReport && hasPresentation) {
-    return "deep-research-report-presentation";
+    return 'deep-research-report-presentation';
   }
   if (hasResearch && (hasReport || hasPresentation || hasImplementation)) {
-    return "research-plus-deliverable";
+    return 'research-plus-deliverable';
   }
   if (hasReport && hasPresentation) {
-    return "multi-deliverable";
+    return 'multi-deliverable';
   }
   if (hasImplementation && hasAppSurface && hasMultipleFeatureCue) {
-    return "multi-part-application-build";
+    return 'multi-part-application-build';
   }
   if (hasImplementation && hasAppSurface && normalized.length >= 20) {
-    return "application-build";
+    return 'application-build';
   }
   return undefined;
 }
 
-export async function getOrCreateActiveSession<TActive extends SubagentActiveSession = SubagentActiveSession>(
+export async function getOrCreateActiveSession<
+  TActive extends SubagentActiveSession = SubagentActiveSession,
+>(
   activeSessions: Map<string, TActive>,
   runtime: SubagentRuntime,
   input: ActiveSessionInput,
@@ -1018,7 +1074,7 @@ export async function getOrCreateActiveSession<TActive extends SubagentActiveSes
     return active;
   }
   active?.pi.dispose();
-  const created = await createActiveSession(runtime, input) as TActive;
+  const created = (await createActiveSession(runtime, input)) as TActive;
   activeSessions.set(input.sessionId, created);
   return created;
 }
@@ -1034,8 +1090,8 @@ export async function createActiveSession(
     ...(input.tenantId ? { tenantId: input.tenantId } : {}),
     ...(input.userId ? { userId: input.userId } : {}),
     ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}),
-    trigger: input.trigger ?? "user",
-    senderTrust: input.senderTrust ?? "owner",
+    trigger: input.trigger ?? 'user',
+    senderTrust: input.senderTrust ?? 'owner',
     interactive: input.interactive ?? true,
     model: input.model,
     ...(input.parentSessionId ? { parentSessionId: input.parentSessionId } : {}),
@@ -1049,7 +1105,11 @@ export async function createActiveSession(
     toolPolicyProfile: input.toolPolicyProfile,
     ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}),
   });
-  return { ...(input.traceId ? { traceId: input.traceId } : {}), runtime: created.runtime, pi: created.pi };
+  return {
+    ...(input.traceId ? { traceId: input.traceId } : {}),
+    runtime: created.runtime,
+    pi: created.pi,
+  };
 }
 
 export function activeSessionLineageMatches(
@@ -1076,15 +1136,17 @@ export function abortPiSession(pi: { abort?: () => Promise<unknown> }): void {
 }
 
 export function toTelemetryText(value: string, maxLength = 20_000): string {
-  return value.length > maxLength ? `${value.slice(0, maxLength)}... [truncated ${value.length - maxLength} chars]` : value;
+  return value.length > maxLength
+    ? `${value.slice(0, maxLength)}... [truncated ${value.length - maxLength} chars]`
+    : value;
 }
 
 export function isActiveSubagentStatus(status: SubagentRunStatus): boolean {
-  return status === "pending" || status === "running";
+  return status === 'pending' || status === 'running';
 }
 
 export function summarizeSubagentToolResult(result: SpawnSubagentResult): JsonObject {
-  if (result.status !== "completed") {
+  if (result.status !== 'completed') {
     return {
       status: result.status,
       error: result.error,
@@ -1120,25 +1182,28 @@ function assertSubagentToolAllowed(
     request,
     toolCall: {
       id: toolCallId,
-      name: "sessions_spawn",
-      source: "runtime",
+      name: 'sessions_spawn',
+      source: 'runtime',
       args,
     },
   });
   if (
-    decision.kind === "allow" ||
-    decision.kind === "allow_with_constraints" ||
-    decision.kind === "sandbox_only"
+    decision.kind === 'allow' ||
+    decision.kind === 'allow_with_constraints' ||
+    decision.kind === 'sandbox_only'
   ) {
     return;
   }
-  if (decision.kind === "ask") {
+  if (decision.kind === 'ask') {
     throw new Error(`Tool call requires approval: ${decision.reason}`);
   }
   throw new Error(`Tool call denied by policy: ${decision.reason}`);
 }
 
-function mergeModel(base: RuntimeModelConfig, override: Partial<RuntimeModelConfig>): RuntimeModelConfig {
+function mergeModel(
+  base: RuntimeModelConfig,
+  override: Partial<RuntimeModelConfig>,
+): RuntimeModelConfig {
   const reasoning = override.reasoning ?? base.reasoning;
   const thinkingLevel = override.thinkingLevel ?? base.thinkingLevel;
   const authProfileId = override.authProfileId ?? base.authProfileId;
@@ -1153,7 +1218,7 @@ function mergeModel(base: RuntimeModelConfig, override: Partial<RuntimeModelConf
 
 function parseModelRef(value: string, provider?: string): Partial<RuntimeModelConfig> {
   const trimmed = value.trim();
-  const separator = trimmed.indexOf("/");
+  const separator = trimmed.indexOf('/');
   if (separator > 0) {
     return {
       provider: trimmed.slice(0, separator),

@@ -1,24 +1,17 @@
 export {
+  type AttachmentDependencyCheck,
+  checkAttachmentHostDependencies,
+} from './diagnostics.js';
+export {
   AttachmentValidationError,
   normalizeAttachments,
-} from "./normalize.js";
+} from './normalize.js';
+export { renderAttachmentPrompt } from './prompt.js';
+export { handleAttachmentRoutes } from './routes.js';
 export {
-  createAttachmentService,
   type AttachmentService,
-} from "./service.js";
-export {
-  renderAttachmentPrompt,
-} from "./prompt.js";
-export {
-  handleAttachmentRoutes,
-} from "./routes.js";
-export type {
-  AttachmentUploadAuth,
-} from "./upload-proxy.js";
-export {
-  checkAttachmentHostDependencies,
-  type AttachmentDependencyCheck,
-} from "./diagnostics.js";
+  createAttachmentService,
+} from './service.js';
 export type {
   AttachmentContext,
   AttachmentFailure,
@@ -28,4 +21,5 @@ export type {
   NormalizedAttachment,
   PreparedAttachmentBundle,
   StoredAttachmentRecord,
-} from "./types.js";
+} from './types.js';
+export type { AttachmentUploadAuth } from './upload-proxy.js';

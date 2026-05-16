@@ -1,30 +1,36 @@
-import type { AttachmentContext } from "./types.js";
+import { isDocumentAttachment, isImageMimeType, resolveAttachmentMimeType } from './classify.js';
+import { LocalAttachmentStore } from './local-store.js';
+import { normalizeAttachments } from './normalize.js';
+import {
+  type AttachmentParser,
+  BasicAttachmentParser,
+  LiteParseAttachmentParser,
+} from './parser.js';
+import { attachmentHeader, truncateText } from './prompt.js';
+import { fetchRemoteAttachment } from './remote-fetch.js';
 import type {
+  AttachmentContext,
   AttachmentImageContent,
   AttachmentJsonObject,
   AttachmentServiceConfig,
   NormalizedAttachment,
   PreparedAttachmentBundle,
   StoredAttachmentRecord,
-} from "./types.js";
-import { isDocumentAttachment, isImageMimeType, resolveAttachmentMimeType } from "./classify.js";
-import { LocalAttachmentStore } from "./local-store.js";
-import { normalizeAttachments } from "./normalize.js";
-import { BasicAttachmentParser, LiteParseAttachmentParser, type AttachmentParser } from "./parser.js";
-import { attachmentHeader, truncateText } from "./prompt.js";
-import { fetchRemoteAttachment } from "./remote-fetch.js";
+} from './types.js';
 
 export type AttachmentService = {
   readonly config: AttachmentServiceConfig;
   readonly store: LocalAttachmentStore;
-  prepareForPrompt(attachments: unknown, context: AttachmentContext): Promise<PreparedAttachmentBundle>;
+  prepareForPrompt(
+    attachments: unknown,
+    context: AttachmentContext,
+  ): Promise<PreparedAttachmentBundle>;
 };
 
 export function createAttachmentService(config: AttachmentServiceConfig): AttachmentService {
   const store = new LocalAttachmentStore(config.localStoreDir);
-  const parser = config.parser === "liteparse"
-    ? new LiteParseAttachmentParser()
-    : new BasicAttachmentParser();
+  const parser =
+    config.parser === 'liteparse' ? new LiteParseAttachmentParser() : new BasicAttachmentParser();
   return new DefaultAttachmentService(config, store, parser);
 }
 
@@ -35,11 +41,14 @@ class DefaultAttachmentService implements AttachmentService {
     private readonly parser: AttachmentParser,
   ) {}
 
-  async prepareForPrompt(attachmentsInput: unknown, context: AttachmentContext): Promise<PreparedAttachmentBundle> {
+  async prepareForPrompt(
+    attachmentsInput: unknown,
+    context: AttachmentContext,
+  ): Promise<PreparedAttachmentBundle> {
     const attachments = normalizeAttachments(attachmentsInput, this.config.maxAttachmentCount);
     const images: AttachmentImageContent[] = [];
     const promptBlocks: string[] = [];
-    const failures: PreparedAttachmentBundle["failures"] = [];
+    const failures: PreparedAttachmentBundle['failures'] = [];
     const telemetry: AttachmentJsonObject[] = [];
 
     for (const [index, attachment] of attachments.entries()) {
@@ -55,8 +64,15 @@ class DefaultAttachmentService implements AttachmentService {
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
         failures.push({ attachmentId: attachment.id, name: attachment.name, reason });
-        promptBlocks.push(`${attachmentHeader({ index, ...attachment })}\nContent: attachment could not be processed (${reason}).`);
-        telemetry.push({ id: attachment.id, name: attachment.name, status: "failed", error: reason });
+        promptBlocks.push(
+          `${attachmentHeader({ index, ...attachment })}\nContent: attachment could not be processed (${reason}).`,
+        );
+        telemetry.push({
+          id: attachment.id,
+          name: attachment.name,
+          status: 'failed',
+          error: reason,
+        });
       }
     }
 
@@ -67,32 +83,39 @@ class DefaultAttachmentService implements AttachmentService {
     attachment: NormalizedAttachment,
     index: number,
     context: AttachmentContext,
-  ): Promise<{ image?: AttachmentImageContent; promptBlock?: string; telemetry: AttachmentJsonObject }> {
+  ): Promise<{
+    image?: AttachmentImageContent;
+    promptBlock?: string;
+    telemetry: AttachmentJsonObject;
+  }> {
     const header = attachmentHeader({ index, ...attachment });
-    if (attachment.source.kind === "inlineText") {
+    if (attachment.source.kind === 'inlineText') {
       const text = truncateText(attachment.source.text, this.config.maxTextChars);
       return {
         promptBlock: `${header}\nContent:\n${text}`,
-        telemetry: attachmentTelemetry(attachment, { status: "inline_text", textBytes: text.length }),
+        telemetry: attachmentTelemetry(attachment, {
+          status: 'inline_text',
+          textBytes: text.length,
+        }),
       };
     }
 
     const local = await this.resolveToLocalFile(attachment, context);
     const mimeType = resolveAttachmentMimeType(local.name, local.mimeType ?? attachment.mimeType);
     if (isImageMimeType(mimeType)) {
-      const { readFile } = await import("node:fs/promises");
+      const { readFile } = await import('node:fs/promises');
       const data = await readFile(local.path);
       if (data.byteLength > this.config.maxBytes) {
         throw new Error(`attachment exceeds ${this.config.maxBytes} bytes`);
       }
       return {
         image: {
-          type: "image",
-          data: data.toString("base64"),
+          type: 'image',
+          data: data.toString('base64'),
           mimeType,
         },
         promptBlock: `${header}\nContent: image upload is attached directly as model-visible image content. Do not call file tools for this uploaded image.`,
-        telemetry: attachmentTelemetry(attachment, { status: "image", bytes: data.byteLength }),
+        telemetry: attachmentTelemetry(attachment, { status: 'image', bytes: data.byteLength }),
       };
     }
 
@@ -101,7 +124,7 @@ class DefaultAttachmentService implements AttachmentService {
         path: local.path,
         name: local.name,
         ...(mimeType ? { mimeType } : {}),
-        format: "text",
+        format: 'text',
         ocr: this.config.ocr,
         maxPages: this.config.maxPages,
       });
@@ -109,7 +132,7 @@ class DefaultAttachmentService implements AttachmentService {
       return {
         promptBlock: `${header}\nContent:\n${text}`,
         telemetry: attachmentTelemetry(attachment, {
-          status: "parsed",
+          status: 'parsed',
           textBytes: text.length,
           ...(parsed.pageCount !== undefined ? { pageCount: parsed.pageCount } : {}),
         }),
@@ -118,7 +141,7 @@ class DefaultAttachmentService implements AttachmentService {
 
     return {
       promptBlock: `${header}\nContent: non-text attachment is available as metadata only.`,
-      telemetry: attachmentTelemetry(attachment, { status: "metadata_only" }),
+      telemetry: attachmentTelemetry(attachment, { status: 'metadata_only' }),
     };
   }
 
@@ -126,10 +149,10 @@ class DefaultAttachmentService implements AttachmentService {
     attachment: NormalizedAttachment,
     context: AttachmentContext,
   ): Promise<StoredAttachmentRecord> {
-    if (attachment.source.kind === "storedFile") {
+    if (attachment.source.kind === 'storedFile') {
       return this.store.readRecord(attachment.source.attachmentId);
     }
-    if (attachment.source.kind === "remoteObject") {
+    if (attachment.source.kind === 'remoteObject') {
       const fetched = await fetchRemoteAttachment({
         url: attachment.source.url,
         maxBytes: this.config.maxBytes,
@@ -143,7 +166,7 @@ class DefaultAttachmentService implements AttachmentService {
         ...optionalMimeType(fetched.mimeType ?? attachment.mimeType),
       });
     }
-    throw new Error("inline text attachment does not resolve to a local file");
+    throw new Error('inline text attachment does not resolve to a local file');
   }
 }
 

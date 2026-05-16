@@ -2,9 +2,12 @@ import type {
   RuntimeLifecycleEvent,
   RuntimeLlmGenerationEvent,
   RuntimeToolEvent,
-} from "@amaster.ai/pi-types";
+} from '@amaster.ai/pi-types';
 
-export type RuntimeTelemetryEvent = RuntimeLifecycleEvent | RuntimeToolEvent | RuntimeLlmGenerationEvent;
+export type RuntimeTelemetryEvent =
+  | RuntimeLifecycleEvent
+  | RuntimeToolEvent
+  | RuntimeLlmGenerationEvent;
 
 export interface RuntimeEventExporter {
   publish(event: RuntimeTelemetryEvent): Promise<void>;
@@ -17,7 +20,7 @@ export type TelemetryEnvironment = Record<string, string | undefined>;
 export type TelemetryFetch = (
   input: string,
   init: {
-    method: "POST";
+    method: 'POST';
     headers: Record<string, string>;
     body: string;
   },

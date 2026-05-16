@@ -1,16 +1,22 @@
 export type AttachmentJsonObject = { [key: string]: AttachmentJsonValue | undefined };
-export type AttachmentJsonValue = string | number | boolean | null | AttachmentJsonObject | AttachmentJsonValue[];
+export type AttachmentJsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | AttachmentJsonObject
+  | AttachmentJsonValue[];
 
 export type AttachmentImageContent = {
-  type: "image";
+  type: 'image';
   mimeType: string;
   data: string;
 };
 
 export type AttachmentSource =
-  | { kind: "inlineText"; text: string; truncated?: boolean }
-  | { kind: "remoteObject"; url: string; key?: string }
-  | { kind: "storedFile"; attachmentId: string };
+  | { kind: 'inlineText'; text: string; truncated?: boolean }
+  | { kind: 'remoteObject'; url: string; key?: string }
+  | { kind: 'storedFile'; attachmentId: string };
 
 export type ChatAttachmentInput = {
   id: string;
@@ -45,7 +51,7 @@ export type AttachmentContext = {
 };
 
 export type AttachmentServiceConfig = {
-  storageMode: "platform" | "local";
+  storageMode: 'platform' | 'local';
   uploadEndpoint: string;
   allowInsecureLocalUploadTls: boolean;
   localStoreDir: string;
@@ -54,8 +60,8 @@ export type AttachmentServiceConfig = {
   maxTextChars: number;
   fetchTimeoutMs: number;
   parseEnabled: boolean;
-  parser: "liteparse" | "basic";
-  ocr: "off" | "auto";
+  parser: 'liteparse' | 'basic';
+  ocr: 'off' | 'auto';
   maxPages: number;
   desktopEnabled: boolean;
 };
@@ -73,8 +79,8 @@ export type ParseAttachmentInput = {
   path: string;
   name: string;
   mimeType?: string;
-  format?: "text" | "json";
-  ocr: "off" | "auto";
+  format?: 'text' | 'json';
+  ocr: 'off' | 'auto';
   maxPages: number;
 };
 

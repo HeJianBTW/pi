@@ -136,16 +136,12 @@ describe('createFetchVisionCaller', () => {
     expect(result).toBe('Analysis result');
     const [url, options] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe('https://api.openai.com/v1/chat/completions');
-    expect(options.headers).toEqual(
-      expect.objectContaining({ Authorization: 'Bearer test-key' }),
-    );
+    expect(options.headers).toEqual(expect.objectContaining({ Authorization: 'Bearer test-key' }));
   });
 
   test('throws on missing API key', async () => {
     const caller = createFetchVisionCaller({ provider: 'openai', model: 'gpt-4o' });
-    await expect(caller('Find button', 'aW1hZ2VkYXRh', 'image/png')).rejects.toThrow(
-      'No API key',
-    );
+    await expect(caller('Find button', 'aW1hZ2VkYXRh', 'image/png')).rejects.toThrow('No API key');
   });
 
   test('throws on non-OK response', async () => {

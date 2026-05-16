@@ -1,6 +1,5 @@
-import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
-import path from "node:path";
-import { Prisma, PrismaClient } from "@prisma/client";
+import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
 import {
   normalizeScheduledTask,
   type ScheduledTask,
@@ -10,9 +9,10 @@ import {
   type ScheduledTaskStore,
   type SchedulerLock,
   type TaskSchedulerScope,
-} from "@amaster.ai/pi-task-scheduler";
-import { readJsonFile, writeJsonFile } from "./json-file.js";
-import { RedisLockManager } from "./redis-locks.js";
+} from '@amaster.ai/pi-task-scheduler';
+import { Prisma, PrismaClient } from '@prisma/client';
+import { readJsonFile, writeJsonFile } from './json-file.js';
+import { RedisLockManager } from './redis-locks.js';
 
 export class JsonScheduledTaskStore implements ScheduledTaskStore {
   private loaded = false;
@@ -101,11 +101,11 @@ export class FileSchedulerLock implements SchedulerLock {
       // Lock did not exist or was already removed between checks.
     }
     try {
-      writeFileSync(this.path, String(process.pid), { flag: "wx" });
+      writeFileSync(this.path, String(process.pid), { flag: 'wx' });
       this.acquired = true;
       return true;
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
         this.acquired = false;
         return false;
       }
@@ -118,7 +118,7 @@ export class FileSchedulerLock implements SchedulerLock {
       return;
     }
     try {
-      const pid = Number(readFileSync(this.path, "utf8").trim());
+      const pid = Number(readFileSync(this.path, 'utf8').trim());
       if (pid === process.pid) {
         unlinkSync(this.path);
       }
@@ -134,7 +134,7 @@ export class FileSchedulerLock implements SchedulerLock {
 
   holderPid(): number | undefined {
     try {
-      const pid = Number(readFileSync(this.path, "utf8").trim());
+      const pid = Number(readFileSync(this.path, 'utf8').trim());
       if (Number.isInteger(pid) && pid > 0 && isProcessAlive(pid)) {
         return pid;
       }
@@ -153,7 +153,7 @@ export class RedisSchedulerLock implements SchedulerLock {
 
   constructor(
     redisUrl: string,
-    private readonly key = "pi:scheduler:leader",
+    private readonly key = 'pi:scheduler:leader',
     private readonly ttlMs = 30_000,
   ) {
     this.path = `redis:${key}`;
@@ -198,7 +198,7 @@ export class DbScheduledTaskStore implements ScheduledTaskStore {
   async list(scope: TaskSchedulerScope = {}): Promise<ScheduledTask[]> {
     const rows = await this.prisma.piAgentScheduledTask.findMany({
       where: scheduledTaskWhere(scope),
-      orderBy: { updatedAt: "desc" },
+      orderBy: { updatedAt: 'desc' },
     });
     return await Promise.all(rows.map((row) => this.taskFromPrisma(row)));
   }
@@ -216,7 +216,7 @@ export class DbScheduledTaskStore implements ScheduledTaskStore {
       data: scheduledTaskPrismaData(normalized),
     });
     await this.syncTaskRuns(normalized);
-    return await this.get(normalized.id) ?? normalized;
+    return (await this.get(normalized.id)) ?? normalized;
   }
 
   async update(
@@ -254,11 +254,11 @@ export class DbScheduledTaskStore implements ScheduledTaskStore {
       ...(row.name ? { name: row.name } : {}),
       prompt: row.prompt,
       type: row.taskType,
-      schedule: row.schedule ?? "",
+      schedule: row.schedule ?? '',
       intervalSeconds: row.intervalSeconds ?? 0,
       enabled: Boolean(row.enabled),
       model: parseModel(row.modelJson),
-      toolPolicyProfile: row.toolPolicyProfile ?? "scheduled",
+      toolPolicyProfile: row.toolPolicyProfile ?? 'scheduled',
       ...(row.workspaceDir ? { workspaceDir: row.workspaceDir } : {}),
       ...(row.description ? { description: row.description } : {}),
       createdAt: toIso(row.createdAt),
@@ -275,7 +275,7 @@ export class DbScheduledTaskStore implements ScheduledTaskStore {
   private async listRunHistory(taskId: string): Promise<ScheduledTaskRunHistoryEntry[]> {
     const rows = await this.prisma.piAgentTaskRun.findMany({
       where: { taskId },
-      orderBy: { createdAt: "desc" },
+      orderBy: { createdAt: 'desc' },
       take: 25,
     });
     return rows.map(taskRunHistoryFromPrisma).reverse();
@@ -296,8 +296,10 @@ export class DbScheduledTaskStore implements ScheduledTaskStore {
 type PrismaRecord = Record<string, any>;
 
 function taskMatchesScope(task: ScheduledTask, scope: TaskSchedulerScope): boolean {
-  return (!scope.tenantId || task.tenantId === scope.tenantId) &&
-    (!scope.userId || task.userId === scope.userId);
+  return (
+    (!scope.tenantId || task.tenantId === scope.tenantId) &&
+    (!scope.userId || task.userId === scope.userId)
+  );
 }
 
 function isProcessAlive(pid: number): boolean {
@@ -321,11 +323,13 @@ function scheduledTaskWhere(
   };
 }
 
-function scheduledTaskPrismaData(task: ScheduledTask): Prisma.PiAgentScheduledTaskUncheckedCreateInput {
+function scheduledTaskPrismaData(
+  task: ScheduledTask,
+): Prisma.PiAgentScheduledTaskUncheckedCreateInput {
   return {
     id: task.id,
-    tenantId: task.tenantId ?? "default",
-    userId: task.userId ?? "system",
+    tenantId: task.tenantId ?? 'default',
+    userId: task.userId ?? 'system',
     workspaceId: task.workspaceId ?? null,
     sessionId: task.sessionId,
     name: task.name ?? null,
@@ -352,20 +356,21 @@ function scheduledTaskPrismaData(task: ScheduledTask): Prisma.PiAgentScheduledTa
 function taskRunPrismaCreate(
   task: ScheduledTask,
   entry: ScheduledTaskRunHistoryEntry,
-  status: ScheduledTaskRunHistoryEntry["status"],
+  status: ScheduledTaskRunHistoryEntry['status'],
 ): Prisma.PiAgentTaskRunUncheckedCreateInput {
   return {
     id: entry.id,
-    tenantId: task.tenantId ?? "default",
-    userId: task.userId ?? "system",
+    tenantId: task.tenantId ?? 'default',
+    userId: task.userId ?? 'system',
     workspaceId: task.workspaceId ?? null,
     taskId: task.id,
     sessionId: entry.sessionId ?? task.sessionId,
     status,
     message: entry.message ?? null,
     errorJson: errorJson(task, entry),
-    startedAt: status === "running" ? toDate(entry.createdAt) : null,
-    endedAt: status === "success" || status === "error" ? toDate(task.lastRunAt ?? task.updatedAt) : null,
+    startedAt: status === 'running' ? toDate(entry.createdAt) : null,
+    endedAt:
+      status === 'success' || status === 'error' ? toDate(task.lastRunAt ?? task.updatedAt) : null,
     createdAt: toDate(entry.createdAt),
   };
 }
@@ -373,20 +378,24 @@ function taskRunPrismaCreate(
 function taskRunPrismaUpdate(
   task: ScheduledTask,
   entry: ScheduledTaskRunHistoryEntry,
-  status: ScheduledTaskRunHistoryEntry["status"],
+  status: ScheduledTaskRunHistoryEntry['status'],
 ): Prisma.PiAgentTaskRunUncheckedUpdateInput {
   return {
     sessionId: entry.sessionId ?? task.sessionId,
     status,
     message: entry.message ?? null,
     errorJson: errorJson(task, entry),
-    endedAt: status === "success" || status === "error" ? toDate(task.lastRunAt ?? task.updatedAt) : null,
+    endedAt:
+      status === 'success' || status === 'error' ? toDate(task.lastRunAt ?? task.updatedAt) : null,
   };
 }
 
-function errorJson(task: ScheduledTask, entry: ScheduledTaskRunHistoryEntry): Prisma.InputJsonValue | typeof Prisma.JsonNull {
-  return entry.status === "error"
-    ? jsonInput({ message: entry.message ?? task.lastError ?? "Scheduled task failed" })
+function errorJson(
+  task: ScheduledTask,
+  entry: ScheduledTaskRunHistoryEntry,
+): Prisma.InputJsonValue | typeof Prisma.JsonNull {
+  return entry.status === 'error'
+    ? jsonInput({ message: entry.message ?? task.lastError ?? 'Scheduled task failed' })
     : Prisma.JsonNull;
 }
 
@@ -401,34 +410,36 @@ function taskRunHistoryFromPrisma(row: PrismaRecord): ScheduledTaskRunHistoryEnt
 }
 
 function parseModel(value: unknown): ScheduledTaskModelConfig {
-  if (typeof value === "string") {
+  if (typeof value === 'string') {
     try {
       return parseModel(JSON.parse(value) as unknown);
     } catch {
-      return { provider: "unknown", model: "unknown" };
+      return { provider: 'unknown', model: 'unknown' };
     }
   }
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return { provider: "unknown", model: "unknown" };
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return { provider: 'unknown', model: 'unknown' };
   }
   const raw = value as Partial<ScheduledTaskModelConfig>;
   return {
-    provider: typeof raw.provider === "string" ? raw.provider : "unknown",
-    model: typeof raw.model === "string" ? raw.model : "unknown",
+    provider: typeof raw.provider === 'string' ? raw.provider : 'unknown',
+    model: typeof raw.model === 'string' ? raw.model : 'unknown',
     ...(isThinkingLevel(raw.thinkingLevel) ? { thinkingLevel: raw.thinkingLevel } : {}),
-    ...(typeof raw.authProfileId === "string" ? { authProfileId: raw.authProfileId } : {}),
+    ...(typeof raw.authProfileId === 'string' ? { authProfileId: raw.authProfileId } : {}),
     ...(raw.reasoning === true ? { reasoning: true } : {}),
   };
 }
 
-function isThinkingLevel(value: unknown): value is NonNullable<ScheduledTaskModelConfig["thinkingLevel"]> {
+function isThinkingLevel(
+  value: unknown,
+): value is NonNullable<ScheduledTaskModelConfig['thinkingLevel']> {
   return (
-    value === "off" ||
-    value === "minimal" ||
-    value === "low" ||
-    value === "medium" ||
-    value === "high" ||
-    value === "xhigh"
+    value === 'off' ||
+    value === 'minimal' ||
+    value === 'low' ||
+    value === 'medium' ||
+    value === 'high' ||
+    value === 'xhigh'
   );
 }
 

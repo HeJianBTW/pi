@@ -5,11 +5,11 @@
  * validation, runtime event recording, and memory tool policy outside these
  * stores.
  */
-import { randomUUID } from "node:crypto";
+import { randomUUID } from 'node:crypto';
 import type {
-  ConversationStore,
   ConversationHistoryStore,
   ConversationMessage,
+  ConversationStore,
   ConversationTurn,
   CopilotMemoryStore,
   JsonObject,
@@ -20,8 +20,8 @@ import type {
   RuntimeSessionStore,
   RuntimeSessionSummary,
   TranscriptStore,
-} from "@amaster.ai/pi-types";
-import { readJsonFile, writeJsonFile } from "./json-file.js";
+} from '@amaster.ai/pi-types';
+import { readJsonFile, writeJsonFile } from './json-file.js';
 
 type RuntimeSessionSummaryFields = Omit<RuntimeSessionSummary, keyof RuntimeSession>;
 
@@ -39,7 +39,10 @@ export class JsonFileConversationStore implements RuntimeSessionStore {
 
   constructor(private readonly filePath: string) {}
 
-  async getRuntimeSession(scope: RuntimeScope, sessionId: string): Promise<RuntimeSession | undefined> {
+  async getRuntimeSession(
+    scope: RuntimeScope,
+    sessionId: string,
+  ): Promise<RuntimeSession | undefined> {
     await this.load();
     const session = this.sessions.get(sessionId);
     return session && sessionMatchesScope(session, scope) ? session : undefined;
@@ -90,7 +93,10 @@ export class JsonFileTranscriptStore implements TranscriptStore {
     await this.update((state) => {
       state.turns.push(turn);
       state.messages.push(...messagesForTurn(turn));
-      state.sessionSummaries[turn.sessionId] = nextSessionSummaryFields(state.sessionSummaries[turn.sessionId], turn);
+      state.sessionSummaries[turn.sessionId] = nextSessionSummaryFields(
+        state.sessionSummaries[turn.sessionId],
+        turn,
+      );
     });
   }
 
@@ -116,11 +122,13 @@ export class JsonFileTranscriptStore implements TranscriptStore {
     sessions: RuntimeSession[],
   ): Promise<RuntimeSessionSummary[]> {
     await this.load();
-    return sessions.filter((session) => sessionMatchesScope(session, scope)).map((session) => ({
-      ...session,
-      turnCount: 0,
-      ...this.state.sessionSummaries[session.sessionId],
-    }));
+    return sessions
+      .filter((session) => sessionMatchesScope(session, scope))
+      .map((session) => ({
+        ...session,
+        turnCount: 0,
+        ...this.state.sessionSummaries[session.sessionId],
+      }));
   }
 
   private async update(mutator: (state: JsonConversationHistoryState) => void): Promise<void> {
@@ -148,12 +156,14 @@ export class JsonFileTranscriptStore implements TranscriptStore {
 }
 
 function sessionMatchesScope(session: RuntimeSession, scope: RuntimeScope): boolean {
-  return runtimeTenantId(session.tenantId) === scope.tenantId &&
-    (!scope.userId || session.userId === scope.userId);
+  return (
+    runtimeTenantId(session.tenantId) === scope.tenantId &&
+    (!scope.userId || session.userId === scope.userId)
+  );
 }
 
 function runtimeTenantId(tenantId: string | undefined): string {
-  return tenantId ?? "default";
+  return tenantId ?? 'default';
 }
 
 function createEmptyConversationHistoryState(): JsonConversationHistoryState {
@@ -186,7 +196,7 @@ function messagesForTurn(turn: ConversationTurn): ConversationMessage[] {
       sessionId: turn.sessionId,
       conversationId: turn.conversationId,
       turnId: turn.id,
-      role: "user",
+      role: 'user',
       text: turn.userMessage,
       model: turn.model,
       ...(turn.traceId ? { traceId: turn.traceId } : {}),
@@ -197,7 +207,7 @@ function messagesForTurn(turn: ConversationTurn): ConversationMessage[] {
       sessionId: turn.sessionId,
       conversationId: turn.conversationId,
       turnId: turn.id,
-      role: "assistant",
+      role: 'assistant',
       text: turn.assistantMessage,
       model: turn.model,
       ...(turn.traceId ? { traceId: turn.traceId } : {}),
@@ -228,12 +238,12 @@ function isConversationTurn(value: unknown): value is ConversationTurn {
     return false;
   }
   return (
-    typeof value.id === "string" &&
-    typeof value.sessionId === "string" &&
-    typeof value.conversationId === "string" &&
-    typeof value.userMessage === "string" &&
-    typeof value.assistantMessage === "string" &&
-    typeof value.createdAt === "string" &&
+    typeof value.id === 'string' &&
+    typeof value.sessionId === 'string' &&
+    typeof value.conversationId === 'string' &&
+    typeof value.userMessage === 'string' &&
+    typeof value.assistantMessage === 'string' &&
+    typeof value.createdAt === 'string' &&
     isJsonObject(value.model)
   );
 }
@@ -243,13 +253,13 @@ function isConversationMessage(value: unknown): value is ConversationMessage {
     return false;
   }
   return (
-    typeof value.id === "string" &&
-    typeof value.sessionId === "string" &&
-    typeof value.conversationId === "string" &&
-    typeof value.role === "string" &&
-    ["user", "assistant", "tool", "system"].includes(value.role) &&
-    typeof value.text === "string" &&
-    typeof value.createdAt === "string"
+    typeof value.id === 'string' &&
+    typeof value.sessionId === 'string' &&
+    typeof value.conversationId === 'string' &&
+    typeof value.role === 'string' &&
+    ['user', 'assistant', 'tool', 'system'].includes(value.role) &&
+    typeof value.text === 'string' &&
+    typeof value.createdAt === 'string'
   );
 }
 
@@ -257,15 +267,23 @@ function isSummaryRecord(value: unknown): value is Record<string, RuntimeSession
   if (!isJsonObject(value)) {
     return false;
   }
-  return Object.values(value).every((entry) => isJsonObject(entry) && typeof entry.turnCount === "number");
+  return Object.values(value).every(
+    (entry) => isJsonObject(entry) && typeof entry.turnCount === 'number',
+  );
 }
 
 function isJsonObject(value: unknown): value is JsonObject {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function firstLine(value: string | undefined): string {
-  return value?.split(/\r?\n/).find((line) => line.trim())?.trim().slice(0, 120) ?? "";
+  return (
+    value
+      ?.split(/\r?\n/)
+      .find((line) => line.trim())
+      ?.trim()
+      .slice(0, 120) ?? ''
+  );
 }
 
 export class JsonFileMemoryStore implements CopilotMemoryStore {
@@ -319,7 +337,9 @@ export class JsonFileMemoryStore implements CopilotMemoryStore {
     return readJsonFile<Array<{ sessionId: string; record: MemoryRecord }>>(this.filePath, []);
   }
 
-  private async update(mutator: (records: Array<{ sessionId: string; record: MemoryRecord }>) => void): Promise<void> {
+  private async update(
+    mutator: (records: Array<{ sessionId: string; record: MemoryRecord }>) => void,
+  ): Promise<void> {
     const pending = this.writeTail.then(async () => {
       const records = await this.load();
       mutator(records);

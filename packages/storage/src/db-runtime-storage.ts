@@ -5,14 +5,13 @@
  * packages/storage/prisma/schema.prisma. JSON mode remains the local developer
  * adapter; DB mode uses these stores directly and never falls back silently.
  */
-import { createHash, randomUUID } from "node:crypto";
-import { Prisma, PrismaClient } from "@prisma/client";
+import { createHash, randomUUID } from 'node:crypto';
 import type {
-  JsonObject,
-  JsonValue,
   ConversationMessage,
   ConversationTurn,
   CopilotMemoryStore,
+  JsonObject,
+  JsonValue,
   LlmGenerationEventStore,
   MemoryRecord,
   RuntimeArtifact,
@@ -39,11 +38,10 @@ import type {
   SubagentRunStore,
   ToolEventStore,
   TranscriptStore,
-} from "@amaster.ai/pi-types";
-import {
-  isTerminalSubagentStatus,
-} from "./subagent-store.js";
-import { RedisLockManager } from "./redis-locks.js";
+} from '@amaster.ai/pi-types';
+import { Prisma, PrismaClient } from '@prisma/client';
+import { RedisLockManager } from './redis-locks.js';
+import { isTerminalSubagentStatus } from './subagent-store.js';
 
 export type DbRuntimeStores = {
   store: RuntimeSessionStore;
@@ -58,18 +56,18 @@ export type DbRuntimeStores = {
 };
 
 const REQUIRED_DB_TABLES = [
-  "pi_agent_sessions",
-  "pi_agent_turns",
-  "pi_agent_messages",
-  "pi_agent_turn_queue",
-  "pi_agent_turn_signals",
-  "pi_agent_events",
-  "pi_agent_subagent_runs",
-  "pi_agent_approvals",
-  "pi_agent_memory",
-  "pi_agent_scheduled_tasks",
-  "pi_agent_task_runs",
-  "pi_agent_artifacts",
+  'pi_agent_sessions',
+  'pi_agent_turns',
+  'pi_agent_messages',
+  'pi_agent_turn_queue',
+  'pi_agent_turn_signals',
+  'pi_agent_events',
+  'pi_agent_subagent_runs',
+  'pi_agent_approvals',
+  'pi_agent_memory',
+  'pi_agent_scheduled_tasks',
+  'pi_agent_task_runs',
+  'pi_agent_artifacts',
 ] as const;
 
 type Identity = {
@@ -107,8 +105,8 @@ export async function verifyDbRuntimeSchema(databaseUrl: string): Promise<void> 
     const missing = REQUIRED_DB_TABLES.filter((table) => !found.has(table));
     if (missing.length > 0) {
       throw new Error(
-        `STORAGE_MODE=db schema is missing required table(s): ${missing.join(", ")}. ` +
-          "Apply the pi runtime DB migration before starting server.",
+        `STORAGE_MODE=db schema is missing required table(s): ${missing.join(', ')}. ` +
+          'Apply the pi runtime DB migration before starting server.',
       );
     }
   } finally {
@@ -131,22 +129,25 @@ class DbRuntimeContext {
     this.locks = new RedisLockManager(redisUrl);
   }
 
-  async resolveIdentity(sessionId: string, tx: PrismaTx | PrismaClient = this.prisma): Promise<Identity> {
+  async resolveIdentity(
+    sessionId: string,
+    tx: PrismaTx | PrismaClient = this.prisma,
+  ): Promise<Identity> {
     const row = await tx.piAgentSession.findFirst({
       where: { sessionId: { in: identityLookupSessionIds(sessionId) }, deletedAt: null },
-      orderBy: { updatedAt: "desc" },
+      orderBy: { updatedAt: 'desc' },
       select: { tenantId: true, userId: true, workspaceId: true },
     });
     return {
-      tenantId: row?.tenantId ?? "default",
-      userId: row?.userId ?? "system",
+      tenantId: row?.tenantId ?? 'default',
+      userId: row?.userId ?? 'system',
       ...(row?.workspaceId ? { workspaceId: row.workspaceId } : {}),
     };
   }
 }
 
 function identityLookupSessionIds(sessionId: string): string[] {
-  const subagentMarker = ":subagent:";
+  const subagentMarker = ':subagent:';
   const markerIndex = sessionId.indexOf(subagentMarker);
   if (markerIndex <= 0) {
     return [sessionId];
@@ -157,19 +158,22 @@ function identityLookupSessionIds(sessionId: string): string[] {
 class DbRuntimeSessionStore implements RuntimeSessionStore {
   constructor(private readonly db: DbRuntimeContext) {}
 
-  async getRuntimeSession(scope: RuntimeScope, sessionId: string): Promise<RuntimeSession | undefined> {
+  async getRuntimeSession(
+    scope: RuntimeScope,
+    sessionId: string,
+  ): Promise<RuntimeSession | undefined> {
     const row = await this.db.prisma.piAgentSession.findFirst({
       where: { sessionId, deletedAt: null, ...sessionScopeWhere(scope) },
-      orderBy: { updatedAt: "desc" },
+      orderBy: { updatedAt: 'desc' },
     });
     return row ? sessionFromPrisma(row) : undefined;
   }
 
   async saveRuntimeSession(session: RuntimeSession): Promise<void> {
     const now = new Date().toISOString();
-    const tenantId = session.tenantId ?? "default";
-    const userId = session.userId ?? "system";
-    const rowId = stableRowId("session", tenantId, session.sessionId);
+    const tenantId = session.tenantId ?? 'default';
+    const userId = session.userId ?? 'system';
+    const rowId = stableRowId('session', tenantId, session.sessionId);
     await this.db.prisma.piAgentSession.upsert({
       where: { id: rowId },
       create: {
@@ -184,8 +188,8 @@ class DbRuntimeSessionStore implements RuntimeSessionStore {
         taskRunId: session.taskRunId ?? null,
         runId: session.runId ?? null,
         spawnBatchId: session.spawnBatchId ?? null,
-        triggerType: "user",
-        status: "active",
+        triggerType: 'user',
+        status: 'active',
         modelProvider: session.model.provider,
         modelName: session.model.model,
         thinkingLevel: session.model.thinkingLevel ?? null,
@@ -225,7 +229,7 @@ class DbRuntimeSessionStore implements RuntimeSessionStore {
   async listRuntimeSessions(scope: RuntimeScope): Promise<RuntimeSession[]> {
     const rows = await this.db.prisma.piAgentSession.findMany({
       where: { deletedAt: null, ...sessionScopeWhere(scope) },
-      orderBy: [{ lastMessageAt: "desc" }, { updatedAt: "desc" }],
+      orderBy: [{ lastMessageAt: 'desc' }, { updatedAt: 'desc' }],
     });
     return rows.map(sessionFromPrisma);
   }
@@ -243,14 +247,20 @@ class DbTranscriptStore implements TranscriptStore {
       task: async () => {
         await this.db.prisma.$transaction(async (tx) => {
           const [turnSeq, messageSeq] = await Promise.all([
-            nextBigIntSeq(tx.piAgentTurn.aggregate({
-              where: { tenantId: identity.tenantId, sessionId: turn.sessionId },
-              _max: { turnSeq: true },
-            }), "turnSeq"),
-            nextBigIntSeq(tx.piAgentMessage.aggregate({
-              where: { tenantId: identity.tenantId, sessionId: turn.sessionId },
-              _max: { messageSeq: true },
-            }), "messageSeq"),
+            nextBigIntSeq(
+              tx.piAgentTurn.aggregate({
+                where: { tenantId: identity.tenantId, sessionId: turn.sessionId },
+                _max: { turnSeq: true },
+              }),
+              'turnSeq',
+            ),
+            nextBigIntSeq(
+              tx.piAgentMessage.aggregate({
+                where: { tenantId: identity.tenantId, sessionId: turn.sessionId },
+                _max: { messageSeq: true },
+              }),
+              'messageSeq',
+            ),
           ]);
           await tx.piAgentTurn.create({
             data: {
@@ -262,8 +272,8 @@ class DbTranscriptStore implements TranscriptStore {
               conversationId: turn.conversationId,
               traceId: turn.traceId ?? null,
               turnSeq,
-              sourceType: "user",
-              status: "completed",
+              sourceType: 'user',
+              status: 'completed',
               inputText: turn.userMessage,
               outputText: turn.assistantMessage,
               modelJson: jsonInput(turn.model),
@@ -274,8 +284,22 @@ class DbTranscriptStore implements TranscriptStore {
           });
           await tx.piAgentMessage.createMany({
             data: [
-              messageCreateInput(identity, turn, `${turn.id}:user`, "user", turn.userMessage, messageSeq),
-              messageCreateInput(identity, turn, `${turn.id}:assistant`, "assistant", turn.assistantMessage, messageSeq + 1n),
+              messageCreateInput(
+                identity,
+                turn,
+                `${turn.id}:user`,
+                'user',
+                turn.userMessage,
+                messageSeq,
+              ),
+              messageCreateInput(
+                identity,
+                turn,
+                `${turn.id}:assistant`,
+                'assistant',
+                turn.assistantMessage,
+                messageSeq + 1n,
+              ),
             ],
           });
           await tx.piAgentSession.updateMany({
@@ -299,7 +323,7 @@ class DbTranscriptStore implements TranscriptStore {
   async listTurns(scope: RuntimeScope, sessionId?: string): Promise<ConversationTurn[]> {
     const rows = await this.db.prisma.piAgentTurn.findMany({
       where: { ...(sessionId ? { sessionId } : {}), ...sessionScopeWhere(scope) },
-      orderBy: [{ createdAt: "asc" }, { turnSeq: "asc" }],
+      orderBy: [{ createdAt: 'asc' }, { turnSeq: 'asc' }],
     });
     return rows.map(turnFromPrisma);
   }
@@ -308,7 +332,7 @@ class DbTranscriptStore implements TranscriptStore {
     const [rows, turns] = await Promise.all([
       this.db.prisma.piAgentMessage.findMany({
         where: { sessionId, deletedAt: null, ...sessionScopeWhere(scope) },
-        orderBy: { messageSeq: "asc" },
+        orderBy: { messageSeq: 'asc' },
       }),
       this.db.prisma.piAgentTurn.findMany({
         where: { sessionId, ...sessionScopeWhere(scope) },
@@ -316,9 +340,7 @@ class DbTranscriptStore implements TranscriptStore {
       }),
     ]);
     const traceIdsByTurnId = new Map(
-      turns
-        .filter((turn) => Boolean(turn.traceId))
-        .map((turn) => [turn.id, turn.traceId] as const),
+      turns.filter((turn) => Boolean(turn.traceId)).map((turn) => [turn.id, turn.traceId] as const),
     );
     return rows.map((row) => messageFromPrisma(row, traceIdsByTurnId));
   }
@@ -335,7 +357,9 @@ class DbTranscriptStore implements TranscriptStore {
       where: { sessionId: { in: ids }, deletedAt: null, ...sessionScopeWhere(scope) },
     });
     const bySessionId = new Map(rows.map((row) => [row.sessionId, row]));
-    return sessions.map((session) => summaryFromPrismaSession(session, bySessionId.get(session.sessionId)));
+    return sessions.map((session) =>
+      summaryFromPrismaSession(session, bySessionId.get(session.sessionId)),
+    );
   }
 }
 
@@ -350,7 +374,10 @@ class DbRuntimeTimelineEventStore implements RuntimeTimelineEventStore {
       timeoutMs: 5_000,
       task: async () => {
         await this.db.prisma.$transaction(async (tx) => {
-          const existing = await tx.piAgentEvent.findUnique({ where: { id: event.eventId }, select: { id: true } });
+          const existing = await tx.piAgentEvent.findUnique({
+            where: { id: event.eventId },
+            select: { id: true },
+          });
           if (existing) {
             return;
           }
@@ -371,7 +398,7 @@ class DbRuntimeTimelineEventStore implements RuntimeTimelineEventStore {
               eventSource: event.eventSource,
               eventType: event.eventType,
               eventName: event.eventName,
-              severity: "info",
+              severity: 'info',
               payloadJson: jsonInput(event.payload),
               createdAt: toDate(event.createdAt),
             },
@@ -381,18 +408,20 @@ class DbRuntimeTimelineEventStore implements RuntimeTimelineEventStore {
     });
   }
 
-  async list(input: RuntimeScope & {
-    sessionId?: string;
-    traceId?: string;
-    afterSeq?: number;
-    beforeSeq?: number;
-    cursor?: RuntimeTimelineCursor;
-    limit?: number;
-  }): Promise<RuntimeTimelineEvent[]> {
+  async list(
+    input: RuntimeScope & {
+      sessionId?: string;
+      traceId?: string;
+      afterSeq?: number;
+      beforeSeq?: number;
+      cursor?: RuntimeTimelineCursor;
+      limit?: number;
+    },
+  ): Promise<RuntimeTimelineEvent[]> {
     const limit = positiveLimit(input.limit);
     const rows = await this.db.prisma.piAgentEvent.findMany({
       where: timelineWhere(input),
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: limit,
     });
     return rows.map(timelineEventFromPrisma).reverse();
@@ -400,7 +429,12 @@ class DbRuntimeTimelineEventStore implements RuntimeTimelineEventStore {
 
   async listBySource(
     eventSource: RuntimeTimelineEventSource,
-    input: Partial<RuntimeScope> & { sessionId?: string; traceId?: string; eventType?: string; limit?: number } = {},
+    input: Partial<RuntimeScope> & {
+      sessionId?: string;
+      traceId?: string;
+      eventType?: string;
+      limit?: number;
+    } = {},
   ): Promise<RuntimeTimelineEvent[]> {
     const rows = await this.db.prisma.piAgentEvent.findMany({
       where: {
@@ -408,7 +442,7 @@ class DbRuntimeTimelineEventStore implements RuntimeTimelineEventStore {
         ...timelineWhere(input),
         ...(input.eventType ? { eventType: input.eventType } : {}),
       },
-      orderBy: [{ eventSeq: "desc" }, { createdAt: "desc" }],
+      orderBy: [{ eventSeq: 'desc' }, { createdAt: 'desc' }],
       take: positiveLimit(input.limit),
     });
     return rows.map(timelineEventFromPrisma).reverse();
@@ -422,13 +456,10 @@ class DbRuntimeEventStore implements RuntimeEventStore {
     await this.timeline.append(runtimeEventToTimeline(event));
   }
 
-  async list(input: {
-    sessionId?: string;
-    traceId?: string;
-    type?: string;
-    limit?: number;
-  } = {}): Promise<RuntimeLifecycleEvent[]> {
-    const events = await this.timeline.listBySource("runtime", runtimeListInput(input));
+  async list(
+    input: { sessionId?: string; traceId?: string; type?: string; limit?: number } = {},
+  ): Promise<RuntimeLifecycleEvent[]> {
+    const events = await this.timeline.listBySource('runtime', runtimeListInput(input));
     return events.map((event) => event.payload as RuntimeLifecycleEvent);
   }
 }
@@ -440,8 +471,10 @@ class DbToolEventStore implements ToolEventStore {
     await this.timeline.append(toolEventToTimeline(event));
   }
 
-  async list(input: { sessionId?: string; traceId?: string; limit?: number } = {}): Promise<RuntimeToolEvent[]> {
-    const events = await this.timeline.listBySource("tool", timelineListInput(input));
+  async list(
+    input: { sessionId?: string; traceId?: string; limit?: number } = {},
+  ): Promise<RuntimeToolEvent[]> {
+    const events = await this.timeline.listBySource('tool', timelineListInput(input));
     return events.map((event) => event.payload as RuntimeToolEvent);
   }
 }
@@ -453,8 +486,10 @@ class DbLlmGenerationEventStore implements LlmGenerationEventStore {
     await this.timeline.append(llmEventToTimeline(event));
   }
 
-  async list(input: { sessionId?: string; traceId?: string; limit?: number } = {}): Promise<RuntimeLlmGenerationEvent[]> {
-    const events = await this.timeline.listBySource("llm", timelineListInput(input));
+  async list(
+    input: { sessionId?: string; traceId?: string; limit?: number } = {},
+  ): Promise<RuntimeLlmGenerationEvent[]> {
+    const events = await this.timeline.listBySource('llm', timelineListInput(input));
     return events.map((event) => event.payload as RuntimeLlmGenerationEvent);
   }
 }
@@ -484,7 +519,7 @@ class DbMemoryStore implements CopilotMemoryStore {
         userId: identity.userId,
         workspaceId: identity.workspaceId ?? null,
         sessionId: input.sessionId,
-        scope: "session",
+        scope: 'session',
         text: input.text,
         tagsJson: jsonInput(input.tags ?? []),
         metadataJson: jsonInput(input.metadata ?? {}),
@@ -509,7 +544,7 @@ class DbMemoryStore implements CopilotMemoryStore {
         deletedAt: null,
         ...(query ? { text: { contains: query } } : {}),
       },
-      orderBy: { createdAt: "desc" },
+      orderBy: { createdAt: 'desc' },
       take: positiveLimit(input.limit),
     });
     return rows.map(memoryFromPrisma);
@@ -519,21 +554,23 @@ class DbMemoryStore implements CopilotMemoryStore {
 class DbSubagentRunStore implements SubagentRunStore {
   constructor(private readonly db: DbRuntimeContext) {}
 
-  async create(input: RuntimeScope & {
-    traceId?: string;
-    taskRunId?: string;
-    spawnBatchId?: string;
-    parentSessionId: string;
-    childSessionId: string;
-    parentToolCallId?: string;
-    task: string;
-    agent?: string;
-    label?: string;
-    depth: number;
-    model: RuntimeModelConfig;
-    toolPolicyProfile: string;
-    context: "isolated";
-  }): Promise<SubagentRun> {
+  async create(
+    input: RuntimeScope & {
+      traceId?: string;
+      taskRunId?: string;
+      spawnBatchId?: string;
+      parentSessionId: string;
+      childSessionId: string;
+      parentToolCallId?: string;
+      task: string;
+      agent?: string;
+      label?: string;
+      depth: number;
+      model: RuntimeModelConfig;
+      toolPolicyProfile: string;
+      context: 'isolated';
+    },
+  ): Promise<SubagentRun> {
     const parentIdentity = await this.db.resolveIdentity(input.parentSessionId);
     const identity: Identity = {
       tenantId: input.tenantId,
@@ -553,7 +590,7 @@ class DbSubagentRunStore implements SubagentRunStore {
       task: input.task,
       ...(input.agent ? { agent: input.agent } : {}),
       ...(input.label ? { label: input.label } : {}),
-      status: "pending",
+      status: 'pending',
       depth: input.depth,
       model: input.model,
       toolPolicyProfile: input.toolPolicyProfile,
@@ -561,13 +598,13 @@ class DbSubagentRunStore implements SubagentRunStore {
       createdAt: now,
       updatedAt: now,
       events: [
-        { type: "subagent_spawning", at: now },
-        { type: "subagent_spawned", at: now },
+        { type: 'subagent_spawning', at: now },
+        { type: 'subagent_spawned', at: now },
       ],
     };
     await this.db.prisma.piAgentSubagentRun.create({
       data: {
-        id: stableRowId("subagent", identity.tenantId, runId),
+        id: stableRowId('subagent', identity.tenantId, runId),
         tenantId: identity.tenantId,
         userId: identity.userId,
         workspaceId: identity.workspaceId ?? null,
@@ -595,7 +632,7 @@ class DbSubagentRunStore implements SubagentRunStore {
   async list(scope: RuntimeScope, parentSessionId?: string): Promise<SubagentRun[]> {
     const rows = await this.db.prisma.piAgentSubagentRun.findMany({
       where: { ...sessionScopeWhere(scope), ...(parentSessionId ? { parentSessionId } : {}) },
-      orderBy: { createdAt: "asc" },
+      orderBy: { createdAt: 'asc' },
     });
     return rows.map(subagentFromPrisma);
   }
@@ -603,7 +640,7 @@ class DbSubagentRunStore implements SubagentRunStore {
   async get(scope: RuntimeScope, runId: string): Promise<SubagentRun | undefined> {
     const row = await this.db.prisma.piAgentSubagentRun.findFirst({
       where: { runId, ...sessionScopeWhere(scope) },
-      orderBy: { updatedAt: "desc" },
+      orderBy: { updatedAt: 'desc' },
     });
     return row ? subagentFromPrisma(row) : undefined;
   }
@@ -611,7 +648,7 @@ class DbSubagentRunStore implements SubagentRunStore {
   async getDepthForSession(scope: RuntimeScope, sessionId: string): Promise<number> {
     const row = await this.db.prisma.piAgentSubagentRun.findFirst({
       where: { childSessionId: sessionId, ...sessionScopeWhere(scope) },
-      orderBy: { updatedAt: "desc" },
+      orderBy: { updatedAt: 'desc' },
       select: { depth: true },
     });
     return row?.depth ?? 0;
@@ -619,64 +656,80 @@ class DbSubagentRunStore implements SubagentRunStore {
 
   async countActiveChildren(scope: RuntimeScope, parentSessionId: string): Promise<number> {
     return await this.db.prisma.piAgentSubagentRun.count({
-      where: { parentSessionId, status: { in: ["pending", "running"] }, ...sessionScopeWhere(scope) },
+      where: {
+        parentSessionId,
+        status: { in: ['pending', 'running'] },
+        ...sessionScopeWhere(scope),
+      },
     });
   }
 
   async markRunning(scope: RuntimeScope, runId: string): Promise<SubagentRun | undefined> {
     return await this.patch(scope, runId, (run, now) => ({
       ...run,
-      status: "running",
+      status: 'running',
       startedAt: run.startedAt ?? now,
       updatedAt: now,
-      events: [...run.events, { type: "subagent_started", at: now }],
+      events: [...run.events, { type: 'subagent_started', at: now }],
     }));
   }
 
-  async markCompleted(scope: RuntimeScope, runId: string, result: string): Promise<SubagentRun | undefined> {
+  async markCompleted(
+    scope: RuntimeScope,
+    runId: string,
+    result: string,
+  ): Promise<SubagentRun | undefined> {
     return await this.patch(scope, runId, (run, now) => {
-      if (run.status === "cancelled") {
+      if (run.status === 'cancelled') {
         return run;
       }
       return {
         ...omitSubagentError(run),
-        status: "completed",
+        status: 'completed',
         result,
         endedAt: now,
         updatedAt: now,
-        events: [...run.events, { type: "subagent_ended", at: now, reason: "completed" }],
+        events: [...run.events, { type: 'subagent_ended', at: now, reason: 'completed' }],
       };
     });
   }
 
-  async markFailed(scope: RuntimeScope, runId: string, error: string): Promise<SubagentRun | undefined> {
+  async markFailed(
+    scope: RuntimeScope,
+    runId: string,
+    error: string,
+  ): Promise<SubagentRun | undefined> {
     return await this.patch(scope, runId, (run, now) => {
-      if (run.status === "cancelled") {
+      if (run.status === 'cancelled') {
         return run;
       }
       return {
         ...run,
-        status: "failed",
+        status: 'failed',
         error,
         endedAt: now,
         updatedAt: now,
-        events: [...run.events, { type: "subagent_ended", at: now, reason: "failed" }],
+        events: [...run.events, { type: 'subagent_ended', at: now, reason: 'failed' }],
       };
     });
   }
 
-  async markCancelled(scope: RuntimeScope, runId: string, reason = "cancelled"): Promise<SubagentRun | undefined> {
+  async markCancelled(
+    scope: RuntimeScope,
+    runId: string,
+    reason = 'cancelled',
+  ): Promise<SubagentRun | undefined> {
     return await this.patch(scope, runId, (run, now) => {
       if (isTerminalSubagentStatus(run.status)) {
         return run;
       }
       return {
         ...run,
-        status: "cancelled",
+        status: 'cancelled',
         error: reason,
         endedAt: now,
         updatedAt: now,
-        events: [...run.events, { type: "subagent_ended", at: now, reason: "cancelled" }],
+        events: [...run.events, { type: 'subagent_ended', at: now, reason: 'cancelled' }],
       };
     });
   }
@@ -715,7 +768,9 @@ class DbArtifactStore implements RuntimeArtifactStore {
       id: input.id ?? randomUUID(),
       tenantId: input.tenantId ?? identity.tenantId,
       userId: input.userId ?? identity.userId,
-      ...(input.workspaceId ?? identity.workspaceId ? { workspaceId: input.workspaceId ?? identity.workspaceId } : {}),
+      ...((input.workspaceId ?? identity.workspaceId)
+        ? { workspaceId: input.workspaceId ?? identity.workspaceId }
+        : {}),
       sessionId: input.sessionId,
       ...(input.turnId ? { turnId: input.turnId } : {}),
       ...(input.toolCallId ? { toolCallId: input.toolCallId } : {}),
@@ -732,8 +787,8 @@ class DbArtifactStore implements RuntimeArtifactStore {
     await this.db.prisma.piAgentArtifact.create({
       data: {
         id: artifact.id,
-        tenantId: artifact.tenantId ?? "default",
-        userId: artifact.userId ?? "system",
+        tenantId: artifact.tenantId ?? 'default',
+        userId: artifact.userId ?? 'system',
         workspaceId: artifact.workspaceId ?? null,
         sessionId: artifact.sessionId,
         turnId: artifact.turnId ?? null,
@@ -768,7 +823,7 @@ class DbArtifactStore implements RuntimeArtifactStore {
         ...(input.turnId ? { turnId: input.turnId } : {}),
         ...(input.toolCallId ? { toolCallId: input.toolCallId } : {}),
       },
-      orderBy: { createdAt: "desc" },
+      orderBy: { createdAt: 'desc' },
       take: positiveLimit(input.limit),
     });
     return rows.map(artifactFromPrisma).reverse();
@@ -786,7 +841,7 @@ class DbArtifactStore implements RuntimeArtifactStore {
 type PrismaRecord = Record<string, any>;
 
 async function nextBigIntSeq(aggregatePromise: Promise<unknown>, key: string): Promise<bigint> {
-  const aggregate = await aggregatePromise as { _max?: Record<string, bigint | null> };
+  const aggregate = (await aggregatePromise) as { _max?: Record<string, bigint | null> };
   return (aggregate._max?.[key] ?? 0n) + 1n;
 }
 
@@ -794,7 +849,7 @@ function messageCreateInput(
   identity: Identity,
   turn: ConversationTurn,
   id: string,
-  role: ConversationMessage["role"],
+  role: ConversationMessage['role'],
   text: string,
   messageSeq: bigint,
 ): Prisma.PiAgentMessageCreateManyInput {
@@ -829,8 +884,8 @@ function timelineWhere(input: {
     clauses.push({
       OR: [
         { sessionId: input.sessionId },
-        { payloadJson: { path: "$.parentSessionId", equals: input.sessionId } },
-        { payloadJson: { path: "$.childSessionId", equals: input.sessionId } },
+        { payloadJson: { path: '$.parentSessionId', equals: input.sessionId } },
+        { payloadJson: { path: '$.childSessionId', equals: input.sessionId } },
       ],
     });
   }
@@ -861,9 +916,7 @@ function sessionScopeWhere(scope: RuntimeScope): { tenantId: string; userId?: st
   };
 }
 
-function artifactScopeWhere(
-  scope: RuntimeScope,
-): { tenantId: string; userId?: string } {
+function artifactScopeWhere(scope: RuntimeScope): { tenantId: string; userId?: string } {
   return {
     tenantId: scope.tenantId,
     ...(scope.userId ? { userId: scope.userId } : {}),
@@ -887,12 +940,14 @@ function sessionFromPrisma(row: PrismaRecord): RuntimeSession {
     ...(row.spawnBatchId ? { spawnBatchId: row.spawnBatchId } : {}),
     ...(row.taskRunId ? { taskRunId: row.taskRunId } : {}),
     ...(row.sandboxSessionId ? { sandboxSessionId: row.sandboxSessionId } : {}),
-    sandboxStatus: row.sandboxStatus as RuntimeSession["sandboxStatus"],
+    sandboxStatus: row.sandboxStatus as RuntimeSession['sandboxStatus'],
     model: {
       provider: row.modelProvider,
       model: row.modelName,
       ...(row.thinkingLevel ? { thinkingLevel: row.thinkingLevel } : {}),
-      ...(typeof metadataModel.authProfileId === "string" ? { authProfileId: metadataModel.authProfileId } : {}),
+      ...(typeof metadataModel.authProfileId === 'string'
+        ? { authProfileId: metadataModel.authProfileId }
+        : {}),
       ...(metadataModel.reasoning === true ? { reasoning: true } : {}),
     },
     ...(row.piSessionRef ? { piSessionFile: row.piSessionRef } : {}),
@@ -901,7 +956,10 @@ function sessionFromPrisma(row: PrismaRecord): RuntimeSession {
   };
 }
 
-function summaryFromPrismaSession(session: RuntimeSession, row: PrismaRecord | undefined): RuntimeSessionSummary {
+function summaryFromPrismaSession(
+  session: RuntimeSession,
+  row: PrismaRecord | undefined,
+): RuntimeSessionSummary {
   return {
     ...session,
     turnCount: Number(row?.turnCount ?? 0),
@@ -919,15 +977,18 @@ function turnFromPrisma(row: PrismaRecord): ConversationTurn {
     id: row.id,
     sessionId: row.sessionId,
     conversationId: row.conversationId,
-    userMessage: row.inputText ?? "",
-    assistantMessage: row.outputText ?? "",
+    userMessage: row.inputText ?? '',
+    assistantMessage: row.outputText ?? '',
     model: parseModel(row.modelJson),
     ...(row.traceId ? { traceId: row.traceId } : {}),
     createdAt: toIso(row.createdAt),
   };
 }
 
-function messageFromPrisma(row: PrismaRecord, traceIdsByTurnId = new Map<string, string | null>()): ConversationMessage {
+function messageFromPrisma(
+  row: PrismaRecord,
+  traceIdsByTurnId = new Map<string, string | null>(),
+): ConversationMessage {
   const metadata = parseJsonObject(row.contentJson);
   const model =
     row.modelProvider && row.modelName
@@ -940,7 +1001,7 @@ function messageFromPrisma(row: PrismaRecord, traceIdsByTurnId = new Map<string,
     conversationId: row.conversationId,
     ...(row.turnId ? { turnId: row.turnId } : {}),
     role: row.role,
-    text: row.contentText ?? "",
+    text: row.contentText ?? '',
     ...(model ? { model } : {}),
     ...(traceId ? { traceId } : {}),
     createdAt: toIso(row.createdAt),
@@ -960,13 +1021,23 @@ function timelineEventFromPrisma(row: PrismaRecord): RuntimeTimelineEvent {
     sessionId: row.sessionId,
     ...(row.turnId ? { turnId: row.turnId } : {}),
     ...(row.traceId ? { traceId: row.traceId } : {}),
-    ...(typeof payloadObject.conversationId === "string" ? { conversationId: payloadObject.conversationId } : {}),
-    ...(typeof payloadObject.toolCallId === "string" ? { toolCallId: payloadObject.toolCallId } : {}),
-    ...(typeof payloadObject.parentSessionId === "string" ? { parentSessionId: payloadObject.parentSessionId } : {}),
-    ...(typeof payloadObject.childSessionId === "string" ? { childSessionId: payloadObject.childSessionId } : {}),
-    ...(typeof payloadObject.runId === "string" ? { runId: payloadObject.runId } : {}),
-    ...(typeof payloadObject.spawnBatchId === "string" ? { spawnBatchId: payloadObject.spawnBatchId } : {}),
-    ...(typeof payloadObject.taskRunId === "string" ? { taskRunId: payloadObject.taskRunId } : {}),
+    ...(typeof payloadObject.conversationId === 'string'
+      ? { conversationId: payloadObject.conversationId }
+      : {}),
+    ...(typeof payloadObject.toolCallId === 'string'
+      ? { toolCallId: payloadObject.toolCallId }
+      : {}),
+    ...(typeof payloadObject.parentSessionId === 'string'
+      ? { parentSessionId: payloadObject.parentSessionId }
+      : {}),
+    ...(typeof payloadObject.childSessionId === 'string'
+      ? { childSessionId: payloadObject.childSessionId }
+      : {}),
+    ...(typeof payloadObject.runId === 'string' ? { runId: payloadObject.runId } : {}),
+    ...(typeof payloadObject.spawnBatchId === 'string'
+      ? { spawnBatchId: payloadObject.spawnBatchId }
+      : {}),
+    ...(typeof payloadObject.taskRunId === 'string' ? { taskRunId: payloadObject.taskRunId } : {}),
     createdAt: toIso(row.createdAt),
     payload,
   };
@@ -1000,14 +1071,14 @@ function subagentFromPrisma(row: PrismaRecord): SubagentRun {
     status: row.status,
     depth: row.depth,
     model: parseModel(row.modelJson),
-    toolPolicyProfile: row.toolPolicyProfile ?? "default",
-    context: "isolated",
+    toolPolicyProfile: row.toolPolicyProfile ?? 'default',
+    context: 'isolated',
     createdAt: toIso(row.createdAt),
     updatedAt: toIso(row.updatedAt),
     ...(row.startedAt ? { startedAt: toIso(row.startedAt) } : {}),
     ...(row.endedAt ? { endedAt: toIso(row.endedAt) } : {}),
     ...(row.resultText ? { result: row.resultText } : {}),
-    ...(typeof error.message === "string" ? { error: error.message } : {}),
+    ...(typeof error.message === 'string' ? { error: error.message } : {}),
     events: subagentLifecycleEvents(row.status, row.createdAt, row.startedAt, row.endedAt),
   };
 }
@@ -1025,7 +1096,9 @@ function artifactFromPrisma(row: PrismaRecord): RuntimeArtifact {
     artifactType: row.artifactType,
     ...(row.name ? { name: row.name } : {}),
     ...(row.mimeType ? { mimeType: row.mimeType } : {}),
-    ...(row.sizeBytes !== null && row.sizeBytes !== undefined ? { sizeBytes: Number(row.sizeBytes) } : {}),
+    ...(row.sizeBytes !== null && row.sizeBytes !== undefined
+      ? { sizeBytes: Number(row.sizeBytes) }
+      : {}),
     ...(row.sha256 ? { sha256: row.sha256 } : {}),
     storageUri: row.storageUri,
     ...(row.previewUri ? { previewUri: row.previewUri } : {}),
@@ -1042,15 +1115,15 @@ function subagentLifecycleEvents(
 ): SubagentLifecycleEvent[] {
   const created = toIso(createdAt);
   const events: SubagentLifecycleEvent[] = [
-    { type: "subagent_spawning", at: created },
-    { type: "subagent_spawned", at: created },
+    { type: 'subagent_spawning', at: created },
+    { type: 'subagent_spawned', at: created },
   ];
   if (startedAt) {
-    events.push({ type: "subagent_started", at: toIso(startedAt) });
+    events.push({ type: 'subagent_started', at: toIso(startedAt) });
   }
   if (endedAt) {
-    const reason = isTerminalSubagentStatus(status) ? status : "completed";
-    events.push({ type: "subagent_ended", at: toIso(endedAt), reason });
+    const reason = isTerminalSubagentStatus(status) ? status : 'completed';
+    events.push({ type: 'subagent_ended', at: toIso(endedAt), reason });
   }
   return events;
 }
@@ -1058,9 +1131,9 @@ function subagentLifecycleEvents(
 function runtimeEventToTimeline(event: RuntimeLifecycleEvent): RuntimeTimelineEventInput {
   return {
     eventId: event.id,
-    eventName: "runtime_event",
+    eventName: 'runtime_event',
     eventType: event.type,
-    eventSource: "runtime",
+    eventSource: 'runtime',
     sessionId: event.sessionId,
     ...(event.conversationId ? { conversationId: event.conversationId } : {}),
     ...(event.traceId ? { traceId: event.traceId } : {}),
@@ -1079,7 +1152,7 @@ function toolEventToTimeline(event: RuntimeToolEvent): RuntimeTimelineEventInput
     eventId: event.id,
     eventName: `tool_call_${event.status}`,
     eventType: event.status,
-    eventSource: "tool",
+    eventSource: 'tool',
     sessionId: event.sessionId,
     conversationId: event.conversationId,
     ...(event.traceId ? { traceId: event.traceId } : {}),
@@ -1099,7 +1172,7 @@ function llmEventToTimeline(event: RuntimeLlmGenerationEvent): RuntimeTimelineEv
     eventId: event.id,
     eventName: `llm_generation_${event.status}`,
     eventType: event.status,
-    eventSource: "llm",
+    eventSource: 'llm',
     sessionId: event.sessionId,
     conversationId: event.conversationId,
     ...(event.traceId ? { traceId: event.traceId } : {}),
@@ -1125,7 +1198,12 @@ function timelineListInput(input: { sessionId?: string; traceId?: string; limit?
   };
 }
 
-function runtimeListInput(input: { sessionId?: string; traceId?: string; type?: string; limit?: number }): {
+function runtimeListInput(input: {
+  sessionId?: string;
+  traceId?: string;
+  type?: string;
+  limit?: number;
+}): {
   sessionId?: string;
   traceId?: string;
   eventType?: string;
@@ -1142,22 +1220,24 @@ function runtimeListInput(input: { sessionId?: string; traceId?: string; type?: 
 function parseModel(value: unknown): RuntimeModelConfig {
   const model = parseJsonObject(value);
   return {
-    provider: typeof model.provider === "string" ? model.provider : "unknown",
-    model: typeof model.model === "string" ? model.model : "unknown",
+    provider: typeof model.provider === 'string' ? model.provider : 'unknown',
+    model: typeof model.model === 'string' ? model.model : 'unknown',
     ...(isThinkingLevel(model.thinkingLevel) ? { thinkingLevel: model.thinkingLevel } : {}),
-    ...(typeof model.authProfileId === "string" ? { authProfileId: model.authProfileId } : {}),
+    ...(typeof model.authProfileId === 'string' ? { authProfileId: model.authProfileId } : {}),
     ...(model.reasoning === true ? { reasoning: true } : {}),
   };
 }
 
-function isThinkingLevel(value: unknown): value is NonNullable<RuntimeModelConfig["thinkingLevel"]> {
+function isThinkingLevel(
+  value: unknown,
+): value is NonNullable<RuntimeModelConfig['thinkingLevel']> {
   return (
-    value === "off" ||
-    value === "minimal" ||
-    value === "low" ||
-    value === "medium" ||
-    value === "high" ||
-    value === "xhigh"
+    value === 'off' ||
+    value === 'minimal' ||
+    value === 'low' ||
+    value === 'medium' ||
+    value === 'high' ||
+    value === 'xhigh'
   );
 }
 
@@ -1167,7 +1247,7 @@ function parseJsonObject(value: unknown): JsonObject {
 }
 
 function parseJsonValue(value: unknown): JsonValue {
-  if (typeof value === "string") {
+  if (typeof value === 'string') {
     try {
       return JSON.parse(value) as JsonValue;
     } catch {
@@ -1179,7 +1259,9 @@ function parseJsonValue(value: unknown): JsonValue {
 
 function parseStringArray(value: unknown): string[] {
   const parsed = parseJsonValue(value);
-  return Array.isArray(parsed) ? parsed.filter((entry): entry is string => typeof entry === "string") : [];
+  return Array.isArray(parsed)
+    ? parsed.filter((entry): entry is string => typeof entry === 'string')
+    : [];
 }
 
 function parseStringRecord(value: unknown): Record<string, string> {
@@ -1188,12 +1270,14 @@ function parseStringRecord(value: unknown): Record<string, string> {
     return {};
   }
   return Object.fromEntries(
-    Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+    Object.entries(parsed).filter(
+      (entry): entry is [string, string] => typeof entry[1] === 'string',
+    ),
   );
 }
 
 function isJsonObject(value: unknown): value is JsonObject {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function isJsonValue(value: unknown): value is JsonValue {
@@ -1201,7 +1285,7 @@ function isJsonValue(value: unknown): value is JsonValue {
     return true;
   }
   const type = typeof value;
-  if (type === "string" || type === "number" || type === "boolean") {
+  if (type === 'string' || type === 'number' || type === 'boolean') {
     return true;
   }
   if (Array.isArray(value)) {
@@ -1226,11 +1310,11 @@ function toIso(value: Date | string): string {
 }
 
 function firstLine(value: string): string {
-  return value.trim().split(/\r?\n/, 1)[0]?.slice(0, 120) ?? "";
+  return value.trim().split(/\r?\n/, 1)[0]?.slice(0, 120) ?? '';
 }
 
 function stableRowId(prefix: string, ...parts: string[]): string {
-  const hash = createHash("sha256").update(parts.join("\0")).digest("hex").slice(0, 48);
+  const hash = createHash('sha256').update(parts.join('\0')).digest('hex').slice(0, 48);
   return `${prefix}_${hash}`.slice(0, 64);
 }
 
@@ -1238,7 +1322,7 @@ function positiveLimit(limit: number | undefined): number {
   return limit && limit > 0 ? limit : 200;
 }
 
-function omitSubagentError(run: SubagentRun): Omit<SubagentRun, "error"> {
+function omitSubagentError(run: SubagentRun): Omit<SubagentRun, 'error'> {
   const { error: _error, ...rest } = run;
   return rest;
 }

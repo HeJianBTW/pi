@@ -9,8 +9,8 @@ import type {
   AppendOnlyEventStore,
   JsonValue,
   LlmGenerationEventStore,
-  RuntimeLifecycleEvent,
   RuntimeEventStore,
+  RuntimeLifecycleEvent,
   RuntimeLlmGenerationEvent,
   RuntimeScope,
   RuntimeTimelineCursor,
@@ -19,8 +19,8 @@ import type {
   RuntimeTimelineEventStore,
   RuntimeToolEvent,
   ToolEventStore,
-} from "@amaster.ai/pi-types";
-import { readJsonFile, writeJsonFile } from "./json-file.js";
+} from '@amaster.ai/pi-types';
+import { readJsonFile, writeJsonFile } from './json-file.js';
 
 export class JsonFileRuntimeTimelineEventStore implements RuntimeTimelineEventStore {
   private writeTail: Promise<unknown> = Promise.resolve();
@@ -37,35 +37,41 @@ export class JsonFileRuntimeTimelineEventStore implements RuntimeTimelineEventSt
         return;
       }
       const sessionEvents = events.filter((candidate) => candidate.sessionId === event.sessionId);
-      const eventSeq = sessionEvents.reduce((max, candidate) => Math.max(max, candidate.eventSeq), 0) + 1;
+      const eventSeq =
+        sessionEvents.reduce((max, candidate) => Math.max(max, candidate.eventSeq), 0) + 1;
       events.push({ ...event, eventSeq });
       const retained = this.maxEvents > 0 ? events.slice(-this.maxEvents) : events;
       await writeJsonFile(this.filePath, retained);
     });
   }
 
-  async list(input: RuntimeScope & {
-    sessionId?: string;
-    traceId?: string;
-    afterSeq?: number;
-    beforeSeq?: number;
-    cursor?: RuntimeTimelineCursor;
-    limit?: number;
-  }): Promise<RuntimeTimelineEvent[]> {
+  async list(
+    input: RuntimeScope & {
+      sessionId?: string;
+      traceId?: string;
+      afterSeq?: number;
+      beforeSeq?: number;
+      cursor?: RuntimeTimelineCursor;
+      limit?: number;
+    },
+  ): Promise<RuntimeTimelineEvent[]> {
     await this.writeTail.catch(() => undefined);
     const events = await this.readAll();
-    const filtered = events.filter((event) =>
-      (!input.sessionId ||
-        event.sessionId === input.sessionId ||
-        event.parentSessionId === input.sessionId ||
-      event.childSessionId === input.sessionId) &&
-      (!input.traceId || event.traceId === input.traceId) &&
-      (input.afterSeq === undefined || event.eventSeq > input.afterSeq) &&
-      (input.beforeSeq === undefined || event.eventSeq < input.beforeSeq) &&
-      (!input.cursor || compareTimelineCursor(event, input.cursor) < 0)
+    const filtered = events.filter(
+      (event) =>
+        (!input.sessionId ||
+          event.sessionId === input.sessionId ||
+          event.parentSessionId === input.sessionId ||
+          event.childSessionId === input.sessionId) &&
+        (!input.traceId || event.traceId === input.traceId) &&
+        (input.afterSeq === undefined || event.eventSeq > input.afterSeq) &&
+        (input.beforeSeq === undefined || event.eventSeq < input.beforeSeq) &&
+        (!input.cursor || compareTimelineCursor(event, input.cursor) < 0),
     );
-    const sorted = filtered.sort((left, right) =>
-      Date.parse(left.createdAt) - Date.parse(right.createdAt) || left.eventId.localeCompare(right.eventId)
+    const sorted = filtered.sort(
+      (left, right) =>
+        Date.parse(left.createdAt) - Date.parse(right.createdAt) ||
+        left.eventId.localeCompare(right.eventId),
     );
     const limit = input.limit && input.limit > 0 ? input.limit : sorted.length;
     return sorted.slice(-limit);
@@ -112,15 +118,18 @@ export class JsonFileToolEventStore implements ToolEventStore {
     });
   }
 
-  async list(input: { sessionId?: string; traceId?: string; limit?: number } = {}): Promise<RuntimeToolEvent[]> {
+  async list(
+    input: { sessionId?: string; traceId?: string; limit?: number } = {},
+  ): Promise<RuntimeToolEvent[]> {
     await this.writeTail.catch(() => undefined);
     const events = await this.readAll();
-    const filtered = events.filter((event) =>
-      (!input.sessionId ||
-        event.sessionId === input.sessionId ||
-        event.parentSessionId === input.sessionId ||
-        event.childSessionId === input.sessionId) &&
-      (!input.traceId || event.traceId === input.traceId)
+    const filtered = events.filter(
+      (event) =>
+        (!input.sessionId ||
+          event.sessionId === input.sessionId ||
+          event.parentSessionId === input.sessionId ||
+          event.childSessionId === input.sessionId) &&
+        (!input.traceId || event.traceId === input.traceId),
     );
     const limit = input.limit && input.limit > 0 ? input.limit : filtered.length;
     return filtered.slice(-limit);
@@ -162,21 +171,19 @@ export class JsonFileRuntimeEventStore implements RuntimeEventStore {
     });
   }
 
-  async list(input: {
-    sessionId?: string;
-    traceId?: string;
-    type?: string;
-    limit?: number;
-  } = {}): Promise<RuntimeLifecycleEvent[]> {
+  async list(
+    input: { sessionId?: string; traceId?: string; type?: string; limit?: number } = {},
+  ): Promise<RuntimeLifecycleEvent[]> {
     await this.writeTail.catch(() => undefined);
     const events = await this.readAll();
-    const filtered = events.filter((event) =>
-      (!input.sessionId ||
-        event.sessionId === input.sessionId ||
-        event.parentSessionId === input.sessionId ||
-        event.childSessionId === input.sessionId) &&
-      (!input.traceId || event.traceId === input.traceId) &&
-      (!input.type || event.type === input.type)
+    const filtered = events.filter(
+      (event) =>
+        (!input.sessionId ||
+          event.sessionId === input.sessionId ||
+          event.parentSessionId === input.sessionId ||
+          event.childSessionId === input.sessionId) &&
+        (!input.traceId || event.traceId === input.traceId) &&
+        (!input.type || event.type === input.type),
     );
     const limit = input.limit && input.limit > 0 ? input.limit : filtered.length;
     return filtered.slice(-limit);
@@ -218,15 +225,18 @@ export class JsonFileLlmGenerationEventStore implements LlmGenerationEventStore 
     });
   }
 
-  async list(input: { sessionId?: string; traceId?: string; limit?: number } = {}): Promise<RuntimeLlmGenerationEvent[]> {
+  async list(
+    input: { sessionId?: string; traceId?: string; limit?: number } = {},
+  ): Promise<RuntimeLlmGenerationEvent[]> {
     await this.writeTail.catch(() => undefined);
     const events = await this.readAll();
-    const filtered = events.filter((event) =>
-      (!input.sessionId ||
-        event.sessionId === input.sessionId ||
-        event.parentSessionId === input.sessionId ||
-        event.childSessionId === input.sessionId) &&
-      (!input.traceId || event.traceId === input.traceId)
+    const filtered = events.filter(
+      (event) =>
+        (!input.sessionId ||
+          event.sessionId === input.sessionId ||
+          event.parentSessionId === input.sessionId ||
+          event.childSessionId === input.sessionId) &&
+        (!input.traceId || event.traceId === input.traceId),
     );
     const limit = input.limit && input.limit > 0 ? input.limit : filtered.length;
     return filtered.slice(-limit);

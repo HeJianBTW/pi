@@ -5,16 +5,17 @@
  * atomic-ish JSON writes used by local stores. Keep domain-specific schema and
  * retention behavior in the store modules.
  */
-import { chmod, copyFile, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import path from "node:path";
-import { randomUUID } from "node:crypto";
+
+import { randomUUID } from 'node:crypto';
+import { chmod, copyFile, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 
 export async function readJsonFile<T>(filePath: string, fallback: T): Promise<T> {
   const backupPath = jsonBackupPath(filePath);
   try {
     return await readJsonFileStrict<T>(filePath);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       return fallback;
     }
     if (error instanceof SyntaxError) {
@@ -33,7 +34,7 @@ export async function writeJsonFile(filePath: string, value: unknown): Promise<v
   const tempPath = `${filePath}.${randomUUID()}.tmp`;
   const backupPath = jsonBackupPath(filePath);
   await copyFile(filePath, backupPath).catch((error) => {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
       throw error;
     }
   });
@@ -52,7 +53,7 @@ export async function writePrivateJsonFile(filePath: string, value: unknown): Pr
 }
 
 function readJsonFileStrict<T>(filePath: string): Promise<T> {
-  return readFile(filePath, "utf8").then((content) => JSON.parse(content) as T);
+  return readFile(filePath, 'utf8').then((content) => JSON.parse(content) as T);
 }
 
 function jsonBackupPath(filePath: string): string {

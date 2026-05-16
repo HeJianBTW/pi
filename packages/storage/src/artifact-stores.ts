@@ -5,15 +5,15 @@
  * Stores keep searchable metadata and stable references; payload bytes live in
  * workspace files, sandbox storage, or platform object storage.
  */
-import { randomUUID } from "node:crypto";
+import { randomUUID } from 'node:crypto';
 import type {
   RuntimeArtifact,
   RuntimeArtifactCreateInput,
   RuntimeArtifactListInput,
   RuntimeArtifactStore,
   RuntimeScope,
-} from "@amaster.ai/pi-types";
-import { readJsonFile, writeJsonFile } from "./json-file.js";
+} from '@amaster.ai/pi-types';
+import { readJsonFile, writeJsonFile } from './json-file.js';
 
 export class JsonFileArtifactStore implements RuntimeArtifactStore {
   private writeTail: Promise<unknown> = Promise.resolve();
@@ -45,43 +45,40 @@ export class JsonFileArtifactStore implements RuntimeArtifactStore {
     return artifact;
   }
 
-  async get(
-    scope: RuntimeScope,
-    id: string,
-  ): Promise<RuntimeArtifact | undefined> {
+  async get(scope: RuntimeScope, id: string): Promise<RuntimeArtifact | undefined> {
     await this.writeTail.catch(() => undefined);
     const artifacts = await this.readAll();
-    return artifacts.find((artifact) =>
-      artifact.id === id &&
-      artifact.tenantId === scope.tenantId &&
-      (!scope.userId || artifact.userId === scope.userId)
+    return artifacts.find(
+      (artifact) =>
+        artifact.id === id &&
+        artifact.tenantId === scope.tenantId &&
+        (!scope.userId || artifact.userId === scope.userId),
     );
   }
 
   async list(input: RuntimeArtifactListInput): Promise<RuntimeArtifact[]> {
     await this.writeTail.catch(() => undefined);
     const artifacts = await this.readAll();
-    const filtered = artifacts.filter((artifact) =>
-      artifact.tenantId === input.tenantId &&
-      (!input.userId || artifact.userId === input.userId) &&
-      (!input.sessionId || artifact.sessionId === input.sessionId) &&
-      (!input.turnId || artifact.turnId === input.turnId) &&
-      (!input.toolCallId || artifact.toolCallId === input.toolCallId)
+    const filtered = artifacts.filter(
+      (artifact) =>
+        artifact.tenantId === input.tenantId &&
+        (!input.userId || artifact.userId === input.userId) &&
+        (!input.sessionId || artifact.sessionId === input.sessionId) &&
+        (!input.turnId || artifact.turnId === input.turnId) &&
+        (!input.toolCallId || artifact.toolCallId === input.toolCallId),
     );
     const limit = input.limit && input.limit > 0 ? input.limit : filtered.length;
     return filtered.slice(-limit);
   }
 
-  async delete(
-    scope: RuntimeScope,
-    id: string,
-  ): Promise<boolean> {
+  async delete(scope: RuntimeScope, id: string): Promise<boolean> {
     let deleted = false;
     await this.update((artifacts) => {
-      const index = artifacts.findIndex((artifact) =>
-        artifact.id === id &&
-        artifact.tenantId === scope.tenantId &&
-        (!scope.userId || artifact.userId === scope.userId)
+      const index = artifacts.findIndex(
+        (artifact) =>
+          artifact.id === id &&
+          artifact.tenantId === scope.tenantId &&
+          (!scope.userId || artifact.userId === scope.userId),
       );
       if (index >= 0) {
         artifacts.splice(index, 1);

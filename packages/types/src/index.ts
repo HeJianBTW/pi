@@ -2,19 +2,26 @@ export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonObject | JsonValue[];
 export type JsonObject = { [key: string]: JsonValue | undefined };
 
-export type RuntimeTrigger = "user" | "cron" | "webhook" | "memory" | "system";
-export type SenderTrust = "owner" | "member" | "anonymous" | "service";
-export type ToolSource = "builtin" | "mcp" | "skill" | "memory" | "scheduler" | "sandbox" | "runtime";
+export type RuntimeTrigger = 'user' | 'cron' | 'webhook' | 'memory' | 'system';
+export type SenderTrust = 'owner' | 'member' | 'anonymous' | 'service';
+export type ToolSource =
+  | 'builtin'
+  | 'mcp'
+  | 'skill'
+  | 'memory'
+  | 'scheduler'
+  | 'sandbox'
+  | 'runtime';
 
 export type RuntimeModelConfig = {
   provider: string;
   model: string;
   reasoning?: boolean;
-  thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+  thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
   authProfileId?: string;
 };
 
-export type SandboxStatus = "creating" | "running" | "paused" | "destroyed" | "failed";
+export type SandboxStatus = 'creating' | 'running' | 'paused' | 'destroyed' | 'failed';
 
 export type RuntimeSession = {
   sessionId: string;
@@ -43,7 +50,10 @@ export type RuntimeScope = {
 export type ConversationStoreScope = RuntimeScope;
 
 export interface ConversationStore {
-  getRuntimeSession(scope: ConversationStoreScope, sessionId: string): Promise<RuntimeSession | undefined>;
+  getRuntimeSession(
+    scope: ConversationStoreScope,
+    sessionId: string,
+  ): Promise<RuntimeSession | undefined>;
   saveRuntimeSession(session: RuntimeSession): Promise<void>;
 }
 
@@ -63,7 +73,7 @@ export type ConversationMessage = {
   sessionId: string;
   conversationId: string;
   turnId?: string;
-  role: "user" | "assistant" | "tool" | "system";
+  role: 'user' | 'assistant' | 'tool' | 'system';
   text: string;
   model?: RuntimeModelConfig;
   traceId?: string;
@@ -85,10 +95,13 @@ export type ConversationHistoryStore = {
   appendTurn(turn: ConversationTurn): Promise<void>;
   listTurns(scope: RuntimeScope, sessionId?: string): Promise<ConversationTurn[]>;
   listMessages(scope: RuntimeScope, sessionId: string): Promise<ConversationMessage[]>;
-  listSessionSummaries(scope: RuntimeScope, sessions: RuntimeSession[]): Promise<RuntimeSessionSummary[]>;
+  listSessionSummaries(
+    scope: RuntimeScope,
+    sessions: RuntimeSession[],
+  ): Promise<RuntimeSessionSummary[]>;
 };
 
-export type RuntimeSessionStore = Omit<ConversationStore, "getRuntimeSession"> & {
+export type RuntimeSessionStore = Omit<ConversationStore, 'getRuntimeSession'> & {
   getRuntimeSession(scope: RuntimeScope, sessionId: string): Promise<RuntimeSession | undefined>;
   listRuntimeSessions(scope: RuntimeScope): Promise<RuntimeSession[]>;
 };
@@ -110,11 +123,7 @@ export interface MemoryStore {
     tags?: string[];
     metadata?: JsonObject;
   }): Promise<MemoryRecord>;
-  search(input: {
-    sessionId: string;
-    query: string;
-    limit: number;
-  }): Promise<MemoryRecord[]>;
+  search(input: { sessionId: string; query: string; limit: number }): Promise<MemoryRecord[]>;
 }
 
 export type CopilotMemoryStore = MemoryStore;
@@ -124,7 +133,11 @@ export type AppendOnlyEventStore<T> = {
 };
 
 export type ToolEventStore = AppendOnlyEventStore<RuntimeToolEvent> & {
-  list(input?: { sessionId?: string; traceId?: string; limit?: number }): Promise<RuntimeToolEvent[]>;
+  list(input?: {
+    sessionId?: string;
+    traceId?: string;
+    limit?: number;
+  }): Promise<RuntimeToolEvent[]>;
 };
 
 export type RuntimeEventStore = AppendOnlyEventStore<RuntimeLifecycleEvent> & {
@@ -137,10 +150,14 @@ export type RuntimeEventStore = AppendOnlyEventStore<RuntimeLifecycleEvent> & {
 };
 
 export type LlmGenerationEventStore = AppendOnlyEventStore<RuntimeLlmGenerationEvent> & {
-  list(input?: { sessionId?: string; traceId?: string; limit?: number }): Promise<RuntimeLlmGenerationEvent[]>;
+  list(input?: {
+    sessionId?: string;
+    traceId?: string;
+    limit?: number;
+  }): Promise<RuntimeLlmGenerationEvent[]>;
 };
 
-export type RuntimeTimelineEventSource = "runtime" | "tool" | "llm";
+export type RuntimeTimelineEventSource = 'runtime' | 'tool' | 'llm';
 
 export type RuntimeTimelineEvent = {
   eventId: string;
@@ -162,7 +179,7 @@ export type RuntimeTimelineEvent = {
   payload: JsonValue;
 };
 
-export type RuntimeTimelineEventInput = Omit<RuntimeTimelineEvent, "eventSeq">;
+export type RuntimeTimelineEventInput = Omit<RuntimeTimelineEvent, 'eventSeq'>;
 
 export type RuntimeTimelineCursor = {
   createdAt: string;
@@ -170,14 +187,16 @@ export type RuntimeTimelineCursor = {
 };
 
 export type RuntimeTimelineEventStore = AppendOnlyEventStore<RuntimeTimelineEventInput> & {
-  list(input: RuntimeScope & {
-    sessionId?: string;
-    traceId?: string;
-    afterSeq?: number;
-    beforeSeq?: number;
-    cursor?: RuntimeTimelineCursor;
-    limit?: number;
-  }): Promise<RuntimeTimelineEvent[]>;
+  list(
+    input: RuntimeScope & {
+      sessionId?: string;
+      traceId?: string;
+      afterSeq?: number;
+      beforeSeq?: number;
+      cursor?: RuntimeTimelineCursor;
+      limit?: number;
+    },
+  ): Promise<RuntimeTimelineEvent[]>;
 };
 
 export type RuntimeArtifact = {
@@ -199,7 +218,7 @@ export type RuntimeArtifact = {
   createdAt: string;
 };
 
-export type RuntimeArtifactCreateInput = Omit<RuntimeArtifact, "id" | "createdAt"> & {
+export type RuntimeArtifactCreateInput = Omit<RuntimeArtifact, 'id' | 'createdAt'> & {
   id?: string;
   createdAt?: string;
 };
@@ -218,10 +237,10 @@ export interface RuntimeArtifactStore {
   delete(scope: RuntimeScope, id: string): Promise<boolean>;
 }
 
-export type SubagentRunStatus = "pending" | "running" | "completed" | "failed" | "cancelled";
+export type SubagentRunStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
 
 export type SubagentLifecycleEvent = {
-  type: "subagent_spawning" | "subagent_spawned" | "subagent_started" | "subagent_ended";
+  type: 'subagent_spawning' | 'subagent_spawned' | 'subagent_started' | 'subagent_ended';
   at: string;
   reason?: string;
 };
@@ -241,7 +260,7 @@ export type SubagentRun = {
   depth: number;
   model: RuntimeModelConfig;
   toolPolicyProfile: string;
-  context: "isolated";
+  context: 'isolated';
   createdAt: string;
   updatedAt: string;
   startedAt?: string;
@@ -252,29 +271,39 @@ export type SubagentRun = {
 };
 
 export interface SubagentRunStore {
-  create(input: RuntimeScope & {
-    traceId?: string;
-    taskRunId?: string;
-    spawnBatchId?: string;
-    parentSessionId: string;
-    childSessionId: string;
-    parentToolCallId?: string;
-    task: string;
-    agent?: string;
-    label?: string;
-    depth: number;
-    model: RuntimeModelConfig;
-    toolPolicyProfile: string;
-    context: "isolated";
-  }): Promise<SubagentRun>;
+  create(
+    input: RuntimeScope & {
+      traceId?: string;
+      taskRunId?: string;
+      spawnBatchId?: string;
+      parentSessionId: string;
+      childSessionId: string;
+      parentToolCallId?: string;
+      task: string;
+      agent?: string;
+      label?: string;
+      depth: number;
+      model: RuntimeModelConfig;
+      toolPolicyProfile: string;
+      context: 'isolated';
+    },
+  ): Promise<SubagentRun>;
   list(scope: RuntimeScope, parentSessionId?: string): Promise<SubagentRun[]>;
   get(scope: RuntimeScope, runId: string): Promise<SubagentRun | undefined>;
   getDepthForSession(scope: RuntimeScope, sessionId: string): Promise<number>;
   countActiveChildren(scope: RuntimeScope, parentSessionId: string): Promise<number>;
   markRunning(scope: RuntimeScope, runId: string): Promise<SubagentRun | undefined>;
-  markCompleted(scope: RuntimeScope, runId: string, result: string): Promise<SubagentRun | undefined>;
+  markCompleted(
+    scope: RuntimeScope,
+    runId: string,
+    result: string,
+  ): Promise<SubagentRun | undefined>;
   markFailed(scope: RuntimeScope, runId: string, error: string): Promise<SubagentRun | undefined>;
-  markCancelled(scope: RuntimeScope, runId: string, reason?: string): Promise<SubagentRun | undefined>;
+  markCancelled(
+    scope: RuntimeScope,
+    runId: string,
+    reason?: string,
+  ): Promise<SubagentRun | undefined>;
 }
 
 export type ToolCallRequest = {
@@ -292,7 +321,7 @@ export type ToolCallResult = {
   metadata?: JsonObject;
 };
 
-export type RuntimeToolEventStatus = "started" | "completed" | "failed";
+export type RuntimeToolEventStatus = 'started' | 'completed' | 'failed';
 
 export type RuntimeToolEvent = {
   id: string;
@@ -317,7 +346,7 @@ export type RuntimeToolEvent = {
   error?: string;
 };
 
-export type RuntimeLlmGenerationEventStatus = "started" | "completed" | "failed";
+export type RuntimeLlmGenerationEventStatus = 'started' | 'completed' | 'failed';
 
 export type RuntimeLlmUsage = {
   input?: number;
@@ -361,18 +390,18 @@ export type RuntimeLlmGenerationEvent = {
 };
 
 export type RuntimeLifecycleEventType =
-  | "chat_turn_started"
-  | "chat_turn_steered"
-  | "chat_turn_steer_delivered"
-  | "chat_turn_followup_queued"
-  | "chat_turn_followup_delivered"
-  | "chat_turn_completed"
-  | "chat_turn_failed"
-  | "subagent_spawned"
-  | "subagent_started"
-  | "subagent_completed"
-  | "subagent_failed"
-  | "subagent_cancelled";
+  | 'chat_turn_started'
+  | 'chat_turn_steered'
+  | 'chat_turn_steer_delivered'
+  | 'chat_turn_followup_queued'
+  | 'chat_turn_followup_delivered'
+  | 'chat_turn_completed'
+  | 'chat_turn_failed'
+  | 'subagent_spawned'
+  | 'subagent_started'
+  | 'subagent_completed'
+  | 'subagent_failed'
+  | 'subagent_cancelled';
 
 export type RuntimeLifecycleEvent = {
   id: string;
@@ -413,10 +442,10 @@ export type RuntimeRequestContext = {
 };
 
 export type ExecEvent =
-  | { type: "start"; pid?: number }
-  | { type: "stdout"; data: string }
-  | { type: "stderr"; data: string }
-  | { type: "exit"; code: number | null; signal?: string };
+  | { type: 'start'; pid?: number }
+  | { type: 'stdout'; data: string }
+  | { type: 'stderr'; data: string }
+  | { type: 'exit'; code: number | null; signal?: string };
 
 export type SandboxExecRequest = {
   command: string;
@@ -434,7 +463,7 @@ export type SandboxRunCodeRequest = {
 
 export type SandboxFileEntry = {
   path: string;
-  type: "file" | "directory" | "symlink" | "other";
+  type: 'file' | 'directory' | 'symlink' | 'other';
   size?: number;
   modifiedAt?: string;
 };

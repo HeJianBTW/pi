@@ -5,16 +5,16 @@
  * Keep first-turn execution, request parsing, and HTTP response wiring in the
  * surrounding chat route/service layers.
  */
-import { randomUUID } from "node:crypto";
+import { randomUUID } from 'node:crypto';
 import type {
   JsonObject,
   RuntimeLifecycleEvent,
   RuntimeModelConfig,
   RuntimeSession,
-} from "@amaster.ai/pi-types";
+} from '@amaster.ai/pi-types';
 
-export type ChatTurnMode = "reject" | "queue" | "steer" | "followup";
-export type SubagentRoutingMode = "auto" | "off" | "force";
+export type ChatTurnMode = 'reject' | 'queue' | 'steer' | 'followup';
+export type SubagentRoutingMode = 'auto' | 'off' | 'force';
 
 export type TurnLogger = {
   info(message: string, fields?: JsonObject): void;
@@ -40,7 +40,7 @@ export type ActiveTurnInput = {
 
 export type ActiveQueuedChatInput = {
   acceptedEventId: string;
-  turnMode: Extract<ChatTurnMode, "steer" | "followup">;
+  turnMode: Extract<ChatTurnMode, 'steer' | 'followup'>;
   originalInput: string;
   injectedMessage: string;
   acceptedAt: string;
@@ -49,7 +49,7 @@ export type ActiveQueuedChatInput = {
 export type ActiveQueuedChatInputSummary = {
   eventId: string;
   acceptedEventId?: string;
-  turnMode: Extract<ChatTurnMode, "steer" | "followup">;
+  turnMode: Extract<ChatTurnMode, 'steer' | 'followup'>;
   input: string;
   at: string;
 };
@@ -91,29 +91,34 @@ export async function handleActiveChatTurn(input: {
   toTelemetryText: (value: string) => string;
 }): Promise<
   | { handled: false }
-  | { handled: true; statusCode: number; eventName: "turn_failed" | "turn_queued"; payload: JsonObject }
+  | {
+      handled: true;
+      statusCode: number;
+      eventName: 'turn_failed' | 'turn_queued';
+      payload: JsonObject;
+    }
 > {
   const { prepared } = input;
-  if (prepared.turnMode !== "steer" && prepared.turnMode !== "followup") {
+  if (prepared.turnMode !== 'steer' && prepared.turnMode !== 'followup') {
     return { handled: false };
   }
   if (!input.sessionIsActive) {
     const error = `Session ${prepared.sessionId} has no active turn to ${prepared.turnMode}`;
-    input.logger.warn("chat_turn_active_input_without_active_turn", {
+    input.logger.warn('chat_turn_active_input_without_active_turn', {
       ...input.logFields,
       errorMessage: error,
     });
     return {
       handled: true,
       statusCode: 409,
-      eventName: "turn_failed",
+      eventName: 'turn_failed',
       payload: {
         sessionId: prepared.sessionId,
         traceId: prepared.traceId,
         conversationId: prepared.conversationId,
         model: prepared.model as RuntimeModelConfig,
         turnMode: prepared.turnMode,
-        code: "no_active_turn",
+        code: 'no_active_turn',
         error,
         statusCode: 409,
       },
@@ -121,18 +126,18 @@ export async function handleActiveChatTurn(input: {
   }
   const active = input.active;
   if (!active) {
-    input.logger.warn("chat_turn_active_session_unavailable", input.logFields);
+    input.logger.warn('chat_turn_active_session_unavailable', input.logFields);
     return {
       handled: true,
       statusCode: 409,
-      eventName: "turn_failed",
+      eventName: 'turn_failed',
       payload: {
         sessionId: prepared.sessionId,
         traceId: prepared.traceId,
         conversationId: prepared.conversationId,
         model: prepared.model as RuntimeModelConfig,
         turnMode: prepared.turnMode,
-        code: "active_session_unavailable",
+        code: 'active_session_unavailable',
         error: `Session ${prepared.sessionId} is running but its Pi session is unavailable`,
         statusCode: 409,
       },
@@ -167,8 +172,10 @@ export async function handleActiveChatTurn(input: {
   try {
     await enqueueActiveChatMessage(active.pi, prepared.turnMode, injectedMessage);
   } catch (error) {
-    active.pendingQueuedInputs = active.pendingQueuedInputs.filter((entry) => entry !== queuedInput);
-    input.logger.error("chat_turn_active_enqueue_failed", {
+    active.pendingQueuedInputs = active.pendingQueuedInputs.filter(
+      (entry) => entry !== queuedInput,
+    );
+    input.logger.error('chat_turn_active_enqueue_failed', {
       ...input.logFields,
       activeTraceId,
       ...errorFields(error),
@@ -178,7 +185,7 @@ export async function handleActiveChatTurn(input: {
   await input.recordRuntimeEvent({
     id: acceptedEventId,
     traceId: activeTraceId,
-    type: prepared.turnMode === "steer" ? "chat_turn_steered" : "chat_turn_followup_queued",
+    type: prepared.turnMode === 'steer' ? 'chat_turn_steered' : 'chat_turn_followup_queued',
     sessionId: prepared.sessionId,
     conversationId: active.runtime.conversationId,
     createdAt: queuedInput.acceptedAt,
@@ -204,7 +211,7 @@ export async function handleActiveChatTurn(input: {
     queued: true,
     requestedSkills: prepared.requestedSkills,
   };
-  input.logger.info("chat_turn_queued_into_active_turn", {
+  input.logger.info('chat_turn_queued_into_active_turn', {
     ...input.logFields,
     activeTraceId,
     activeConversationId: active.runtime.conversationId,
@@ -214,7 +221,7 @@ export async function handleActiveChatTurn(input: {
   return {
     handled: true,
     statusCode: 202,
-    eventName: "turn_queued",
+    eventName: 'turn_queued',
     payload,
   };
 }
@@ -225,33 +232,33 @@ export function clearPiQueues(pi: QueueablePiSession): void {
 
 export async function enqueueActiveChatMessage(
   pi: QueueablePiSession,
-  turnMode: Extract<ChatTurnMode, "steer" | "followup">,
+  turnMode: Extract<ChatTurnMode, 'steer' | 'followup'>,
   message: string,
 ): Promise<void> {
-  if (turnMode === "steer") {
-    if (typeof pi.steer !== "function") {
-      throw new Error("Active Pi session does not support steer()");
+  if (turnMode === 'steer') {
+    if (typeof pi.steer !== 'function') {
+      throw new Error('Active Pi session does not support steer()');
     }
     await Promise.resolve(pi.steer(message));
     return;
   }
-  if (typeof pi.followUp !== "function") {
-    throw new Error("Active Pi session does not support followUp()");
+  if (typeof pi.followUp !== 'function') {
+    throw new Error('Active Pi session does not support followUp()');
   }
   await Promise.resolve(pi.followUp(message));
 }
 
 export function applyCopilotRuntimeGuidance(message: string): string {
   return [
-    "Runtime guidance:",
-    "- Do not print binary content, base64 blobs, or full generated artifacts in chat or tool output.",
-    "- Do not inspect generated binary files with cat, base64, xxd, hexdump, or similar commands.",
-    "- When you create a file, return the sandbox-relative file path and a short summary.",
-    "- If an upload/export tool reports missing user, workspace, or auth context, stop retrying that tool and return the local sandbox path instead.",
-    "",
-    "User request:",
+    'Runtime guidance:',
+    '- Do not print binary content, base64 blobs, or full generated artifacts in chat or tool output.',
+    '- Do not inspect generated binary files with cat, base64, xxd, hexdump, or similar commands.',
+    '- When you create a file, return the sandbox-relative file path and a short summary.',
+    '- If an upload/export tool reports missing user, workspace, or auth context, stop retrying that tool and return the local sandbox path instead.',
+    '',
+    'User request:',
     message,
-  ].join("\n");
+  ].join('\n');
 }
 
 function errorFields(error: unknown): JsonObject {

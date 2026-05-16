@@ -5,17 +5,17 @@
  * lifecycle event history. It does not execute subagent turns or enforce tool
  * exposure policy.
  */
-import { randomUUID } from "node:crypto";
+import { randomUUID } from 'node:crypto';
 import type {
   RuntimeScope,
   SubagentLifecycleEvent,
   SubagentRun,
   SubagentRunStatus,
   SubagentRunStore,
-} from "@amaster.ai/pi-types";
-import { readJsonFile, writeJsonFile } from "./json-file.js";
+} from '@amaster.ai/pi-types';
+import { readJsonFile, writeJsonFile } from './json-file.js';
 
-type SubagentRunCreateInput = Parameters<SubagentRunStore["create"]>[0];
+type SubagentRunCreateInput = Parameters<SubagentRunStore['create']>[0];
 
 export class JsonFileSubagentRunStore implements SubagentRunStore {
   private loaded = false;
@@ -39,7 +39,7 @@ export class JsonFileSubagentRunStore implements SubagentRunStore {
         task: input.task,
         ...(input.agent ? { agent: input.agent } : {}),
         ...(input.label ? { label: input.label } : {}),
-        status: "pending",
+        status: 'pending',
         depth: input.depth,
         model: input.model,
         toolPolicyProfile: input.toolPolicyProfile,
@@ -47,8 +47,8 @@ export class JsonFileSubagentRunStore implements SubagentRunStore {
         createdAt: now,
         updatedAt: now,
         events: [
-          { type: "subagent_spawning", at: now },
-          { type: "subagent_spawned", at: now },
+          { type: 'subagent_spawning', at: now },
+          { type: 'subagent_spawned', at: now },
         ],
       };
       this.runs.set(run.runId, run);
@@ -75,65 +75,73 @@ export class JsonFileSubagentRunStore implements SubagentRunStore {
 
   async countActiveChildren(_scope: RuntimeScope, parentSessionId: string): Promise<number> {
     await this.load();
-    return [...this.runs.values()].filter((run) =>
-      run.parentSessionId === parentSessionId && isActiveSubagentStatus(run.status)
+    return [...this.runs.values()].filter(
+      (run) => run.parentSessionId === parentSessionId && isActiveSubagentStatus(run.status),
     ).length;
   }
 
   markRunning(_scope: RuntimeScope, runId: string): Promise<SubagentRun | undefined> {
     return this.patch(runId, (run, now) => ({
       ...run,
-      status: "running",
+      status: 'running',
       startedAt: run.startedAt ?? now,
       updatedAt: now,
-      events: [...run.events, { type: "subagent_started", at: now }],
+      events: [...run.events, { type: 'subagent_started', at: now }],
     }));
   }
 
-  markCompleted(_scope: RuntimeScope, runId: string, result: string): Promise<SubagentRun | undefined> {
+  markCompleted(
+    _scope: RuntimeScope,
+    runId: string,
+    result: string,
+  ): Promise<SubagentRun | undefined> {
     return this.patch(runId, (run, now) => {
-      if (run.status === "cancelled") {
+      if (run.status === 'cancelled') {
         return run;
       }
       return {
         ...omitSubagentError(run),
-        status: "completed",
+        status: 'completed',
         result,
         endedAt: now,
         updatedAt: now,
-        events: [...run.events, { type: "subagent_ended", at: now, reason: "completed" }],
+        events: [...run.events, { type: 'subagent_ended', at: now, reason: 'completed' }],
       };
     });
   }
 
   markFailed(_scope: RuntimeScope, runId: string, error: string): Promise<SubagentRun | undefined> {
     return this.patch(runId, (run, now) => {
-      if (run.status === "cancelled") {
+      if (run.status === 'cancelled') {
         return run;
       }
       return {
         ...run,
-        status: "failed",
+        status: 'failed',
         error,
         endedAt: now,
         updatedAt: now,
-        events: [...run.events, { type: "subagent_ended", at: now, reason: "failed" }],
+        events: [...run.events, { type: 'subagent_ended', at: now, reason: 'failed' }],
       };
     });
   }
 
-  markCancelled(_scope: RuntimeScope, runId: string, reason = "cancelled"): Promise<SubagentRun | undefined> {
+  markCancelled(
+    _scope: RuntimeScope,
+    runId: string,
+    reason = 'cancelled',
+  ): Promise<SubagentRun | undefined> {
     return this.patch(runId, (run, now) => {
       if (isTerminalSubagentStatus(run.status)) {
         return run;
       }
       return {
         ...run,
-        status: "cancelled",
+        status: 'cancelled',
         error: reason,
         endedAt: now,
         updatedAt: now,
-        events: [...run.events, { type: "subagent_ended", at: now, reason: "cancelled" }],
+        events: [...run.events, { type: 'subagent_ended', at: now, reason: 'cancelled' }],
       };
     });
   }
@@ -182,14 +190,14 @@ export class JsonFileSubagentRunStore implements SubagentRunStore {
 }
 
 export function isActiveSubagentStatus(status: SubagentRunStatus): boolean {
-  return status === "pending" || status === "running";
+  return status === 'pending' || status === 'running';
 }
 
 export function isTerminalSubagentStatus(status: SubagentRunStatus): boolean {
-  return status === "completed" || status === "failed" || status === "cancelled";
+  return status === 'completed' || status === 'failed' || status === 'cancelled';
 }
 
-function omitSubagentError(run: SubagentRun): Omit<SubagentRun, "error"> {
+function omitSubagentError(run: SubagentRun): Omit<SubagentRun, 'error'> {
   const { error: _error, ...rest } = run;
   return rest;
 }

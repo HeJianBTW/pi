@@ -1,9 +1,9 @@
-import { createHash, randomUUID } from "node:crypto";
-import { copyFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import type { StoredAttachmentRecord } from "./types.js";
-import { mimeTypeFromFileName } from "./classify.js";
+import { createHash, randomUUID } from 'node:crypto';
+import { copyFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { mimeTypeFromFileName } from './classify.js';
+import type { StoredAttachmentRecord } from './types.js';
 
 export class LocalAttachmentStore {
   constructor(private readonly rootDir: string) {}
@@ -64,7 +64,7 @@ export class LocalAttachmentStore {
     const candidates = await findRecordCandidates(this.rootDir, safeId);
     for (const candidate of candidates) {
       try {
-        const parsed = JSON.parse(await readFile(candidate, "utf8")) as StoredAttachmentRecord;
+        const parsed = JSON.parse(await readFile(candidate, 'utf8')) as StoredAttachmentRecord;
         if (parsed.attachmentId === attachmentId) {
           return parsed;
         }
@@ -76,8 +76,8 @@ export class LocalAttachmentStore {
   }
 
   private attachmentDir(sessionId: string | undefined, attachmentId: string): string {
-    const sessionPart = sanitizeId(sessionId ?? "global");
-    const hash = createHash("sha256").update(attachmentId).digest("hex").slice(0, 8);
+    const sessionPart = sanitizeId(sessionId ?? 'global');
+    const hash = createHash('sha256').update(attachmentId).digest('hex').slice(0, 8);
     return path.join(this.rootDir, sessionPart, `${hash}-${sanitizeId(attachmentId)}`);
   }
 }
@@ -100,11 +100,15 @@ function createRecord(input: {
 }
 
 async function writeRecord(dir: string, record: StoredAttachmentRecord): Promise<void> {
-  await writeFile(path.join(dir, "attachment.json"), `${JSON.stringify(record, null, 2)}\n`, "utf8");
+  await writeFile(
+    path.join(dir, 'attachment.json'),
+    `${JSON.stringify(record, null, 2)}\n`,
+    'utf8',
+  );
 }
 
 async function findRecordCandidates(rootDir: string, attachmentId: string): Promise<string[]> {
-  const { readdir } = await import("node:fs/promises");
+  const { readdir } = await import('node:fs/promises');
   const result: string[] = [];
   try {
     for (const sessionEntry of await readdir(rootDir, { withFileTypes: true })) {
@@ -112,7 +116,7 @@ async function findRecordCandidates(rootDir: string, attachmentId: string): Prom
       const sessionDir = path.join(rootDir, sessionEntry.name);
       for (const attachmentEntry of await readdir(sessionDir, { withFileTypes: true })) {
         if (attachmentEntry.isDirectory() && attachmentEntry.name.endsWith(`-${attachmentId}`)) {
-          result.push(path.join(sessionDir, attachmentEntry.name, "attachment.json"));
+          result.push(path.join(sessionDir, attachmentEntry.name, 'attachment.json'));
         }
       }
     }
@@ -123,8 +127,11 @@ async function findRecordCandidates(rootDir: string, attachmentId: string): Prom
 }
 
 function sanitizeFileName(value: string): string {
-  const base = path.basename(value).replace(/[^\w .@()+=[\]-]/g, "_").trim();
-  return base || "attachment";
+  const base = path
+    .basename(value)
+    .replace(/[^\w .@()+=[\]-]/g, '_')
+    .trim();
+  return base || 'attachment';
 }
 
 function optionalMimeType(mimeType: string | undefined): { mimeType?: string } {
@@ -132,9 +139,9 @@ function optionalMimeType(mimeType: string | undefined): { mimeType?: string } {
 }
 
 function sanitizeId(value: string): string {
-  return value.replace(/[^a-zA-Z0-9_.-]/g, "_").slice(0, 160) || "attachment";
+  return value.replace(/[^a-zA-Z0-9_.-]/g, '_').slice(0, 160) || 'attachment';
 }
 
 function fileURLToPathIfNeeded(value: string): string {
-  return value.startsWith("file://") ? fileURLToPath(value) : value;
+  return value.startsWith('file://') ? fileURLToPath(value) : value;
 }

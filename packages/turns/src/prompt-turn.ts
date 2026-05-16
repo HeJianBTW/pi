@@ -5,20 +5,20 @@
  * recording around the prompt call, and expected turn error types. Keep HTTP
  * routing and high-level response payload shaping in chat-turn-service.
  */
-import { randomUUID } from "node:crypto";
-import type { AssistantMessage, ImageContent } from "@earendil-works/pi-ai";
+import { randomUUID } from 'node:crypto';
 import type {
   JsonObject,
   RuntimeLifecycleEvent,
   RuntimeLlmGenerationEvent,
   RuntimeModelConfig,
   RuntimeSession,
-} from "@amaster.ai/pi-types";
+} from '@amaster.ai/pi-types';
+import type { AssistantMessage, ImageContent } from '@earendil-works/pi-ai';
 import {
-  applyCopilotRuntimeGuidance,
   type ActiveQueuedChatInput,
   type ActiveQueuedChatInputSummary,
-} from "./active-turn.js";
+  applyCopilotRuntimeGuidance,
+} from './active-turn.js';
 
 export type RuntimeLifecycleEventRecorder = (event: RuntimeLifecycleEvent) => Promise<void>;
 export type RuntimeLlmGenerationEventRecorder = (event: RuntimeLlmGenerationEvent) => Promise<void>;
@@ -33,7 +33,10 @@ export type PromptChatSession = {
   pi: {
     messages: readonly unknown[];
     agent?: { state?: { systemPrompt?: unknown; tools?: unknown[] } };
-    prompt: (message: string, options?: { expandPromptTemplates: boolean; source: "rpc"; images?: ImageContent[] }) => Promise<unknown>;
+    prompt: (
+      message: string,
+      options?: { expandPromptTemplates: boolean; source: 'rpc'; images?: ImageContent[] },
+    ) => Promise<unknown>;
     abort?: () => Promise<unknown>;
     subscribe?: (listener: (event: RuntimeMessageEvent) => void) => () => void;
   };
@@ -48,21 +51,21 @@ type RuntimeMessageEvent = {
 export class ChatTurnTimeoutError extends Error {
   constructor(timeoutMs: number) {
     super(`Chat turn timed out after ${timeoutMs}ms`);
-    this.name = "ChatTurnTimeoutError";
+    this.name = 'ChatTurnTimeoutError';
   }
 }
 
 export class ChatTurnToolLimitError extends Error {
   constructor(limit: number) {
     super(`Chat turn stopped after ${limit} tool results to prevent a runaway tool loop`);
-    this.name = "ChatTurnToolLimitError";
+    this.name = 'ChatTurnToolLimitError';
   }
 }
 
 export class ChatTurnCancelledError extends Error {
   constructor(reason: string) {
     super(reason);
-    this.name = "ChatTurnCancelledError";
+    this.name = 'ChatTurnCancelledError';
   }
 }
 
@@ -123,7 +126,7 @@ export async function promptChatTurn(
     await Promise.race([
       active.pi.prompt(applyCopilotRuntimeGuidance(message), {
         expandPromptTemplates: true,
-        source: "rpc",
+        source: 'rpc',
         ...(images.length > 0 ? { images } : {}),
       }),
       timeout,
@@ -163,16 +166,20 @@ function observeLlmGenerations(
     taskRunId?: string;
   } = {},
 ): { unsubscribe: () => void; fail: (reason: string) => void; settle: () => Promise<void> } {
-  if (typeof active.pi.subscribe !== "function") {
+  if (typeof active.pi.subscribe !== 'function') {
     return { unsubscribe: () => undefined, fail: () => undefined, settle: async () => undefined };
   }
   let llmGenerationIndex = 0;
   const pending: Array<Promise<void>> = [];
-  let currentGeneration: { startedAt: number; llmGenerationId: string; input: JsonObject | string } | undefined;
+  let currentGeneration:
+    | { startedAt: number; llmGenerationId: string; input: JsonObject | string }
+    | undefined;
   const enqueue = (event: RuntimeLlmGenerationEvent): void => {
     pending.push(
       recordLlmGenerationEvent(event).catch((error) => {
-        console.warn(`Model-call event recording failed: ${error instanceof Error ? error.message : String(error)}`);
+        console.warn(
+          `Model-call event recording failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
       }),
     );
   };
@@ -182,14 +189,16 @@ function observeLlmGenerations(
     }
     pending.push(
       recordRuntimeEvent(event).catch((error) => {
-        console.warn(`Runtime event recording failed: ${error instanceof Error ? error.message : String(error)}`);
+        console.warn(
+          `Runtime event recording failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
       }),
     );
   };
   const unsubscribe = active.pi.subscribe((event) => {
-    if (event.type === "message_start") {
+    if (event.type === 'message_start') {
       const message = event.message as { role?: string; content?: unknown[] | string } | undefined;
-      if (message?.role === "user") {
+      if (message?.role === 'user') {
         const delivered = takeDeliveredQueuedChatInput(active, extractMessageText(message));
         if (delivered) {
           const deliveredEventId = randomUUID();
@@ -199,7 +208,10 @@ function observeLlmGenerations(
             ...(active.traceId ? { traceId: active.traceId } : {}),
             sessionId: active.runtime.sessionId,
             conversationId: active.runtime.conversationId,
-            type: delivered.turnMode === "steer" ? "chat_turn_steer_delivered" : "chat_turn_followup_delivered",
+            type:
+              delivered.turnMode === 'steer'
+                ? 'chat_turn_steer_delivered'
+                : 'chat_turn_followup_delivered',
             createdAt: new Date().toISOString(),
             model: active.runtime.model,
             toolPolicyProfile: active.runtime.toolPolicyProfile,
@@ -214,28 +226,28 @@ function observeLlmGenerations(
         }
       }
     }
-    if (event.type === "message_update") {
+    if (event.type === 'message_update') {
       const assistantEvent = event.assistantMessageEvent;
-      if (!assistantEvent || typeof assistantEvent !== "object") {
+      if (!assistantEvent || typeof assistantEvent !== 'object') {
         return;
       }
       const typedEvent = assistantEvent as { type?: unknown; delta?: unknown; content?: unknown };
-      if (typedEvent.type === "text_delta" && typeof typedEvent.delta === "string") {
-        stream?.("assistant_text_delta", {
+      if (typedEvent.type === 'text_delta' && typeof typedEvent.delta === 'string') {
+        stream?.('assistant_text_delta', {
           traceId: active.traceId,
           sessionId: active.runtime.sessionId,
           conversationId: active.runtime.conversationId,
           delta: typedEvent.delta,
         });
-      } else if (typedEvent.type === "thinking_delta" && typeof typedEvent.delta === "string") {
-        stream?.("assistant_thinking_delta", {
+      } else if (typedEvent.type === 'thinking_delta' && typeof typedEvent.delta === 'string') {
+        stream?.('assistant_thinking_delta', {
           traceId: active.traceId,
           sessionId: active.runtime.sessionId,
           conversationId: active.runtime.conversationId,
           delta: typedEvent.delta,
         });
-      } else if (typedEvent.type === "text_end" && typeof typedEvent.content === "string") {
-        stream?.("assistant_text_end", {
+      } else if (typedEvent.type === 'text_end' && typeof typedEvent.content === 'string') {
+        stream?.('assistant_text_end', {
           traceId: active.traceId,
           sessionId: active.runtime.sessionId,
           conversationId: active.runtime.conversationId,
@@ -244,14 +256,14 @@ function observeLlmGenerations(
       }
       return;
     }
-    if (event.type !== "message_start" && event.type !== "message_end") {
+    if (event.type !== 'message_start' && event.type !== 'message_end') {
       return;
     }
     const message = event.message as AssistantMessage | undefined;
-    if (message?.role !== "assistant") {
+    if (message?.role !== 'assistant') {
       return;
     }
-    if (event.type === "message_start") {
+    if (event.type === 'message_start') {
       const startedAt = Date.now();
       const index = llmGenerationIndex;
       llmGenerationIndex += 1;
@@ -268,7 +280,7 @@ function observeLlmGenerations(
         ...(active.runtime.workspaceId ? { workspaceId: active.runtime.workspaceId } : {}),
         ...lineage,
         llmGenerationId,
-        status: "started",
+        status: 'started',
         createdAt: new Date(startedAt).toISOString(),
         model: active.runtime.model,
         input: generationInput,
@@ -276,7 +288,8 @@ function observeLlmGenerations(
       return;
     }
 
-    const generation = currentGeneration ?? createFallbackLlmGeneration(active, input, llmGenerationIndex++);
+    const generation =
+      currentGeneration ?? createFallbackLlmGeneration(active, input, llmGenerationIndex++);
     currentGeneration = undefined;
     const completedAt = Date.now();
     const usage = normalizeAssistantUsage(message);
@@ -290,7 +303,7 @@ function observeLlmGenerations(
       ...(active.runtime.workspaceId ? { workspaceId: active.runtime.workspaceId } : {}),
       ...lineage,
       llmGenerationId: generation.llmGenerationId,
-      status: message.errorMessage ? "failed" : "completed",
+      status: message.errorMessage ? 'failed' : 'completed',
       createdAt: new Date(completedAt).toISOString(),
       durationMs: completedAt - generation.startedAt,
       model: active.runtime.model,
@@ -321,7 +334,7 @@ function observeLlmGenerations(
         ...(active.runtime.workspaceId ? { workspaceId: active.runtime.workspaceId } : {}),
         ...lineage,
         llmGenerationId: generation.llmGenerationId,
-        status: "failed",
+        status: 'failed',
         createdAt: new Date(failedAt).toISOString(),
         durationMs: failedAt - generation.startedAt,
         model: active.runtime.model,
@@ -355,7 +368,10 @@ function buildLlmGenerationInput(
   llmGenerationIndex: number,
 ): JsonObject | string {
   const messages = llmInputMessagesSnapshot(active.pi.messages);
-  const systemPrompt = typeof active.pi.agent?.state?.systemPrompt === "string" ? active.pi.agent.state.systemPrompt : undefined;
+  const systemPrompt =
+    typeof active.pi.agent?.state?.systemPrompt === 'string'
+      ? active.pi.agent.state.systemPrompt
+      : undefined;
   if (messages.length === 0 && !systemPrompt) {
     return llmGenerationIndex === 0
       ? fallbackInput
@@ -375,41 +391,47 @@ function buildLlmGenerationInput(
       : {}),
     ...(systemPrompt ? { systemPrompt: toTelemetryText(systemPrompt, 40_000) } : {}),
     messages,
-    ...(Array.isArray(active.pi.agent?.state?.tools) ? { toolCount: active.pi.agent.state.tools.length } : {}),
+    ...(Array.isArray(active.pi.agent?.state?.tools)
+      ? { toolCount: active.pi.agent.state.tools.length }
+      : {}),
   };
 }
 
 function llmInputMessagesSnapshot(messages: readonly unknown[]): JsonObject[] {
   const candidates = [...messages];
   const last = candidates[candidates.length - 1] as { role?: string } | undefined;
-  if (last?.role === "assistant") {
+  if (last?.role === 'assistant') {
     candidates.pop();
   }
-  return candidates.map(formatLlmInputMessage).filter((message): message is JsonObject => Boolean(message));
+  return candidates
+    .map(formatLlmInputMessage)
+    .filter((message): message is JsonObject => Boolean(message));
 }
 
 function formatLlmInputMessage(message: unknown): JsonObject | undefined {
   if (!isRecord(message)) {
     return undefined;
   }
-  const role = typeof message.role === "string" ? message.role : undefined;
+  const role = typeof message.role === 'string' ? message.role : undefined;
   if (!role) {
     return undefined;
   }
   return {
     role,
-    ...(typeof message.customType === "string" ? { customType: message.customType } : {}),
+    ...(typeof message.customType === 'string' ? { customType: message.customType } : {}),
     ...(message.content !== undefined ? { content: summarizeLlmInputValue(message.content) } : {}),
-    ...(typeof message.display === "string" ? { display: toTelemetryText(message.display, 4_000) } : {}),
+    ...(typeof message.display === 'string'
+      ? { display: toTelemetryText(message.display, 4_000) }
+      : {}),
     ...(message.details !== undefined ? { details: summarizeLlmInputValue(message.details) } : {}),
   };
 }
 
 function summarizeLlmInputValue(value: unknown): JsonObject[string] {
-  if (typeof value === "string") {
+  if (typeof value === 'string') {
     return toTelemetryText(value, 8_000);
   }
-  if (value === null || typeof value === "number" || typeof value === "boolean") {
+  if (value === null || typeof value === 'number' || typeof value === 'boolean') {
     return value;
   }
   if (Array.isArray(value)) {
@@ -418,7 +440,7 @@ function summarizeLlmInputValue(value: unknown): JsonObject[string] {
   if (isRecord(value)) {
     return Object.fromEntries(
       Object.entries(value).map(([key, raw]) => {
-        if (typeof raw === "string" && /^(data|base64|bytes)$/i.test(key)) {
+        if (typeof raw === 'string' && /^(data|base64|bytes)$/i.test(key)) {
           return [key, `[omitted ${raw.length} chars]`];
         }
         return [key, summarizeLlmInputValue(raw)];
@@ -428,7 +450,9 @@ function summarizeLlmInputValue(value: unknown): JsonObject[string] {
   return String(value);
 }
 
-function normalizeAssistantUsage(message: AssistantMessage): RuntimeLlmGenerationEvent["usage"] | undefined {
+function normalizeAssistantUsage(
+  message: AssistantMessage,
+): RuntimeLlmGenerationEvent['usage'] | undefined {
   const usage = message.usage;
   if (!usage) {
     return undefined;
@@ -450,11 +474,9 @@ function normalizeAssistantUsage(message: AssistantMessage): RuntimeLlmGeneratio
 }
 
 function extractAssistantOutput(message: AssistantMessage): string | JsonObject {
-  const text = message.content
-    .map((entry) => entry.type === "text" ? entry.text : "")
-    .join("");
+  const text = message.content.map((entry) => (entry.type === 'text' ? entry.text : '')).join('');
   const toolCalls = message.content
-    .filter((entry) => entry.type === "toolCall")
+    .filter((entry) => entry.type === 'toolCall')
     .map((entry) => ({
       id: entry.id,
       name: entry.name,
@@ -470,14 +492,14 @@ function extractAssistantOutput(message: AssistantMessage): string | JsonObject 
 }
 
 function summarizeGenerationOutput(value: string | JsonObject): string | JsonObject {
-  return typeof value === "string" ? toTelemetryText(value) : value;
+  return typeof value === 'string' ? toTelemetryText(value) : value;
 }
 
 function summarizeGenerationValue(value: unknown): JsonObject[string] {
-  if (typeof value === "string") {
+  if (typeof value === 'string') {
     return toTelemetryText(value);
   }
-  if (value === null || typeof value === "number" || typeof value === "boolean") {
+  if (value === null || typeof value === 'number' || typeof value === 'boolean') {
     return value;
   }
   if (Array.isArray(value)) {
@@ -525,7 +547,7 @@ function takeDeliveredQueuedChatInput(
 export function countToolResultMessages(messages: readonly unknown[]): number {
   return messages.filter((message) => {
     const candidate = message as { role?: string } | undefined;
-    return candidate?.role === "toolResult";
+    return candidate?.role === 'toolResult';
   }).length;
 }
 
@@ -533,29 +555,31 @@ function currentToolResultLimit(active: PromptChatSession, baseLimit: number): n
   return baseLimit + Math.max(0, active.extraToolResultBudget ?? 0);
 }
 
-function abortPiSession(pi: PromptChatSession["pi"]): void {
+function abortPiSession(pi: PromptChatSession['pi']): void {
   void pi.abort?.().catch(() => undefined);
 }
 
 function extractMessageText(message: { content?: unknown[] | string }): string {
-  if (typeof message.content === "string") {
+  if (typeof message.content === 'string') {
     return message.content;
   }
   if (!Array.isArray(message.content)) {
-    return "";
+    return '';
   }
   return message.content
     .map((entry) => {
       const content = entry as { type?: string; text?: string };
-      return content.type === "text" ? content.text ?? "" : "";
+      return content.type === 'text' ? (content.text ?? '') : '';
     })
-    .join("");
+    .join('');
 }
 
 function toTelemetryText(value: string, maxLength = 20_000): string {
-  return value.length > maxLength ? `${value.slice(0, maxLength)}... [truncated ${value.length - maxLength} chars]` : value;
+  return value.length > maxLength
+    ? `${value.slice(0, maxLength)}... [truncated ${value.length - maxLength} chars]`
+    : value;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

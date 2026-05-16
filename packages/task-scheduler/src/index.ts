@@ -1,18 +1,18 @@
-import { randomUUID } from "node:crypto";
-import { Cron } from "croner";
+import { randomUUID } from 'node:crypto';
+import { Cron } from 'croner';
 
-export type ScheduledTaskType = "cron" | "once" | "interval";
-export type ScheduledTaskStatus = "success" | "error" | "running";
+export type ScheduledTaskType = 'cron' | 'once' | 'interval';
+export type ScheduledTaskStatus = 'success' | 'error' | 'running';
 export type ScheduledTaskModelConfig = {
   provider: string;
   model: string;
-  thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+  thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
   authProfileId?: string;
   reasoning?: boolean;
 };
 export type ScheduledTaskRunHistoryEntry = {
   id: string;
-  status: ScheduledTaskStatus | "paused" | "resumed";
+  status: ScheduledTaskStatus | 'paused' | 'resumed';
   createdAt: string;
   sessionId?: string;
   message?: string;
@@ -52,11 +52,36 @@ export type ScheduledTask = {
 
 export type ScheduledTaskCreateInput = Omit<
   ScheduledTask,
-  "id" | "createdAt" | "updatedAt" | "nextRunAt" | "runCount" | "lastStatus" | "lastRunAt" | "lastError" | "runHistory"
+  | 'id'
+  | 'createdAt'
+  | 'updatedAt'
+  | 'nextRunAt'
+  | 'runCount'
+  | 'lastStatus'
+  | 'lastRunAt'
+  | 'lastError'
+  | 'runHistory'
 >;
 
 export type ScheduledTaskUpdate = Partial<
-  Omit<ScheduledTask, "id" | "tenantId" | "userId" | "workspaceId" | "createdAt" | "updatedAt" | "lastRunAt" | "lastError" | "nextRunAt" | "runCount" | "lastStatus" | "runHistory" | "name" | "description" | "workspaceDir">
+  Omit<
+    ScheduledTask,
+    | 'id'
+    | 'tenantId'
+    | 'userId'
+    | 'workspaceId'
+    | 'createdAt'
+    | 'updatedAt'
+    | 'lastRunAt'
+    | 'lastError'
+    | 'nextRunAt'
+    | 'runCount'
+    | 'lastStatus'
+    | 'runHistory'
+    | 'name'
+    | 'description'
+    | 'workspaceDir'
+  >
 > & {
   name?: string | undefined;
   description?: string | undefined;
@@ -88,7 +113,11 @@ export interface TaskScheduler {
   status(): Promise<TaskSchedulerStatus>;
   isActive(): boolean;
   create(input: ScheduledTaskCreateInput): Promise<ScheduledTask>;
-  update(taskId: string, input: ScheduledTaskUpdate, scope?: TaskSchedulerScope): Promise<ScheduledTask | undefined>;
+  update(
+    taskId: string,
+    input: ScheduledTaskUpdate,
+    scope?: TaskSchedulerScope,
+  ): Promise<ScheduledTask | undefined>;
   delete(taskId: string, scope?: TaskSchedulerScope): Promise<boolean>;
   runNow(taskId: string, scope?: TaskSchedulerScope): Promise<ScheduledTask | undefined>;
   start(): Promise<void>;
@@ -99,7 +128,11 @@ export interface ScheduledTaskStore {
   list(scope?: TaskSchedulerScope): Promise<ScheduledTask[]>;
   get(taskId: string, scope?: TaskSchedulerScope): Promise<ScheduledTask | undefined>;
   create(task: ScheduledTask): Promise<ScheduledTask>;
-  update(taskId: string, task: ScheduledTask, scope?: TaskSchedulerScope): Promise<ScheduledTask | undefined>;
+  update(
+    taskId: string,
+    task: ScheduledTask,
+    scope?: TaskSchedulerScope,
+  ): Promise<ScheduledTask | undefined>;
   delete(taskId: string, scope?: TaskSchedulerScope): Promise<boolean>;
 }
 
@@ -112,7 +145,10 @@ export interface SchedulerLock {
   extend?(): boolean | Promise<boolean>;
 }
 
-export type ScheduledTaskRunner = (task: ScheduledTask, run: ScheduledTaskRunContext) => Promise<void>;
+export type ScheduledTaskRunner = (
+  task: ScheduledTask,
+  run: ScheduledTaskRunContext,
+) => Promise<void>;
 
 export type TaskSchedulerRunEvent = {
   task: ScheduledTask;
@@ -165,7 +201,7 @@ export class PersistentTaskScheduler implements TaskScheduler {
   async status(): Promise<TaskSchedulerStatus> {
     const tasks = await this.options.store.list();
     const holderPid = await this.options.lock.holderPid();
-    const lock: TaskSchedulerStatus["lock"] = {
+    const lock: TaskSchedulerStatus['lock'] = {
       path: this.options.lock.path,
       acquired: this.options.lock.isAcquired(),
     };
@@ -195,7 +231,8 @@ export class PersistentTaskScheduler implements TaskScheduler {
       createdAt: now,
       updatedAt: now,
       runCount: 0,
-      runHistory: input.enabled === false ? [createTaskHistoryEntry("paused", "Created paused")] : [],
+      runHistory:
+        input.enabled === false ? [createTaskHistoryEntry('paused', 'Created paused')] : [],
     });
     const created = await this.options.store.create(task);
     if (this.active) {
@@ -213,23 +250,28 @@ export class PersistentTaskScheduler implements TaskScheduler {
     if (!existing) {
       return undefined;
     }
-    const { name: inputName, description: inputDescription, workspaceDir: inputWorkspaceDir, ...inputRest } = input;
+    const {
+      name: inputName,
+      description: inputDescription,
+      workspaceDir: inputWorkspaceDir,
+      ...inputRest
+    } = input;
     const nextTask: ScheduledTask = {
       ...existing,
       ...inputRest,
       updatedAt: new Date().toISOString(),
     };
-    if (Object.prototype.hasOwnProperty.call(input, "description") && input.description === undefined) {
+    if (Object.hasOwn(input, 'description') && input.description === undefined) {
       delete nextTask.description;
     } else if (inputDescription !== undefined) {
       nextTask.description = inputDescription;
     }
-    if (Object.prototype.hasOwnProperty.call(input, "name") && input.name === undefined) {
+    if (Object.hasOwn(input, 'name') && input.name === undefined) {
       delete nextTask.name;
     } else if (inputName !== undefined) {
       nextTask.name = inputName;
     }
-    if (Object.prototype.hasOwnProperty.call(input, "workspaceDir") && input.workspaceDir === undefined) {
+    if (Object.hasOwn(input, 'workspaceDir') && input.workspaceDir === undefined) {
       delete nextTask.workspaceDir;
     } else if (inputWorkspaceDir !== undefined) {
       nextTask.workspaceDir = inputWorkspaceDir;
@@ -237,11 +279,13 @@ export class PersistentTaskScheduler implements TaskScheduler {
     if (input.enabled !== undefined && input.enabled !== existing.enabled) {
       nextTask.runHistory = appendTaskHistory(
         existing.runHistory,
-        input.enabled ? createTaskHistoryEntry("resumed", "Task resumed") : createTaskHistoryEntry("paused", "Task paused"),
+        input.enabled
+          ? createTaskHistoryEntry('resumed', 'Task resumed')
+          : createTaskHistoryEntry('paused', 'Task paused'),
       );
     }
     const task = withNextRun(nextTask);
-    if (input.enabled !== false && existing.lastStatus === "error" && existing.lastError) {
+    if (input.enabled !== false && existing.lastStatus === 'error' && existing.lastError) {
       delete task.lastError;
     }
     const updated = await this.options.store.update(taskId, task, scope);
@@ -304,7 +348,7 @@ export class PersistentTaskScheduler implements TaskScheduler {
     if (!this.active || !task.enabled) {
       return;
     }
-    if (task.type === "cron") {
+    if (task.type === 'cron') {
       try {
         const cron = new Cron(scheduleExpressionForCroner(task.schedule), { unref: true }, () => {
           void this.execute(task.id);
@@ -312,11 +356,14 @@ export class PersistentTaskScheduler implements TaskScheduler {
         this.crons.set(task.id, cron);
         void this.refreshNextRun(task.id, cron.nextRun()?.toISOString());
       } catch (error) {
-        void this.markScheduleError(task.id, error instanceof Error ? error.message : String(error));
+        void this.markScheduleError(
+          task.id,
+          error instanceof Error ? error.message : String(error),
+        );
       }
       return;
     }
-    if (task.type === "once") {
+    if (task.type === 'once') {
       const target = new Date(task.schedule);
       const delayMs = target.getTime() - Date.now();
       if (!Number.isFinite(delayMs) || delayMs <= 0) {
@@ -336,7 +383,10 @@ export class PersistentTaskScheduler implements TaskScheduler {
     }, task.intervalSeconds * 1000);
     timer.unref();
     this.timers.set(task.id, timer);
-    void this.refreshNextRun(task.id, new Date(Date.now() + task.intervalSeconds * 1000).toISOString());
+    void this.refreshNextRun(
+      task.id,
+      new Date(Date.now() + task.intervalSeconds * 1000).toISOString(),
+    );
   }
 
   private async execute(taskId: string): Promise<void> {
@@ -349,13 +399,13 @@ export class PersistentTaskScheduler implements TaskScheduler {
     }
     this.runningTaskIds.add(taskId);
     const startedAt = new Date().toISOString();
-    const runningEntry = createTaskHistoryEntry("running", "Run started", {
+    const runningEntry = createTaskHistoryEntry('running', 'Run started', {
       createdAt: startedAt,
       sessionId: createScheduledTaskRunSessionId(),
     });
     const runningTask: ScheduledTask = {
       ...task,
-      lastStatus: "running",
+      lastStatus: 'running',
       runHistory: appendTaskHistory(task.runHistory, runningEntry),
       updatedAt: startedAt,
     };
@@ -365,45 +415,56 @@ export class PersistentTaskScheduler implements TaskScheduler {
       sessionId: runningEntry.sessionId ?? task.sessionId,
       startedAt,
     };
-    await this.emitHook(() => this.options.hooks?.onTaskStarted?.({ task, run, timestamp: startedAt }));
+    await this.emitHook(() =>
+      this.options.hooks?.onTaskStarted?.({ task, run, timestamp: startedAt }),
+    );
     try {
       await this.options.runner(task, run);
-      const latest = await this.options.store.get(taskId) ?? runningTask;
+      const latest = (await this.options.store.get(taskId)) ?? runningTask;
       const completedAt = new Date().toISOString();
       const updated = withNextRun({
         ...latest,
-        enabled: latest.type === "once" ? false : latest.enabled,
+        enabled: latest.type === 'once' ? false : latest.enabled,
         lastRunAt: completedAt,
-        lastStatus: "success",
+        lastStatus: 'success',
         runHistory: updateTaskHistoryEntry(latest.runHistory, runningEntry.id, {
-          status: "success",
-          message: "Run completed",
+          status: 'success',
+          message: 'Run completed',
         }),
         runCount: latest.runCount + 1,
         updatedAt: completedAt,
       });
       delete updated.lastError;
-      const stored = await this.options.store.update(taskId, updated) ?? updated;
-      if (updated.type === "once") {
+      const stored = (await this.options.store.update(taskId, updated)) ?? updated;
+      if (updated.type === 'once') {
         this.unschedule(taskId);
       }
-      await this.emitHook(() => this.options.hooks?.onTaskCompleted?.({ task: stored, run, timestamp: completedAt }));
+      await this.emitHook(() =>
+        this.options.hooks?.onTaskCompleted?.({ task: stored, run, timestamp: completedAt }),
+      );
     } catch (error) {
-      const latest = await this.options.store.get(taskId) ?? runningTask;
+      const latest = (await this.options.store.get(taskId)) ?? runningTask;
       const failedAt = new Date().toISOString();
       const message = error instanceof Error ? error.message : String(error);
       const updated = withNextRun({
         ...latest,
-        lastStatus: "error",
+        lastStatus: 'error',
         lastError: message,
         runHistory: updateTaskHistoryEntry(latest.runHistory, runningEntry.id, {
-          status: "error",
+          status: 'error',
           message,
         }),
         updatedAt: failedAt,
       });
-      const stored = await this.options.store.update(taskId, updated) ?? updated;
-      await this.emitHook(() => this.options.hooks?.onTaskFailed?.({ task: stored, run, timestamp: failedAt, error: message }));
+      const stored = (await this.options.store.update(taskId, updated)) ?? updated;
+      await this.emitHook(() =>
+        this.options.hooks?.onTaskFailed?.({
+          task: stored,
+          run,
+          timestamp: failedAt,
+          error: message,
+        }),
+      );
     } finally {
       this.runningTaskIds.delete(taskId);
     }
@@ -444,23 +505,25 @@ export class PersistentTaskScheduler implements TaskScheduler {
     const updated = {
       ...task,
       enabled: false,
-      lastStatus: "error" as const,
+      lastStatus: 'error' as const,
       lastError: error,
-      runHistory: appendTaskHistory(task.runHistory, createTaskHistoryEntry("error", error)),
+      runHistory: appendTaskHistory(task.runHistory, createTaskHistoryEntry('error', error)),
       updatedAt: new Date().toISOString(),
     };
     delete updated.nextRunAt;
-    const stored = await this.options.store.update(taskId, updated) ?? updated;
-    await this.emitHook(() => this.options.hooks?.onTaskFailed?.({
-      task: stored,
-      run: {
-        historyEntryId: stored.runHistory?.at(-1)?.id ?? taskId,
-        sessionId: stored.sessionId,
-        startedAt: stored.updatedAt,
-      },
-      timestamp: stored.updatedAt,
-      error,
-    }));
+    const stored = (await this.options.store.update(taskId, updated)) ?? updated;
+    await this.emitHook(() =>
+      this.options.hooks?.onTaskFailed?.({
+        task: stored,
+        run: {
+          historyEntryId: stored.runHistory?.at(-1)?.id ?? taskId,
+          sessionId: stored.sessionId,
+          startedAt: stored.updatedAt,
+        },
+        timestamp: stored.updatedAt,
+        error,
+      }),
+    );
   }
 
   private startLockHeartbeat(): void {
@@ -480,18 +543,22 @@ export class PersistentTaskScheduler implements TaskScheduler {
 
   private async emitSchedulerStarted(): Promise<void> {
     const status = await this.status();
-    await this.emitHook(() => this.options.hooks?.onSchedulerStarted?.({
-      timestamp: new Date().toISOString(),
-      status,
-    }));
+    await this.emitHook(() =>
+      this.options.hooks?.onSchedulerStarted?.({
+        timestamp: new Date().toISOString(),
+        status,
+      }),
+    );
   }
 
   private async emitSchedulerStopped(): Promise<void> {
     const status = await this.status();
-    await this.emitHook(() => this.options.hooks?.onSchedulerStopped?.({
-      timestamp: new Date().toISOString(),
-      status,
-    }));
+    await this.emitHook(() =>
+      this.options.hooks?.onSchedulerStopped?.({
+        timestamp: new Date().toISOString(),
+        status,
+      }),
+    );
   }
 
   private async emitHook(callback: () => void | Promise<void>): Promise<void> {
@@ -506,18 +573,20 @@ export class PersistentTaskScheduler implements TaskScheduler {
 export function resolveScheduledTaskDefinition(input: {
   type?: ScheduledTaskType;
   schedule?: string;
-}): Pick<ScheduledTask, "type" | "schedule" | "intervalSeconds"> {
+}): Pick<ScheduledTask, 'type' | 'schedule' | 'intervalSeconds'> {
   const type = input.type;
   if (!isScheduledTaskType(type)) {
-    throw new Error("Scheduled task type is required and must be one of: cron, once, interval");
+    throw new Error('Scheduled task type is required and must be one of: cron, once, interval');
   }
   if (!input.schedule?.trim()) {
     throw new Error(`${type} scheduled tasks require schedule`);
   }
-  if (type === "interval") {
+  if (type === 'interval') {
     const intervalSeconds = parseIntervalSeconds(input.schedule);
     if (!intervalSeconds) {
-      throw new Error(`Invalid interval schedule: ${input.schedule}. Use formats like "30s", "5m", or "1h".`);
+      throw new Error(
+        `Invalid interval schedule: ${input.schedule}. Use formats like "30s", "5m", or "1h".`,
+      );
     }
     return {
       type,
@@ -525,7 +594,7 @@ export function resolveScheduledTaskDefinition(input: {
       intervalSeconds,
     };
   }
-  if (type === "once") {
+  if (type === 'once') {
     const schedule = resolveOnceSchedule(input.schedule);
     const delaySeconds = Math.max(1, Math.ceil((new Date(schedule).getTime() - Date.now()) / 1000));
     return { type, schedule, intervalSeconds: delaySeconds };
@@ -548,25 +617,32 @@ export function normalizeScheduledTask(rawTask: ScheduledTask): ScheduledTask {
     runCount?: unknown;
     runHistory?: unknown;
   };
-  const type = isScheduledTaskType(raw.type) ? raw.type : "interval";
-  const intervalSeconds = typeof raw.intervalSeconds === "number" && Number.isFinite(raw.intervalSeconds)
-    ? Math.max(5, Math.floor(raw.intervalSeconds))
-    : 60;
-  const schedule = typeof raw.schedule === "string" && raw.schedule.trim()
-    ? raw.schedule.trim()
-    : type === "interval"
-      ? `${intervalSeconds}s`
-      : "";
+  const type = isScheduledTaskType(raw.type) ? raw.type : 'interval';
+  const intervalSeconds =
+    typeof raw.intervalSeconds === 'number' && Number.isFinite(raw.intervalSeconds)
+      ? Math.max(5, Math.floor(raw.intervalSeconds))
+      : 60;
+  const schedule =
+    typeof raw.schedule === 'string' && raw.schedule.trim()
+      ? raw.schedule.trim()
+      : type === 'interval'
+        ? `${intervalSeconds}s`
+        : '';
   const task: ScheduledTask = {
     ...rawTask,
     type,
     schedule,
     intervalSeconds,
-    enabled: typeof raw.enabled === "boolean" ? raw.enabled : true,
-    runCount: typeof raw.runCount === "number" && Number.isFinite(raw.runCount) ? Math.max(0, Math.floor(raw.runCount)) : 0,
-    runHistory: Array.isArray(raw.runHistory) ? raw.runHistory.filter(isTaskHistoryEntry).slice(-25) : [],
+    enabled: typeof raw.enabled === 'boolean' ? raw.enabled : true,
+    runCount:
+      typeof raw.runCount === 'number' && Number.isFinite(raw.runCount)
+        ? Math.max(0, Math.floor(raw.runCount))
+        : 0,
+    runHistory: Array.isArray(raw.runHistory)
+      ? raw.runHistory.filter(isTaskHistoryEntry).slice(-25)
+      : [],
   };
-  if (typeof raw.workspaceDir === "string" && raw.workspaceDir.trim()) {
+  if (typeof raw.workspaceDir === 'string' && raw.workspaceDir.trim()) {
     task.workspaceDir = raw.workspaceDir.trim();
   } else {
     delete task.workspaceDir;
@@ -574,7 +650,7 @@ export function normalizeScheduledTask(rawTask: ScheduledTask): ScheduledTask {
   const nextRunAt = computeNextRunAt(task);
   if (nextRunAt) {
     task.nextRunAt = nextRunAt;
-  } else if (!task.enabled || task.type === "once") {
+  } else if (!task.enabled || task.type === 'once') {
     delete task.nextRunAt;
   }
   return task;
@@ -584,10 +660,10 @@ export function computeNextRunAt(task: ScheduledTask): string | undefined {
   if (!task.enabled) {
     return undefined;
   }
-  if (task.type === "interval") {
+  if (task.type === 'interval') {
     return new Date(Date.now() + task.intervalSeconds * 1000).toISOString();
   }
-  if (task.type === "once") {
+  if (task.type === 'once') {
     const target = new Date(task.schedule);
     if (Number.isNaN(target.getTime()) || target.getTime() <= Date.now()) {
       return undefined;
@@ -605,7 +681,7 @@ export function computeNextRunAt(task: ScheduledTask): string | undefined {
 }
 
 export function createTaskHistoryEntry(
-  status: ScheduledTaskRunHistoryEntry["status"],
+  status: ScheduledTaskRunHistoryEntry['status'],
   message?: string,
   options: { createdAt?: string; sessionId?: string } = {},
 ): ScheduledTaskRunHistoryEntry {
@@ -628,9 +704,12 @@ export function appendTaskHistory(
 export function updateTaskHistoryEntry(
   history: ScheduledTaskRunHistoryEntry[] | undefined,
   entryId: string,
-  patch: Pick<ScheduledTaskRunHistoryEntry, "status"> & Pick<Partial<ScheduledTaskRunHistoryEntry>, "message">,
+  patch: Pick<ScheduledTaskRunHistoryEntry, 'status'> &
+    Pick<Partial<ScheduledTaskRunHistoryEntry>, 'message'>,
 ): ScheduledTaskRunHistoryEntry[] {
-  return (history ?? []).map((entry) => entry.id === entryId ? { ...entry, ...patch } : entry).slice(-25);
+  return (history ?? [])
+    .map((entry) => (entry.id === entryId ? { ...entry, ...patch } : entry))
+    .slice(-25);
 }
 
 export function createScheduledTaskRunSessionId(): string {
@@ -639,7 +718,7 @@ export function createScheduledTaskRunSessionId(): string {
 
 export function scheduleExpressionForCroner(value: string): string {
   const schedule = value.trim();
-  return schedule.toUpperCase().startsWith("RRULE:") ? rruleToCronSchedule(schedule) : schedule;
+  return schedule.toUpperCase().startsWith('RRULE:') ? rruleToCronSchedule(schedule) : schedule;
 }
 
 function withNextRun<T extends ScheduledTask>(task: T): T {
@@ -654,24 +733,30 @@ function withNextRun<T extends ScheduledTask>(task: T): T {
 }
 
 function isScheduledTaskType(value: unknown): value is ScheduledTaskType {
-  return value === "cron" || value === "once" || value === "interval";
+  return value === 'cron' || value === 'once' || value === 'interval';
 }
 
 function isTaskHistoryEntry(value: unknown): value is ScheduledTaskRunHistoryEntry {
-  if (!value || typeof value !== "object") {
+  if (!value || typeof value !== 'object') {
     return false;
   }
   const entry = value as Partial<ScheduledTaskRunHistoryEntry>;
-  return typeof entry.id === "string" &&
-    typeof entry.createdAt === "string" &&
-    (entry.status === "success" || entry.status === "error" || entry.status === "running" || entry.status === "paused" || entry.status === "resumed") &&
-    (entry.sessionId === undefined || typeof entry.sessionId === "string") &&
-    (entry.message === undefined || typeof entry.message === "string");
+  return (
+    typeof entry.id === 'string' &&
+    typeof entry.createdAt === 'string' &&
+    (entry.status === 'success' ||
+      entry.status === 'error' ||
+      entry.status === 'running' ||
+      entry.status === 'paused' ||
+      entry.status === 'resumed') &&
+    (entry.sessionId === undefined || typeof entry.sessionId === 'string') &&
+    (entry.message === undefined || typeof entry.message === 'string')
+  );
 }
 
 function sanitizeIntervalSeconds(value: number): number {
   if (!Number.isFinite(value) || value <= 0) {
-    throw new Error("intervalSeconds must be a positive number");
+    throw new Error('intervalSeconds must be a positive number');
   }
   return Math.max(5, Math.floor(value));
 }
@@ -707,7 +792,9 @@ function resolveOnceSchedule(value: string): string {
   }
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
-    throw new Error(`Invalid once schedule: ${value}. Use an ISO timestamp or relative time like "+10m".`);
+    throw new Error(
+      `Invalid once schedule: ${value}. Use an ISO timestamp or relative time like "+10m".`,
+    );
   }
   if (date.getTime() <= Date.now()) {
     throw new Error(`Scheduled time is in the past: ${date.toISOString()}`);
@@ -750,44 +837,54 @@ function validateCronSchedule(value: string): void {
 }
 
 function rruleToCronSchedule(value: string): string {
-  const body = value.trim().replace(/^RRULE:/i, "");
-  const parts = Object.fromEntries(body.split(";").map((part) => {
-    const [rawKey, rawValue = ""] = part.split("=");
-    return [rawKey?.trim().toUpperCase() ?? "", rawValue.trim().toUpperCase()];
-  }));
+  const body = value.trim().replace(/^RRULE:/i, '');
+  const parts = Object.fromEntries(
+    body.split(';').map((part) => {
+      const [rawKey, rawValue = ''] = part.split('=');
+      return [rawKey?.trim().toUpperCase() ?? '', rawValue.trim().toUpperCase()];
+    }),
+  );
   const freq = parts.FREQ;
   const hour = parseRruleNumber(parts.BYHOUR, 9, 0, 23);
   const minute = parseRruleNumber(parts.BYMINUTE, 0, 0, 59);
-  if (freq === "HOURLY") {
+  if (freq === 'HOURLY') {
     return `${minute} * * * *`;
   }
-  if (freq === "DAILY") {
+  if (freq === 'DAILY') {
     return `${minute} ${hour} * * *`;
   }
-  if (freq === "WEEKLY") {
+  if (freq === 'WEEKLY') {
     const day = rruleDayToCron(parts.BYDAY);
     return `${minute} ${hour} * * ${day}`;
   }
-  throw new Error(`Unsupported RRULE frequency: ${freq || "missing"}`);
+  throw new Error(`Unsupported RRULE frequency: ${freq || 'missing'}`);
 }
 
-function parseRruleNumber(value: string | undefined, fallback: number, min: number, max: number): number {
+function parseRruleNumber(
+  value: string | undefined,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
   const parsed = Number(value ?? fallback);
   return Number.isInteger(parsed) && parsed >= min && parsed <= max ? parsed : fallback;
 }
 
 function rruleDayToCron(value: string | undefined): string {
   const days: Record<string, string> = {
-    SU: "0",
-    MO: "1",
-    TU: "2",
-    WE: "3",
-    TH: "4",
-    FR: "5",
-    SA: "6",
+    SU: '0',
+    MO: '1',
+    TU: '2',
+    WE: '3',
+    TH: '4',
+    FR: '5',
+    SA: '6',
   };
   if (!value) {
-    return "*";
+    return '*';
   }
-  return value.split(",").map((day) => days[day] ?? day).join(",");
+  return value
+    .split(',')
+    .map((day) => days[day] ?? day)
+    .join(',');
 }

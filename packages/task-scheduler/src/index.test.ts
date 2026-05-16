@@ -1,45 +1,47 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from 'vitest';
 import {
   PersistentTaskScheduler,
   resolveScheduledTaskDefinition,
-  scheduleExpressionForCroner,
   type ScheduledTask,
   type ScheduledTaskStore,
   type SchedulerLock,
+  scheduleExpressionForCroner,
   type TaskSchedulerScope,
-} from "./index.js";
+} from './index.js';
 
-const model = { provider: "test", model: "test-model" };
+const model = { provider: 'test', model: 'test-model' };
 
-describe("task scheduler", () => {
-  it("normalizes interval, once, cron, and RRULE schedules", () => {
-    expect(resolveScheduledTaskDefinition({ type: "interval", schedule: "10m" })).toMatchObject({
-      type: "interval",
-      schedule: "10m",
+describe('task scheduler', () => {
+  it('normalizes interval, once, cron, and RRULE schedules', () => {
+    expect(resolveScheduledTaskDefinition({ type: 'interval', schedule: '10m' })).toMatchObject({
+      type: 'interval',
+      schedule: '10m',
       intervalSeconds: 600,
     });
-    expect(resolveScheduledTaskDefinition({ type: "cron", schedule: "0 9 * * *" })).toMatchObject({
-      type: "cron",
-      schedule: "0 9 * * *",
+    expect(resolveScheduledTaskDefinition({ type: 'cron', schedule: '0 9 * * *' })).toMatchObject({
+      type: 'cron',
+      schedule: '0 9 * * *',
       intervalSeconds: 0,
     });
-    expect(resolveScheduledTaskDefinition({ type: "once", schedule: "+5m" }).schedule).toEqual(
+    expect(resolveScheduledTaskDefinition({ type: 'once', schedule: '+5m' }).schedule).toEqual(
       expect.stringMatching(/T.*Z$/),
     );
-    expect(scheduleExpressionForCroner("RRULE:FREQ=WEEKLY;BYHOUR=7;BYMINUTE=30;BYDAY=FR")).toBe("30 7 * * 5");
+    expect(scheduleExpressionForCroner('RRULE:FREQ=WEEKLY;BYHOUR=7;BYMINUTE=30;BYDAY=FR')).toBe(
+      '30 7 * * 5',
+    );
   });
 
-  it("runs tasks through the injected runner and emits lifecycle hooks", async () => {
+  it('runs tasks through the injected runner and emits lifecycle hooks', async () => {
     const events: string[] = [];
     const scheduler = new PersistentTaskScheduler({
       store: new MemoryScheduledTaskStore(),
       lock: new MemorySchedulerLock(),
       runner: async (task, run) => {
-        events.push(`runner:${task.prompt}:${run.sessionId.startsWith("scheduled-run-")}`);
+        events.push(`runner:${task.prompt}:${run.sessionId.startsWith('scheduled-run-')}`);
       },
       hooks: {
         onSchedulerStarted: () => {
-          events.push("scheduler:start");
+          events.push('scheduler:start');
         },
         onTaskStarted: ({ task }) => {
           events.push(`task:start:${task.prompt}`);
@@ -51,14 +53,14 @@ describe("task scheduler", () => {
     });
 
     const task = await scheduler.create({
-      sessionId: "scheduled-1",
-      prompt: "check things",
-      type: "interval",
-      schedule: "1h",
+      sessionId: 'scheduled-1',
+      prompt: 'check things',
+      type: 'interval',
+      schedule: '1h',
       intervalSeconds: 3600,
       enabled: true,
       model,
-      toolPolicyProfile: "scheduled",
+      toolPolicyProfile: 'scheduled',
     });
 
     await scheduler.start();
@@ -67,15 +69,15 @@ describe("task scheduler", () => {
     await scheduler.stop();
 
     expect(events).toEqual([
-      "scheduler:start",
-      "task:start:check things",
-      "runner:check things:true",
-      "task:done:1",
+      'scheduler:start',
+      'task:start:check things',
+      'runner:check things:true',
+      'task:done:1',
     ]);
-    expect((await scheduler.get(task.id))?.lastStatus).toBe("success");
+    expect((await scheduler.get(task.id))?.lastStatus).toBe('success');
   });
 
-  it("does not run the same task concurrently", async () => {
+  it('does not run the same task concurrently', async () => {
     let starts = 0;
     let release: (() => void) | undefined;
     const scheduler = new PersistentTaskScheduler({
@@ -89,14 +91,14 @@ describe("task scheduler", () => {
       },
     });
     const task = await scheduler.create({
-      sessionId: "scheduled-1",
-      prompt: "slow check",
-      type: "interval",
-      schedule: "1h",
+      sessionId: 'scheduled-1',
+      prompt: 'slow check',
+      type: 'interval',
+      schedule: '1h',
       intervalSeconds: 3600,
       enabled: true,
       model,
-      toolPolicyProfile: "scheduled",
+      toolPolicyProfile: 'scheduled',
     });
 
     await scheduler.start();
@@ -110,13 +112,13 @@ describe("task scheduler", () => {
     await scheduler.stop();
   });
 
-  it("records failed task runs and emits failure hooks", async () => {
+  it('records failed task runs and emits failure hooks', async () => {
     const failures: string[] = [];
     const scheduler = new PersistentTaskScheduler({
       store: new MemoryScheduledTaskStore(),
       lock: new MemorySchedulerLock(),
       runner: async () => {
-        throw new Error("nope");
+        throw new Error('nope');
       },
       hooks: {
         onTaskFailed: ({ error }) => {
@@ -125,28 +127,28 @@ describe("task scheduler", () => {
       },
     });
     const task = await scheduler.create({
-      sessionId: "scheduled-1",
-      prompt: "bad check",
-      type: "interval",
-      schedule: "1h",
+      sessionId: 'scheduled-1',
+      prompt: 'bad check',
+      type: 'interval',
+      schedule: '1h',
       intervalSeconds: 3600,
       enabled: true,
       model,
-      toolPolicyProfile: "scheduled",
+      toolPolicyProfile: 'scheduled',
     });
 
     await scheduler.start();
     await scheduler.runNow(task.id);
-    await waitFor(async () => (await scheduler.get(task.id))?.lastStatus === "error");
+    await waitFor(async () => (await scheduler.get(task.id))?.lastStatus === 'error');
 
     const failed = await scheduler.get(task.id);
-    expect(failed?.lastError).toBe("nope");
-    expect(failed?.runHistory?.at(-1)).toMatchObject({ status: "error", message: "nope" });
-    expect(failures).toEqual(["nope"]);
+    expect(failed?.lastError).toBe('nope');
+    expect(failed?.runHistory?.at(-1)).toMatchObject({ status: 'error', message: 'nope' });
+    expect(failures).toEqual(['nope']);
     await scheduler.stop();
   });
 
-  it("keeps task execution isolated from hook failures", async () => {
+  it('keeps task execution isolated from hook failures', async () => {
     let ran = false;
     const scheduler = new PersistentTaskScheduler({
       store: new MemoryScheduledTaskStore(),
@@ -156,22 +158,22 @@ describe("task scheduler", () => {
       },
       hooks: {
         onTaskStarted: () => {
-          throw new Error("hook failed");
+          throw new Error('hook failed');
         },
         onTaskCompleted: () => {
-          throw new Error("hook failed too");
+          throw new Error('hook failed too');
         },
       },
     });
     const task = await scheduler.create({
-      sessionId: "scheduled-1",
-      prompt: "hook check",
-      type: "interval",
-      schedule: "1h",
+      sessionId: 'scheduled-1',
+      prompt: 'hook check',
+      type: 'interval',
+      schedule: '1h',
       intervalSeconds: 3600,
       enabled: true,
       model,
-      toolPolicyProfile: "scheduled",
+      toolPolicyProfile: 'scheduled',
     });
 
     await scheduler.start();
@@ -180,7 +182,7 @@ describe("task scheduler", () => {
 
     const completed = await scheduler.get(task.id);
     expect(ran).toBe(true);
-    expect(completed?.lastStatus).toBe("success");
+    expect(completed?.lastStatus).toBe('success');
     expect(completed?.lastError).toBeUndefined();
     await scheduler.stop();
   });
@@ -203,7 +205,11 @@ class MemoryScheduledTaskStore implements ScheduledTaskStore {
     return task;
   }
 
-  async update(taskId: string, task: ScheduledTask, scope: TaskSchedulerScope = {}): Promise<ScheduledTask | undefined> {
+  async update(
+    taskId: string,
+    task: ScheduledTask,
+    scope: TaskSchedulerScope = {},
+  ): Promise<ScheduledTask | undefined> {
     if (!(await this.get(taskId, scope))) {
       return undefined;
     }
@@ -220,7 +226,7 @@ class MemoryScheduledTaskStore implements ScheduledTaskStore {
 }
 
 class MemorySchedulerLock implements SchedulerLock {
-  readonly path = "memory:scheduler";
+  readonly path = 'memory:scheduler';
   private locked = false;
 
   acquire(): boolean {
@@ -245,8 +251,10 @@ class MemorySchedulerLock implements SchedulerLock {
 }
 
 function matchesScope(task: ScheduledTask, scope: TaskSchedulerScope): boolean {
-  return (!scope.tenantId || task.tenantId === scope.tenantId) &&
-    (!scope.userId || task.userId === scope.userId);
+  return (
+    (!scope.tenantId || task.tenantId === scope.tenantId) &&
+    (!scope.userId || task.userId === scope.userId)
+  );
 }
 
 async function waitFor(assertion: () => boolean | Promise<boolean>): Promise<void> {
@@ -257,7 +265,7 @@ async function waitFor(assertion: () => boolean | Promise<boolean>): Promise<voi
     }
     await delay(10);
   }
-  throw new Error("Timed out waiting for assertion");
+  throw new Error('Timed out waiting for assertion');
 }
 
 async function delay(ms: number): Promise<void> {

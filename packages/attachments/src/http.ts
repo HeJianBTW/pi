@@ -1,16 +1,24 @@
-import type { IncomingMessage, ServerResponse } from "node:http";
+import type { IncomingMessage, ServerResponse } from 'node:http';
 
 export class AttachmentHttpError extends Error {
-  constructor(readonly statusCode: number, readonly code: string, message: string) {
+  constructor(
+    readonly statusCode: number,
+    readonly code: string,
+    message: string,
+  ) {
     super(message);
-    this.name = "AttachmentHttpError";
+    this.name = 'AttachmentHttpError';
   }
 }
 
 export async function readRequestBody(request: IncomingMessage, maxBytes: number): Promise<Buffer> {
-  const contentLength = Number(request.headers["content-length"]);
+  const contentLength = Number(request.headers['content-length']);
   if (Number.isFinite(contentLength) && contentLength > maxBytes) {
-    throw new AttachmentHttpError(413, "request_body_too_large", `request body exceeds ${maxBytes} bytes`);
+    throw new AttachmentHttpError(
+      413,
+      'request_body_too_large',
+      `request body exceeds ${maxBytes} bytes`,
+    );
   }
   const chunks: Buffer[] = [];
   let totalBytes = 0;
@@ -18,7 +26,11 @@ export async function readRequestBody(request: IncomingMessage, maxBytes: number
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     totalBytes += buffer.length;
     if (totalBytes > maxBytes) {
-      throw new AttachmentHttpError(413, "request_body_too_large", `request body exceeds ${maxBytes} bytes`);
+      throw new AttachmentHttpError(
+        413,
+        'request_body_too_large',
+        `request body exceeds ${maxBytes} bytes`,
+      );
     }
     chunks.push(buffer);
   }
@@ -32,7 +44,7 @@ export function writeJson(response: ServerResponse, statusCode: number, body: un
     }
     return;
   }
-  response.writeHead(statusCode, { "content-type": "application/json; charset=utf-8" });
+  response.writeHead(statusCode, { 'content-type': 'application/json; charset=utf-8' });
   response.end(`${JSON.stringify(body)}\n`);
 }
 

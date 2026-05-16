@@ -11,7 +11,7 @@ export async function fetchRemoteAttachment(input: {
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }
-    const contentLength = Number(response.headers.get("content-length") ?? 0);
+    const contentLength = Number(response.headers.get('content-length') ?? 0);
     if (contentLength > input.maxBytes) {
       throw new Error(`attachment exceeds ${input.maxBytes} bytes`);
     }
@@ -19,10 +19,12 @@ export async function fetchRemoteAttachment(input: {
     if (data.byteLength > input.maxBytes) {
       throw new Error(`attachment exceeds ${input.maxBytes} bytes`);
     }
-    const mimeType = trimToUndefined(response.headers.get("content-type")?.split(";")[0]) ?? input.fallbackMimeType;
+    const mimeType =
+      trimToUndefined(response.headers.get('content-type')?.split(';')[0]) ??
+      input.fallbackMimeType;
     return { data, ...(mimeType ? { mimeType } : {}) };
   } catch (error) {
-    if (error instanceof Error && error.name === "AbortError") {
+    if (error instanceof Error && error.name === 'AbortError') {
       throw new Error(`attachment fetch timed out after ${input.timeoutMs}ms`);
     }
     throw error;

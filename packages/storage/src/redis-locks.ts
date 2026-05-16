@@ -1,5 +1,5 @@
-import { randomUUID } from "node:crypto";
-import { Redis } from "ioredis";
+import { randomUUID } from 'node:crypto';
+import { Redis } from 'ioredis';
 
 const RELEASE_REDIS_LOCK_SCRIPT = `
 if redis.call("GET", KEYS[1]) == ARGV[1] then
@@ -26,24 +26,24 @@ export class RedisLockManager {
       maxRetriesPerRequest: 2,
       enableOfflineQueue: false,
     });
-    this.redis.on("error", () => {
+    this.redis.on('error', () => {
       // ioredis also rejects the operation promise; this prevents unhandled error events.
     });
   }
 
   async ping(): Promise<void> {
-    if (this.redis.status === "wait") {
+    if (this.redis.status === 'wait') {
       await this.redis.connect();
     }
     await this.redis.ping();
   }
 
   async acquire(key: string, ttlMs: number): Promise<boolean> {
-    if (this.redis.status === "wait") {
+    if (this.redis.status === 'wait') {
       await this.redis.connect();
     }
-    const result = await this.redis.set(key, this.owner, "PX", ttlMs, "NX");
-    return result === "OK";
+    const result = await this.redis.set(key, this.owner, 'PX', ttlMs, 'NX');
+    return result === 'OK';
   }
 
   async extend(key: string, ttlMs: number): Promise<boolean> {
