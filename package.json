@@ -10,6 +10,7 @@
   },
   "scripts": {
     "build": "pnpm --filter @amaster.ai/pi-storage prisma:generate && tsc -b packages/*",
+    "pr-check": "pnpm build && pnpm test && pnpm typecheck",
     "typecheck": "pnpm --filter @amaster.ai/pi-storage prisma:generate && tsc -b packages/* --pretty false",
     "test": "vitest run"
   },

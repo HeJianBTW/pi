@@ -1,0 +1,288 @@
+name: Publish npm Packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      npm_tag:
+        description: npm dist-tag to publish with
+        required: true
+        default: latest
+        type: choice
+        options:
+          - latest
+          - beta
+      version_bump:
+        description: version bump level; use current for the first release
+        required: true
+        default: current
+        type: choice
+        options:
+          - current
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+
+concurrency:
+  group: npm-publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: publish packages
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GIT_ACTOR: ${{ github.actor }}
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Setup pnpm
+        run: corepack install -g pnpm@10.18.3
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check npm token
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "NPM_TOKEN repository secret is not configured."
+            exit 1
+          fi
+
+      - name: Ensure release branch
+        run: |
+          if [ "${GITHUB_REF_NAME}" != "master" ]; then
+            echo "Publishing is only allowed from the master branch."
+            exit 1
+          fi
+
+      - name: Configure git identity
+        run: |
+          git config user.name "$GIT_ACTOR"
+          git config user.email "${GIT_ACTOR}@users.noreply.github.com"
+
+      - name: Resolve release version from npm and update package versions
+        id: versioning
+        env:
+          RELEASE_CHANNEL: ${{ inputs.npm_tag }}
+          VERSION_BUMP: ${{ inputs.version_bump }}
+        run: |
+          node <<'EOF'
+          const fs = require("node:fs");
+          const path = require("node:path");
+          const { execFileSync } = require("node:child_process");
+
+          const channel = process.env.RELEASE_CHANNEL;
+          const bump = process.env.VERSION_BUMP;
+          if (!channel || !bump) {
+            throw new Error("RELEASE_CHANNEL and VERSION_BUMP are required");
+          }
+
+          const rootPackageFile = path.join(process.cwd(), "package.json");
+          const packagesDir = path.join(process.cwd(), "packages");
+          const packageFiles = fs.readdirSync(packagesDir, { withFileTypes: true })
+            .filter((entry) => entry.isDirectory())
+            .map((entry) => path.join(packagesDir, entry.name, "package.json"))
+            .filter((file) => fs.existsSync(file));
+
+          const packageJsonFiles = [rootPackageFile, ...packageFiles];
+          const packages = packageFiles.map((file) => JSON.parse(fs.readFileSync(file, "utf8")));
+          const publishedPackages = packages.filter((pkg) => !pkg.private).map((pkg) => pkg.name);
+          if (publishedPackages.length === 0) {
+            throw new Error("No publishable packages found.");
+          }
+
+          const localVersions = new Set(packages.filter((pkg) => !pkg.private).map((pkg) => pkg.version));
+          if (localVersions.size !== 1) {
+            throw new Error(`Expected all local publishable package versions to match, found: ${[...localVersions].join(", ")}`);
+          }
+          const localVersion = [...localVersions][0];
+
+          const parseVersion = (version) => {
+            const match = version.match(/^(\d+)\.(\d+)\.(\d+)(?:-beta\.(\d+))?$/);
+            if (!match) {
+              throw new Error(`Unsupported version format: ${version}`);
+            }
+            return {
+              major: Number(match[1]),
+              minor: Number(match[2]),
+              patch: Number(match[3]),
+              beta: match[4] === undefined ? null : Number(match[4]),
+            };
+          };
+
+          const formatStable = ({ major, minor, patch }) => `${major}.${minor}.${patch}`;
+          const formatBeta = ({ major, minor, patch, beta }) => `${major}.${minor}.${patch}-beta.${beta}`;
+          const compareStable = (left, right) => {
+            if (left.major !== right.major) return left.major - right.major;
+            if (left.minor !== right.minor) return left.minor - right.minor;
+            return left.patch - right.patch;
+          };
+          const bumpStable = (parsed, level) => {
+            if (level === "major") {
+              return { major: parsed.major + 1, minor: 0, patch: 0 };
+            }
+            if (level === "minor") {
+              return { major: parsed.major, minor: parsed.minor + 1, patch: 0 };
+            }
+            if (level === "patch") {
+              return { major: parsed.major, minor: parsed.minor, patch: parsed.patch + 1 };
+            }
+            if (level === "current") {
+              return { major: parsed.major, minor: parsed.minor, patch: parsed.patch };
+            }
+            throw new Error(`Unsupported version bump: ${level}`);
+          };
+
+          const npmViewDistTags = (packageName) => {
+            try {
+              const output = execFileSync("npm", ["view", packageName, "dist-tags", "--json"], {
+                encoding: "utf8",
+                stdio: ["ignore", "pipe", "pipe"],
+              }).trim();
+              return output ? JSON.parse(output) : {};
+            } catch (error) {
+              const stderr = error.stderr?.toString?.() ?? "";
+              if (stderr.includes("E404")) {
+                return null;
+              }
+              throw new Error(`Failed to read npm dist-tags for ${packageName}: ${stderr || error.message}`);
+            }
+          };
+
+          const remoteInfos = publishedPackages.map((packageName) => ({
+            packageName,
+            distTags: npmViewDistTags(packageName),
+          }));
+
+          const latestVersions = new Set(
+            remoteInfos
+              .map((info) => info.distTags?.latest)
+              .filter(Boolean)
+          );
+          const betaVersions = new Set(
+            remoteInfos
+              .map((info) => info.distTags?.beta)
+              .filter(Boolean)
+          );
+
+          const allPackagesUnpublished = remoteInfos.every((info) => info.distTags === null);
+          const somePackagesUnpublished = remoteInfos.some((info) => info.distTags === null);
+          if (!allPackagesUnpublished && somePackagesUnpublished) {
+            const missing = remoteInfos.filter((info) => info.distTags === null).map((info) => info.packageName);
+            throw new Error(`Some packages are missing from npm while others are published: ${missing.join(", ")}`);
+          }
+          if (latestVersions.size > 1) {
+            throw new Error(`Expected all npm latest versions to match before publishing, found: ${[...latestVersions].join(", ")}`);
+          }
+          if (betaVersions.size > 1) {
+            throw new Error(`Expected all npm beta versions to match before publishing, found: ${[...betaVersions].join(", ")}`);
+          }
+
+          const parsedLocal = parseVersion(localVersion);
+          const currentVersion = [...latestVersions][0] ?? null;
+          const currentBetaVersion = [...betaVersions][0] ?? null;
+          let nextVersion;
+
+          if (allPackagesUnpublished) {
+            const nextBase = bumpStable(parsedLocal, bump);
+            nextVersion = channel === "beta"
+              ? formatBeta({ ...nextBase, beta: 0 })
+              : formatStable(nextBase);
+          } else {
+            if (!currentVersion) {
+              throw new Error("No remote latest version found on npm.");
+            }
+            if (bump === "current") {
+              throw new Error("version_bump=current is only allowed for the first release.");
+            }
+            const parsedLatest = parseVersion(currentVersion);
+            const parsedBeta = currentBetaVersion ? parseVersion(currentBetaVersion) : null;
+            const betaAheadOfLatest = parsedBeta ? compareStable(parsedBeta, parsedLatest) > 0 : false;
+
+            if (channel === "beta") {
+              if (bump === "patch" && parsedBeta && betaAheadOfLatest) {
+                nextVersion = formatBeta({
+                  major: parsedBeta.major,
+                  minor: parsedBeta.minor,
+                  patch: parsedBeta.patch,
+                  beta: parsedBeta.beta + 1,
+                });
+              } else {
+                const nextBase = bumpStable(parsedLatest, bump);
+                nextVersion = formatBeta({ ...nextBase, beta: 0 });
+              }
+            } else if (channel === "latest") {
+              if (bump === "patch" && parsedBeta && betaAheadOfLatest) {
+                nextVersion = formatStable(parsedBeta);
+              } else {
+                nextVersion = formatStable(bumpStable(parsedLatest, bump));
+              }
+            } else {
+              throw new Error(`Unsupported release channel: ${channel}`);
+            }
+          }
+
+          for (const file of packageJsonFiles) {
+            const pkg = JSON.parse(fs.readFileSync(file, "utf8"));
+            pkg.version = nextVersion;
+            fs.writeFileSync(file, `${JSON.stringify(pkg, null, 2)}\n`);
+            console.log(`updated ${pkg.name}: ${pkg.version}`);
+          }
+
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `release_version=${nextVersion}\n`);
+          EOF
+
+      - name: Run checks
+        run: pnpm run pr-check
+
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          publish_cmd=(pnpm publish -r --access public --no-git-checks)
+          if [ "${{ inputs.npm_tag }}" = "beta" ]; then
+            publish_cmd+=(--tag beta)
+          fi
+          "${publish_cmd[@]}"
+
+      - name: Commit and tag version changes
+        env:
+          RELEASE_VERSION: ${{ steps.versioning.outputs.release_version }}
+        run: |
+          git add package.json packages/*/package.json
+          if git diff --cached --quiet; then
+            echo "No version changes were staged."
+          else
+            git commit -m "chore: release ${RELEASE_VERSION}"
+          fi
+          git tag "v${RELEASE_VERSION}"
+          git push origin HEAD:${GITHUB_REF_NAME} --follow-tags
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ steps.versioning.outputs.release_version }}
+          RELEASE_CHANNEL: ${{ inputs.npm_tag }}
+        run: |
+          gh release create "v${RELEASE_VERSION}" \
+            --title "v${RELEASE_VERSION}" \
+            --notes "Published npm packages with dist-tag \`${RELEASE_CHANNEL}\`."
