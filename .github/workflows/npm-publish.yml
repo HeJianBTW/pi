@@ -268,14 +268,20 @@ jobs:
         env:
           RELEASE_VERSION: ${{ steps.versioning.outputs.release_version }}
         run: |
+          tag_name="v${RELEASE_VERSION}"
           git add package.json packages/*/package.json
           if git diff --cached --quiet; then
             echo "No version changes were staged."
           else
             git commit -m "chore: release ${RELEASE_VERSION}"
           fi
-          git tag "v${RELEASE_VERSION}"
-          git push origin HEAD:${GITHUB_REF_NAME} --follow-tags
+          if git rev-parse "${tag_name}" >/dev/null 2>&1; then
+            echo "Tag ${tag_name} already exists locally."
+          else
+            git tag -a "${tag_name}" -m "${tag_name}"
+          fi
+          git push origin HEAD:${GITHUB_REF_NAME}
+          git push origin "refs/tags/${tag_name}"
 
       - name: Create GitHub release
         env:
@@ -283,6 +289,12 @@ jobs:
           RELEASE_VERSION: ${{ steps.versioning.outputs.release_version }}
           RELEASE_CHANNEL: ${{ inputs.npm_tag }}
         run: |
-          gh release create "v${RELEASE_VERSION}" \
+          tag_name="v${RELEASE_VERSION}"
+          if gh release view "${tag_name}" >/dev/null 2>&1; then
+            echo "GitHub release ${tag_name} already exists."
+            exit 0
+          fi
+          gh release create "${tag_name}" \
+            --verify-tag \
             --title "v${RELEASE_VERSION}" \
             --notes "Published npm packages with dist-tag \`${RELEASE_CHANNEL}\`."
