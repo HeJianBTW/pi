@@ -81,49 +81,6 @@ import { createOtelRuntimeEventExporterFromEnv } from "@amaster.ai/pi-telemetry/
 
 See each package README for package-specific examples and public API notes.
 
-## Local Development With Pi Agent
-
-Pi Agent normally consumes published `@amaster.ai/pi-*` packages from npm. To
-jointly debug this repository with a sibling `../pi-agent` checkout, temporarily
-add pnpm overrides in `../pi-agent/package.json`:
-
-```json
-{
-  "pnpm": {
-    "overrides": {
-      "@amaster.ai/pi-types": "link:../pi/packages/types",
-      "@amaster.ai/pi-attachments": "link:../pi/packages/attachments",
-      "@amaster.ai/pi-storage": "link:../pi/packages/storage",
-      "@amaster.ai/pi-subagents": "link:../pi/packages/subagents",
-      "@amaster.ai/pi-task-scheduler": "link:../pi/packages/task-scheduler",
-      "@amaster.ai/pi-telemetry": "link:../pi/packages/telemetry",
-      "@amaster.ai/pi-turns": "link:../pi/packages/turns"
-    }
-  }
-}
-```
-
-Then keep this repository compiling in watch mode:
-
-```sh
-cd ../pi
-pnpm install
-pnpm --filter @amaster.ai/pi-storage prisma:generate
-pnpm exec tsc -b packages/* --watch
-```
-
-In the Pi Agent checkout:
-
-```sh
-cd ../pi-agent
-pnpm install
-pnpm typecheck
-```
-
-The package entry points read from `dist`, so keep the watch build running while
-editing this repository. Remove the local overrides before committing Pi Agent
-changes unless the change is explicitly about local linking.
-
 ## Releasing
 
 Packages are published by the `Publish npm Packages` GitHub Actions workflow.
