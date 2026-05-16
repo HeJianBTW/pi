@@ -81,32 +81,6 @@ import { createOtelRuntimeEventExporterFromEnv } from "@amaster.ai/pi-telemetry/
 
 See each package README for package-specific examples and public API notes.
 
-## Releasing
-
-Packages are published by the `Publish npm Packages` GitHub Actions workflow.
-Publishing is only allowed from the `master` branch.
-
-Before running the workflow, configure the repository secret:
-
-- `NPM_TOKEN`: npm automation token with permission to publish `@amaster.ai/*`
-
-Manual workflow inputs:
-
-- `npm_tag`: `beta` or `latest`
-- `version_bump`: `current`, `patch`, `minor`, or `major`
-
-Use `current` only to resume an already-published local version. For a new
-release after `0.1.0-beta.0`, use `patch` for the next beta patch or stable
-promotion flow handled by the workflow.
-
-The release workflow:
-
-1. Installs dependencies with a frozen lockfile.
-2. Computes the next version from npm dist-tags.
-3. Runs `pnpm run pr-check`.
-4. Publishes all public workspace packages with `pnpm publish -r --access public`.
-5. Commits version changes, pushes `v<version>`, and creates a GitHub release.
-
 ## License
 
 Apache-2.0
