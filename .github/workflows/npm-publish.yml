@@ -201,6 +201,7 @@ jobs:
           const currentVersion = [...latestVersions][0] ?? null;
           const currentBetaVersion = [...betaVersions][0] ?? null;
           let nextVersion;
+          let skipPublish = false;
 
           if (allPackagesUnpublished) {
             const nextBase = bumpStable(parsedLocal, bump);
@@ -208,36 +209,46 @@ jobs:
               ? formatBeta({ ...nextBase, beta: 0 })
               : formatStable(nextBase);
           } else {
-            if (!currentVersion) {
-              throw new Error("No remote latest version found on npm.");
-            }
             if (bump === "current") {
-              throw new Error("version_bump=current is only allowed for the first release.");
-            }
-            const parsedLatest = parseVersion(currentVersion);
-            const parsedBeta = currentBetaVersion ? parseVersion(currentBetaVersion) : null;
-            const betaAheadOfLatest = parsedBeta ? compareStable(parsedBeta, parsedLatest) > 0 : false;
-
-            if (channel === "beta") {
-              if (bump === "patch" && parsedBeta && betaAheadOfLatest) {
-                nextVersion = formatBeta({
-                  major: parsedBeta.major,
-                  minor: parsedBeta.minor,
-                  patch: parsedBeta.patch,
-                  beta: parsedBeta.beta + 1,
-                });
-              } else {
-                const nextBase = bumpStable(parsedLatest, bump);
-                nextVersion = formatBeta({ ...nextBase, beta: 0 });
+              const missingCurrent = remoteInfos
+                .filter((info) => !Object.values(info.distTags ?? {}).includes(localVersion))
+                .map((info) => info.packageName);
+              if (missingCurrent.length > 0) {
+                throw new Error(
+                  `version_bump=current can only resume an already-published version. Missing ${localVersion}: ${missingCurrent.join(", ")}`
+                );
               }
-            } else if (channel === "latest") {
-              if (bump === "patch" && parsedBeta && betaAheadOfLatest) {
-                nextVersion = formatStable(parsedBeta);
-              } else {
-                nextVersion = formatStable(bumpStable(parsedLatest, bump));
-              }
+              nextVersion = localVersion;
+              skipPublish = true;
             } else {
-              throw new Error(`Unsupported release channel: ${channel}`);
+              if (!currentVersion) {
+                throw new Error("No remote latest version found on npm.");
+              }
+              const parsedLatest = parseVersion(currentVersion);
+              const parsedBeta = currentBetaVersion ? parseVersion(currentBetaVersion) : null;
+              const betaAheadOfLatest = parsedBeta ? compareStable(parsedBeta, parsedLatest) > 0 : false;
+
+              if (channel === "beta") {
+                if (bump === "patch" && parsedBeta && betaAheadOfLatest) {
+                  nextVersion = formatBeta({
+                    major: parsedBeta.major,
+                    minor: parsedBeta.minor,
+                    patch: parsedBeta.patch,
+                    beta: parsedBeta.beta + 1,
+                  });
+                } else {
+                  const nextBase = bumpStable(parsedLatest, bump);
+                  nextVersion = formatBeta({ ...nextBase, beta: 0 });
+                }
+              } else if (channel === "latest") {
+                if (bump === "patch" && parsedBeta && betaAheadOfLatest) {
+                  nextVersion = formatStable(parsedBeta);
+                } else {
+                  nextVersion = formatStable(bumpStable(parsedLatest, bump));
+                }
+              } else {
+                throw new Error(`Unsupported release channel: ${channel}`);
+              }
             }
           }
 
@@ -249,12 +260,14 @@ jobs:
           }
 
           fs.appendFileSync(process.env.GITHUB_OUTPUT, `release_version=${nextVersion}\n`);
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `skip_publish=${skipPublish ? "true" : "false"}\n`);
           EOF
 
       - name: Run checks
         run: pnpm run pr-check
 
       - name: Publish to npm
+        if: steps.versioning.outputs.skip_publish != 'true'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
