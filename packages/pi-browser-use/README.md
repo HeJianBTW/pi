@@ -1,0 +1,140 @@
+# @amaster.ai/pi-browser-use
+
+pi-coding-agent extension that wraps [chrome-devtools-mcp](https://github.com/ChromeDevTools/chrome-devtools-mcp), exposing all browser automation tools with a unified `browser_` prefix.
+
+## Features
+
+- **pi-coding-agent extension** — registers tools via `pi.registerTool()`, managed by the agent lifecycle
+- **Dynamic tool discovery** — automatically proxies all upstream chrome-devtools-mcp tools with `browser_` prefix
+- **Tool description augmentation** — adds usage hints for key tools (click, fill, press_key, etc.)
+- **Result post-processing** — strips embedded snapshots, detects overlay/stale element issues
+- **Optional visual analysis** — `browser_analyze_screenshot` via configurable vision model
+- **Standalone mode** — also runnable as an independent MCP server via CLI
+
+## Install
+
+```bash
+bun add @amaster.ai/pi-browser-use
+```
+
+Requires Node.js >= 20, Chrome (stable or newer), and `@earendil-works/pi-coding-agent >= 0.74.0`.
+
+## Usage
+
+### As pi-coding-agent Extension (Recommended)
+
+Install the package and pi-coding-agent will automatically discover and load the extension. All browser tools are registered on `session_start`.
+
+```bash
+bun add @amaster.ai/pi-browser-use
+```
+
+Configure via `config.json` in the working directory under the `"pi-browser-use"` key:
+
+```json
+{
+  "pi-browser-use": {
+    "headless": true,
+    "channel": "stable",
+    "viewport": "1280x720",
+    "experimentalVision": true
+  }
+}
+```
+
+### As Standalone MCP Server (CLI)
+
+```bash
+npx @amaster.ai/pi-browser-use --headless --viewport=1280x720
+```
+
+Or with a config file:
+
+```bash
+npx @amaster.ai/pi-browser-use --config path/to/config.json
+```
+
+## Configuration
+
+### Browser
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `headless` | `boolean` | `false` | Run browser in headless mode |
+| `channel` | `string` | — | Chrome channel: `canary`, `dev`, `beta`, `stable` |
+| `browserUrl` | `string` | — | Connect to existing browser via URL |
+| `wsEndpoint` | `string` | — | Connect via WebSocket endpoint |
+| `executablePath` | `string` | — | Path to Chrome executable |
+| `viewport` | `string` | — | Viewport size, e.g. `1280x720` |
+| `isolated` | `boolean` | `false` | Use isolated browser profile |
+| `userDataDir` | `string` | — | Custom user data directory |
+| `autoConnect` | `boolean` | `false` | Auto-connect to running browser |
+
+### Categories
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `categoryPerformance` | `boolean` | `false` | Enable performance tools |
+| `categoryNetwork` | `boolean` | `true` | Enable network tools |
+| `categoryEmulation` | `boolean` | `true` | Enable emulation tools |
+| `categoryExtensions` | `boolean` | `false` | Enable extension tools |
+
+### Experimental
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `experimentalVision` | `boolean` | `true` | Enable vision tools (click_at) |
+| `experimentalScreencast` | `boolean` | `false` | Enable screencast |
+| `experimentalMemory` | `boolean` | `false` | Enable memory snapshots |
+
+### Privacy
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `usageStatistics` | `boolean` | `false` | Send usage statistics |
+| `performanceCrux` | `boolean` | `false` | Enable CrUX performance data |
+
+### Vision Model (Optional)
+
+Enable `browser_analyze_screenshot` by providing a vision model config in `config.json`:
+
+```json
+{
+  "pi-browser-use": {
+    "visionModel": {
+      "provider": "openai",
+      "model": "gpt-4o",
+      "apiKey": "sk-...",
+      "baseUrl": "https://api.openai.com/v1"
+    }
+  }
+}
+```
+
+Supported providers: `openai`, `anthropic`, or any OpenAI-compatible API. API keys can also be set via environment variables (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`).
+
+## Tool Augmentation
+
+Key tools receive additional usage hints in their descriptions:
+
+| Tool | Hint |
+|------|------|
+| `browser_click` | Use element uid from snapshot; UIDs invalidated after action |
+| `browser_fill` | Does not work on canvas/custom widgets |
+| `browser_press_key` | Accepts single key name only |
+| `browser_take_snapshot` | Call first to get uids, and after every state-changing action |
+| `browser_navigate_page` | Call take_snapshot after navigation |
+
+## Result Post-Processing
+
+- **Snapshot stripping** — Removes embedded accessibility tree snapshots from non-snapshot tool responses to prevent token bloat
+- **Overlay detection** — When a click is blocked by an overlay/popup, appends a hint to dismiss it first
+- **Stale element detection** — When element references are stale, appends a hint to refresh the snapshot
+
+## Excluded Tools
+
+- `lighthouse_audit` — Filtered out at the proxy level
+
+## License
+
+Apache-2.0

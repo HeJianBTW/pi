@@ -1,0 +1,115 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { describe, expect, test, vi } from 'vitest';
+
+vi.mock('../index.js', () => ({
+  DevToolsClient: class {
+    connect = vi.fn();
+    listAllTools = vi.fn(() => Promise.resolve([]));
+    callTool = vi.fn();
+    close = vi.fn();
+  },
+  default: vi.fn(),
+}));
+
+vi.mock('@modelcontextprotocol/sdk/server/index.js', () => ({
+  Server: class {
+    setRequestHandler = vi.fn();
+    connect = vi.fn();
+  },
+}));
+
+vi.mock('@modelcontextprotocol/sdk/server/stdio.js', () => ({
+  StdioServerTransport: class {},
+}));
+
+const { parseArgs } = await import('../cli.js');
+
+describe('parseArgs', () => {
+  test('--headless produces boolean true', () => {
+    const config = parseArgs(['--headless']);
+    expect(config.headless).toBe(true);
+  });
+
+  test('--channel=canary produces string value', () => {
+    const config = parseArgs(['--channel=canary']);
+    expect(config.channel).toBe('canary');
+  });
+
+  test('--flag=true produces boolean true', () => {
+    const config = parseArgs(['--headless=true']);
+    expect(config.headless).toBe(true);
+  });
+
+  test('--flag=false produces boolean false', () => {
+    const config = parseArgs(['--headless=false']);
+    expect(config.headless).toBe(false);
+  });
+
+  test('kebab-case converts to camelCase', () => {
+    const config = parseArgs(['--user-data-dir=/tmp/chrome']);
+    expect(config.userDataDir).toBe('/tmp/chrome');
+  });
+
+  test('multiple flags combined', () => {
+    const config = parseArgs(['--headless', '--channel=stable', '--viewport=1920x1080']);
+    expect(config.headless).toBe(true);
+    expect(config.channel).toBe('stable');
+    expect(config.viewport).toBe('1920x1080');
+  });
+
+  test('empty args returns empty config', () => {
+    const config = parseArgs([]);
+    expect(config).toEqual({});
+  });
+
+  test('--config reads JSON file', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cli-test-'));
+    const configPath = join(dir, 'settings.json');
+    writeFileSync(
+      configPath,
+      JSON.stringify({
+        'pi-browser-use': {
+          headless: true,
+          channel: 'canary',
+        },
+      }),
+    );
+
+    try {
+      const config = parseArgs(['--config', configPath]);
+      expect(config.headless).toBe(true);
+      expect(config.channel).toBe('canary');
+    } finally {
+      rmSync(dir, { recursive: true });
+    }
+  });
+
+  test('--config reads top-level keys when no pi-browser-use section', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cli-test-'));
+    const configPath = join(dir, 'settings.json');
+    writeFileSync(configPath, JSON.stringify({ headless: true, viewport: '1280x720' }));
+
+    try {
+      const config = parseArgs(['--config', configPath]);
+      expect(config.headless).toBe(true);
+      expect(config.viewport).toBe('1280x720');
+    } finally {
+      rmSync(dir, { recursive: true });
+    }
+  });
+
+  test('--config can be combined with other flags (flags override)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cli-test-'));
+    const configPath = join(dir, 'settings.json');
+    writeFileSync(configPath, JSON.stringify({ 'pi-browser-use': { channel: 'canary' } }));
+
+    try {
+      const config = parseArgs(['--config', configPath, '--channel=stable']);
+      expect(config.channel).toBe('stable');
+    } finally {
+      rmSync(dir, { recursive: true });
+    }
+  });
+});

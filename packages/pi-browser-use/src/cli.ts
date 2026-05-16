@@ -1,0 +1,160 @@
+#!/usr/bin/env node
+
+/**
+ * Standalone MCP server mode.
+ *
+ * Runs pi-browser-use as a standalone process that speaks MCP over stdio.
+ * Used when pi-browser-use is configured as an external MCP server (e.g. in mcp.json)
+ * rather than loaded as a pi-coding-agent extension.
+ */
+
+import { readFileSync } from 'node:fs';
+import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import { createFetchVisionCaller, handleAnalyzeScreenshot } from './analyze-screenshot.js';
+import type { BrowserUseConfig } from './config.js';
+import { DevToolsClient } from './index.js';
+import {
+  augmentToolDescription,
+  extractTextContent,
+  postProcessToolResult,
+} from './tool-augment.js';
+
+const TOOL_PREFIX = 'browser_';
+const EXCLUDED_TOOLS = new Set([
+  'lighthouse_audit',
+  'performance_analyze_insight',
+  'performance_start_trace',
+  'performance_stop_trace',
+  'screencast_start',
+  'screencast_stop',
+  'install_extension',
+  'list_extensions',
+  'reload_extension',
+  'trigger_extension_action',
+  'uninstall_extension',
+]);
+
+export function parseArgs(argv: string[]): BrowserUseConfig {
+  const config: BrowserUseConfig = {};
+  let i = 0;
+
+  while (i < argv.length) {
+    const arg = argv[i]!;
+
+    if (arg === '--config' && argv[i + 1] != null) {
+      const raw = readFileSync(argv[i + 1]!, 'utf-8');
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      const section = (parsed['pi-browser-use'] ?? parsed) as BrowserUseConfig;
+      Object.assign(config, section);
+      i += 2;
+      continue;
+    }
+
+    const match = arg.match(/^--([a-z-]+)(?:=(.+))?$/);
+    if (match) {
+      const key = match[1]!;
+      const value = match[2];
+      const camelKey = key.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());
+
+      if (value === undefined || value === 'true') {
+        (config as Record<string, unknown>)[camelKey] = true;
+      } else if (value === 'false') {
+        (config as Record<string, unknown>)[camelKey] = false;
+      } else {
+        (config as Record<string, unknown>)[camelKey] = value;
+      }
+    }
+
+    i++;
+  }
+
+  return config;
+}
+
+async function main(): Promise<void> {
+  const config = parseArgs(process.argv.slice(2));
+  const client = new DevToolsClient(config);
+  await client.connect();
+
+  const toolNameMap = new Map<string, string>();
+
+  const server = new Server(
+    { name: 'pi-browser-use', version: '0.1.0' },
+    { capabilities: { tools: {} } },
+  );
+
+  server.setRequestHandler(ListToolsRequestSchema, async () => {
+    const upstreamTools = await client.listAllTools();
+    const tools = [];
+    toolNameMap.clear();
+
+    for (const tool of upstreamTools) {
+      if (EXCLUDED_TOOLS.has(tool.name)) continue;
+      const prefixedName = `${TOOL_PREFIX}${tool.name}`;
+      toolNameMap.set(prefixedName, tool.name);
+      tools.push({
+        ...tool,
+        name: prefixedName,
+        description: augmentToolDescription(tool.name, tool.description ?? ''),
+      });
+    }
+
+    if (config.visionModel) {
+      const name = `${TOOL_PREFIX}analyze_screenshot`;
+      toolNameMap.set(name, 'analyze_screenshot');
+      tools.push({
+        name,
+        description: 'Analyze the current page visually using a screenshot.',
+        inputSchema: {
+          type: 'object' as const,
+          properties: {
+            instruction: {
+              type: 'string',
+              description: 'What to identify or analyze visually.',
+            },
+          },
+          required: ['instruction'],
+        },
+      });
+    }
+
+    return { tools };
+  });
+
+  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    const { name, arguments: args } = request.params;
+    const originalName = toolNameMap.get(name);
+    if (!originalName) throw new Error(`Unknown tool: ${name}`);
+
+    if (originalName === 'analyze_screenshot' && config.visionModel) {
+      const callVision = createFetchVisionCaller(config.visionModel);
+      return await handleAnalyzeScreenshot(client, callVision, args ?? {});
+    }
+
+    const result = await client.callTool(originalName, args ?? {});
+    const textContent = extractTextContent(result.content);
+    const processed = postProcessToolResult(originalName, textContent);
+
+    if (processed !== textContent) {
+      const newContent = (result.content ?? []).map((item) => {
+        if (item.type === 'text') {
+          return { ...item, text: processed };
+        }
+        return item;
+      });
+      return { ...result, content: newContent } as Record<string, unknown>;
+    }
+
+    return result as Record<string, unknown>;
+  });
+
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+}
+
+main().catch((error) => {
+  console.error(`[pi-browser-use] Fatal error: ${error}`);
+  process.exit(1);
+});

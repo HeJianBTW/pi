@@ -1,4 +1,29 @@
-node_modules/
+# AI Agents
+.claude/
+.cursor/
+.codex/
+.gemini/
+.augment/
+.aider/
+.cline/
+.copilot/
+.windsurf/
+
+# IDE
+.idea/
+*.iml
+
+# OS
+.DS_Store
+
+# Env
+.env
+.env.*
+!.env.example
+
+# Build
 dist/
 *.tsbuildinfo
-.DS_Store
+
+# Dependencies
+node_modules/
