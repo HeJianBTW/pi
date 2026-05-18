@@ -1,13 +1,13 @@
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
 import { type ComputerAction, dispatchAction } from './actions.js';
-import { type ComputerUseConfig, loadConfigFromFile, resolveConfig } from './config.js';
 import { ComputerClient } from './computer-client.js';
+import { type ComputerUseConfig, loadConfigFromFile, resolveConfig } from './config.js';
 import { ComputerServerProcess } from './server-process.js';
 import { createPiVisionCaller } from './vision.js';
 
 export type { ComputerUseConfig };
-export { resolveConfig, loadConfigFromFile };
+export { loadConfigFromFile, resolveConfig };
 
 export default function computerUseExtension(pi: ExtensionAPI): void {
   const config = resolveConfig(loadConfigFromFile());

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import type { JsonObject, RuntimeModelConfig } from '@amaster.ai/pi-types';
+import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import {
   CompositeRuntimeEventExporter,
   NoopRuntimeEventExporter,
@@ -31,9 +31,7 @@ export default function telemetryExtension(pi: ExtensionAPI): void {
     const langfuse = createRuntimeEventExporterFromEnv(env);
     const otel = createOtelRuntimeEventExporterFromEnv(env);
 
-    const active = [langfuse, otel].filter(
-      (e) => !(e instanceof NoopRuntimeEventExporter),
-    );
+    const active = [langfuse, otel].filter((e) => !(e instanceof NoopRuntimeEventExporter));
     if (active.length > 1) {
       exporter = new CompositeRuntimeEventExporter(active);
     } else if (active.length === 1) {

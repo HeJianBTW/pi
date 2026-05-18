@@ -5,7 +5,7 @@ let processExitHandler: ((code: number | null) => void) | null = null;
 let processErrorHandler: ((err: Error) => void) | null = null;
 let mockExitCode: number | null = null;
 
-const mockSpawn = vi.fn(() => ({
+const mockSpawn = vi.fn((_cmd: string, _args: string[], _opts: object) => ({
   get exitCode() {
     return mockExitCode;
   },
@@ -20,7 +20,7 @@ const mockSpawn = vi.fn(() => ({
 }));
 
 vi.mock('node:child_process', () => ({
-  spawn: (...args: unknown[]) => mockSpawn(...(args as [string, string[], object])),
+  spawn: (cmd: string, args: string[], opts: object) => mockSpawn(cmd, args, opts),
 }));
 
 let wsProbeCallCount = 0;
