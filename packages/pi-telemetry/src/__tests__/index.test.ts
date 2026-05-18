@@ -4,7 +4,7 @@ import {
   CompositeRuntimeEventExporter,
   NoopRuntimeEventExporter,
   type RuntimeTelemetryEvent,
-} from './index.js';
+} from '../index.js';
 import {
   createRuntimeEventExporterFromEnv as createLangfuseRuntimeEventExporterFromEnv,
   LangfuseHttpRuntimeEventExporter,
@@ -15,12 +15,12 @@ import {
   type LangfuseSdkTraceClient,
   mapRuntimeEventToLangfuse,
   resolveLangfuseConfig,
-} from './langfuse.js';
+} from '../langfuse.js';
 import {
   createOtelRuntimeEventExporterFromEnv,
   OtelRuntimeEventExporter,
   resolveOtelConfig,
-} from './otel.js';
+} from '../otel.js';
 
 const traceId = '11111111111111111111111111111111';
 
