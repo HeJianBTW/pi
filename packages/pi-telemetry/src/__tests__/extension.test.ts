@@ -17,9 +17,9 @@ vi.mock('../otel.js', () => ({
   })),
 }));
 
+import { NoopRuntimeEventExporter } from '../index.js';
 import { createRuntimeEventExporterFromEnv } from '../langfuse.js';
 import { createOtelRuntimeEventExporterFromEnv } from '../otel.js';
-import { NoopRuntimeEventExporter } from '../index.js';
 
 type EventHandler = (...args: any[]) => Promise<void> | void;
 
