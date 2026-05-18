@@ -112,4 +112,52 @@ describe('configToArgs', () => {
     const args = configToArgs({ headless: false });
     expect(args).not.toContain('--headless');
   });
+
+  test('experimentalVision false does not add --experimental-vision', () => {
+    const args = configToArgs({ experimentalVision: false });
+    expect(args).not.toContain('--experimental-vision');
+  });
+
+  test('experimentalScreencast false does not add --experimental-screencast', () => {
+    const args = configToArgs({ experimentalScreencast: false });
+    expect(args).not.toContain('--experimental-screencast');
+  });
+
+  test('experimentalMemory false does not add --experimental-memory', () => {
+    const args = configToArgs({ experimentalMemory: false });
+    expect(args).not.toContain('--experimental-memory');
+  });
+
+  test('usageStatistics true does not add --no-usage-statistics', () => {
+    const args = configToArgs({ usageStatistics: true });
+    expect(args).not.toContain('--no-usage-statistics');
+  });
+
+  test('performanceCrux true does not add --no-performance-crux', () => {
+    const args = configToArgs({ performanceCrux: true });
+    expect(args).not.toContain('--no-performance-crux');
+  });
+
+  test('categoryNetwork true does not add --category-network=false', () => {
+    const args = configToArgs({ categoryNetwork: true });
+    expect(args).not.toContain('--category-network=false');
+  });
+
+  test('categoryEmulation true does not add --category-emulation=false', () => {
+    const args = configToArgs({ categoryEmulation: true });
+    expect(args).not.toContain('--category-emulation=false');
+  });
+
+  test('categoryExtensions false does not add --category-extensions=true', () => {
+    const args = configToArgs({ categoryExtensions: false });
+    expect(args).not.toContain('--category-extensions=true');
+  });
+
+  test('visionModel config does not produce its own CLI flag', () => {
+    const args = configToArgs({
+      visionModel: { provider: 'openai', model: 'gpt-4o' },
+    });
+    expect(args.join(' ')).not.toContain('openai');
+    expect(args.join(' ')).not.toContain('gpt-4o');
+  });
 });

@@ -113,6 +113,29 @@ describe('postProcessToolResult', () => {
     const result = postProcessToolResult('click', input);
     expect(result).toBe(input);
   });
+
+  test('click_at also gets overlay hint', () => {
+    const result = postProcessToolResult('click_at', 'Error: element is not visible');
+    expect(result).toContain('overlay');
+  });
+
+  test('both overlay and stale patterns trigger both hints', () => {
+    const result = postProcessToolResult('click', 'Error: element is stale and not interactable');
+    expect(result).toContain('overlay');
+    expect(result).toContain('take_snapshot');
+  });
+
+  test('preserves original content when no patterns match', () => {
+    const input = 'Navigated to https://example.com';
+    const result = postProcessToolResult('navigate_page', input);
+    expect(result).toBe(input);
+  });
+
+  test('strips only snapshot section, preserves preceding content', () => {
+    const input = 'First line\nSecond line\n## Latest page snapshot\n<tree>big tree</tree>';
+    const result = postProcessToolResult('fill', input);
+    expect(result).toBe('First line\nSecond line');
+  });
 });
 
 describe('extractTextContent', () => {

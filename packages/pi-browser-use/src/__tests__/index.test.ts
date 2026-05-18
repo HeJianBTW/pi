@@ -265,6 +265,112 @@ describe('browserUseExtension', () => {
     });
   });
 
+  describe('tool execution edge cases', () => {
+    test('passes isError through from upstream result', async () => {
+      mockCallTool.mockResolvedValueOnce({
+        content: [{ type: 'text', text: 'Error: element not found' }],
+        isError: true,
+      });
+
+      await startExtension();
+      const clickTool = registeredTools.get('browser_click')!;
+
+      const result = (await clickTool.execute('call-1', {}, undefined, undefined, {})) as {
+        content: Array<{ type: string; text: string }>;
+        isError?: boolean;
+      };
+
+      expect(result.content[0]!.text).toContain('element not found');
+    });
+
+    test('appends overlay hint for click action blocked by overlay', async () => {
+      mockCallTool.mockResolvedValueOnce({
+        content: [{ type: 'text', text: 'Element is not interactable' }],
+      });
+
+      await startExtension();
+      const clickTool = registeredTools.get('browser_click')!;
+
+      const result = (await clickTool.execute('call-1', {}, undefined, undefined, {})) as {
+        content: Array<{ type: string; text: string }>;
+      };
+
+      expect(result.content[0]!.text).toContain('overlay');
+    });
+
+    test('appends stale hint when result mentions stale element', async () => {
+      mockCallTool.mockResolvedValueOnce({
+        content: [{ type: 'text', text: 'Error: stale element reference' }],
+      });
+
+      await startExtension();
+      const clickTool = registeredTools.get('browser_click')!;
+
+      const result = (await clickTool.execute('call-1', {}, undefined, undefined, {})) as {
+        content: Array<{ type: string; text: string }>;
+      };
+
+      expect(result.content[0]!.text).toContain('take_snapshot');
+    });
+
+    test('handles upstream result with multiple text items', async () => {
+      mockCallTool.mockResolvedValueOnce({
+        content: [
+          { type: 'text', text: 'Line 1' },
+          { type: 'text', text: 'Line 2' },
+        ],
+      });
+
+      await startExtension();
+      const navTool = registeredTools.get('browser_navigate_page')!;
+
+      const result = (await navTool.execute(
+        'call-1',
+        { url: 'http://x' },
+        undefined,
+        undefined,
+        {},
+      )) as {
+        content: Array<{ type: string; text: string }>;
+      };
+
+      expect(result.content).toHaveLength(2);
+      expect(result.content[0]!.text).toBe('Line 1');
+      expect(result.content[1]!.text).toBe('Line 2');
+    });
+
+    test('does not strip snapshot from take_snapshot result', async () => {
+      mockCallTool.mockResolvedValueOnce({
+        content: [{ type: 'text', text: 'Snapshot\n## Latest page snapshot\n<tree>data</tree>' }],
+      });
+
+      await startExtension();
+      const snapshotTool = registeredTools.get('browser_take_snapshot')!;
+
+      const result = (await snapshotTool.execute('call-1', {}, undefined, undefined, {})) as {
+        content: Array<{ type: string; text: string }>;
+      };
+
+      expect(result.content[0]!.text).toContain('Latest page snapshot');
+    });
+
+    test('handles upstream result with no text content (only images)', async () => {
+      mockCallTool.mockResolvedValueOnce({
+        content: [{ type: 'image', data: 'base64data', mimeType: 'image/png' }],
+      });
+
+      await startExtension();
+      const clickTool = registeredTools.get('browser_click')!;
+
+      const result = (await clickTool.execute('call-1', {}, undefined, undefined, {})) as {
+        content: Array<{ type: string; text: string }>;
+      };
+
+      expect(result.content).toHaveLength(1);
+      expect(result.content[0]!.text).toBe('');
+    });
+  });
+
   describe('lifecycle (session_shutdown)', () => {
     test('closes the chrome-devtools-mcp subprocess', async () => {
       await startExtension();
