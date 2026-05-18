@@ -155,6 +155,7 @@ export type SecurityGateAuthorizeInput = {
 export type SecurityGateOptions = {
   profile: string;
   config?: SecurityConfig;
+  filePolicies?: Record<string, SecurityProfileConfig>;
   engine?: SecurityPolicyEngine;
   approvalHandler?: SecurityApprovalHandler;
   auditSink?: SecurityAuditSink;
@@ -352,7 +353,8 @@ export class SecurityGate {
 
   constructor(options: SecurityGateOptions) {
     this.engine =
-      options.engine ?? createSecurityPolicyEngineForProfile(options.profile, options.config);
+      options.engine ??
+      createSecurityPolicyEngineForProfile(options.profile, options.config, options.filePolicies);
     this.approvalHandler = options.approvalHandler;
     this.auditSink = options.auditSink;
   }
@@ -441,8 +443,9 @@ export function assertSecurityDecisionAllowed(decision: SecurityDecision): void 
 export function resolveCapabilityPolicy(
   profile: string,
   config: SecurityConfig = {},
+  filePolicies: Record<string, SecurityProfileConfig> = {},
 ): CapabilityPolicy {
-  return resolveSecurityProfile(profile, config).capabilities;
+  return resolveSecurityProfile(profile, config, [], filePolicies).capabilities;
 }
 
 export function isCapabilityExposed(toolName: string, policy: CapabilityPolicy): boolean {
@@ -459,8 +462,9 @@ export function isCapabilityExposed(toolName: string, policy: CapabilityPolicy):
 export function createSecurityPolicyEngineForProfile(
   profile: string,
   config: SecurityConfig = {},
+  filePolicies: Record<string, SecurityProfileConfig> = {},
 ): SecurityPolicyEngine {
-  const resolvedProfile = resolveSecurityProfile(profile, config);
+  const resolvedProfile = resolveSecurityProfile(profile, config, [], filePolicies);
   const capabilityRules: SecurityRule[] =
     resolvedProfile.capabilities.allow?.map((toolName) => ({
       id: `allow-capability-${profile}-${toolName}`,
@@ -638,14 +642,20 @@ function resolveSecurityProfile(
   profile: string,
   config: SecurityConfig,
   seen: string[] = [],
+  filePolicies: Record<string, SecurityProfileConfig> = {},
 ): { capabilities: CapabilityPolicy; rules: SecurityRule[]; defaultDecision?: SecurityDecision } {
   const normalizedProfile = profile.trim();
   if (seen.includes(normalizedProfile)) {
     return { capabilities: DEFAULT_CAPABILITY_POLICY, rules: [] };
   }
-  const configured = config.profiles?.[normalizedProfile];
+  const configured = filePolicies[normalizedProfile] ?? config.profiles?.[normalizedProfile];
   const parent = configured?.extends
-    ? resolveSecurityProfile(configured.extends, config, seen.concat(normalizedProfile))
+    ? resolveSecurityProfile(
+        configured.extends,
+        config,
+        seen.concat(normalizedProfile),
+        filePolicies,
+      )
     : {
         capabilities: BUILTIN_CAPABILITY_POLICIES[normalizedProfile] ?? DEFAULT_CAPABILITY_POLICY,
         rules: BUILTIN_SECURITY_RULES[normalizedProfile] ?? BASELINE_SECURITY_RULES,

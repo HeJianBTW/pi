@@ -150,3 +150,180 @@ function tool(
 ): ToolCallRequest {
   return { id: `${name}-1`, name, source, args };
 }
+
+describe('file-based policy resolution', () => {
+  it('file policies take priority over settings profiles', () => {
+    const filePolicies = {
+      custom: { capabilities: { allow: ['read_file'] } },
+    };
+    const config = {
+      profiles: { custom: { capabilities: { allow: ['write_file', 'run_shell'] } } },
+    };
+
+    const policy = resolveCapabilityPolicy('custom', config, filePolicies);
+    expect(policy.allow).toContain('read_file');
+    expect(policy.allow).not.toContain('write_file');
+  });
+
+  it('file policy extends built-in profile', () => {
+    const filePolicies = {
+      'my-profile': { extends: 'admin', capabilities: { deny: ['run_shell'] } },
+    };
+
+    const policy = resolveCapabilityPolicy('my-profile', {}, filePolicies);
+    expect(policy.allow).toContain('*');
+    expect(policy.deny).toContain('run_shell');
+  });
+
+  it('file policy extends another file policy', () => {
+    const filePolicies = {
+      base: { capabilities: { allow: ['read_file', 'list_files'] } },
+      child: { extends: 'base', capabilities: { allow: ['write_file'] } },
+    };
+
+    const policy = resolveCapabilityPolicy('child', {}, filePolicies);
+    expect(policy.allow).toContain('read_file');
+    expect(policy.allow).toContain('list_files');
+    expect(policy.allow).toContain('write_file');
+  });
+
+  it('falls back to built-in when no file or settings profile exists', () => {
+    const policy = resolveCapabilityPolicy('admin', {}, {});
+    expect(policy.allow).toContain('*');
+  });
+
+  it('engine uses file policies for authorization', () => {
+    const filePolicies = {
+      strict: {
+        capabilities: { allow: ['read_file'] },
+        defaultDecision: { kind: 'deny' as const, reason: 'Strict profile' },
+      },
+    };
+
+    const engine = createSecurityPolicyEngineForProfile('strict', {}, filePolicies);
+    const allowed = engine.evaluate({
+      request,
+      toolCall: tool('read_file', 'sandbox', { path: '/a.txt' }),
+    });
+    expect(allowed.decision.kind).toBe('allow');
+
+    const denied = engine.evaluate({
+      request,
+      toolCall: tool('write_file', 'sandbox', { path: '/a.txt', content: '' }),
+    });
+    expect(denied.decision.kind).toBe('deny');
+  });
+
+  it('circular extends in file policies returns safe default', () => {
+    const filePolicies = {
+      a: { extends: 'b', capabilities: { allow: ['read_file'] } },
+      b: { extends: 'a', capabilities: { allow: ['write_file'] } },
+    };
+
+    const policy = resolveCapabilityPolicy('a', {}, filePolicies);
+    expect(policy).toBeDefined();
+    expect(policy.deny).toContain('run_shell');
+  });
+
+  it('file policy extends a settings profile', () => {
+    const filePolicies = {
+      custom: { extends: 'from-settings', capabilities: { allow: ['run_shell'] } },
+    };
+    const config = {
+      profiles: {
+        'from-settings': { capabilities: { allow: ['read_file', 'write_file'] } },
+      },
+    };
+
+    const policy = resolveCapabilityPolicy('custom', config, filePolicies);
+    expect(policy.allow).toContain('read_file');
+    expect(policy.allow).toContain('write_file');
+    expect(policy.allow).toContain('run_shell');
+  });
+
+  it('file policy with custom rules are appended to parent rules', () => {
+    const filePolicies = {
+      'with-rules': {
+        extends: 'admin',
+        rules: [
+          {
+            id: 'ask-shell',
+            priority: 400,
+            tools: ['run_shell'],
+            decision: { kind: 'ask' as const, reason: 'Shell needs approval' },
+          },
+        ],
+      },
+    };
+
+    const engine = createSecurityPolicyEngineForProfile('with-rules', {}, filePolicies);
+    const result = engine.evaluate({
+      request,
+      toolCall: tool('run_shell', 'sandbox', { command: 'ls' }),
+    });
+    expect(result.decision.kind).toBe('ask');
+    expect(result.matchedRuleIds).toContain('ask-shell');
+  });
+
+  it('file policy defaultDecision overrides parent', () => {
+    const filePolicies = {
+      strict: {
+        extends: 'workspace-read',
+        defaultDecision: { kind: 'deny' as const, reason: 'Strict deny by default' },
+      },
+    };
+
+    const engine = createSecurityPolicyEngineForProfile('strict', {}, filePolicies);
+    const result = engine.evaluate({
+      request,
+      toolCall: tool('run_shell', 'sandbox', { command: 'echo hi' }),
+    });
+    expect(result.decision.kind).toBe('deny');
+    expect(result.decision).toMatchObject({ reason: 'Strict deny by default' });
+  });
+
+  it('SecurityGate accepts filePolicies option', async () => {
+    const filePolicies = {
+      locked: {
+        capabilities: { allow: ['read_file'] },
+        defaultDecision: { kind: 'deny' as const, reason: 'Locked profile' },
+      },
+    };
+
+    const gate = new SecurityGate({
+      profile: 'locked',
+      filePolicies,
+    });
+
+    const allowed = await gate.authorize({
+      request,
+      toolCall: tool('read_file', 'sandbox', { path: '/a.txt' }),
+    });
+    expect(allowed.decision.kind).toBe('allow');
+
+    const denied = await gate.authorize({
+      request,
+      toolCall: tool('write_file', 'sandbox', { path: '/a.txt', content: '' }),
+    });
+    expect(denied.decision.kind).toBe('deny');
+  });
+
+  it('three-level extends chain: file → file → built-in', () => {
+    const filePolicies = {
+      grandchild: { extends: 'child', capabilities: { allow: ['run_code'] } },
+      child: { extends: 'workspace-read', capabilities: { allow: ['search_files'] } },
+    };
+
+    const policy = resolveCapabilityPolicy('grandchild', {}, filePolicies);
+    expect(policy.allow).toContain('read_file');
+    expect(policy.allow).toContain('list_files');
+    expect(policy.allow).toContain('search_files');
+    expect(policy.allow).toContain('run_code');
+  });
+
+  it('empty file policies object has no effect on resolution', () => {
+    const withEmpty = resolveCapabilityPolicy('copilot', {}, {});
+    const without = resolveCapabilityPolicy('copilot', {});
+    expect(withEmpty).toEqual(without);
+  });
+});
