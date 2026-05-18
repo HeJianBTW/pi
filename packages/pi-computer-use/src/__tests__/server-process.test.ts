@@ -5,7 +5,7 @@ let processExitHandler: ((code: number | null) => void) | null = null;
 let processErrorHandler: ((err: Error) => void) | null = null;
 let mockExitCode: number | null = null;
 
-const mockSpawn = vi.fn(() => ({
+const mockSpawn = vi.fn((_cmd: string, _args: string[], _options: object) => ({
   get exitCode() {
     return mockExitCode;
   },

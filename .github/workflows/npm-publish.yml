@@ -6,11 +6,11 @@ on:
       npm_tag:
         description: npm dist-tag to publish with
         required: true
-        default: latest
+        default: beta
         type: choice
         options:
-          - latest
           - beta
+          - latest
       version_bump:
         description: version bump level; use current for the first release
         required: true
@@ -104,17 +104,29 @@ jobs:
             .filter((file) => fs.existsSync(file));
 
           const packageJsonFiles = [rootPackageFile, ...packageFiles];
-          const packages = packageFiles.map((file) => JSON.parse(fs.readFileSync(file, "utf8")));
-          const publishedPackages = packages.filter((pkg) => !pkg.private).map((pkg) => pkg.name);
-          if (publishedPackages.length === 0) {
+          const rootPackage = JSON.parse(fs.readFileSync(rootPackageFile, "utf8"));
+          const packages = packageFiles.map((file) => ({
+            file,
+            pkg: JSON.parse(fs.readFileSync(file, "utf8")),
+          }));
+          const publishablePackages = packages.filter(({ pkg }) => !pkg.private);
+          const publishedPackages = publishablePackages.map(({ pkg }) => pkg.name);
+          if (publishablePackages.length === 0) {
             throw new Error("No publishable packages found.");
           }
 
-          const localVersions = new Set(packages.filter((pkg) => !pkg.private).map((pkg) => pkg.version));
-          if (localVersions.size !== 1) {
-            throw new Error(`Expected all local publishable package versions to match, found: ${[...localVersions].join(", ")}`);
+          const localVersion = rootPackage.version;
+          if (!localVersion) {
+            throw new Error("Root package version is required.");
           }
-          const localVersion = [...localVersions][0];
+          const mismatchedLocalVersions = publishablePackages
+            .filter(({ pkg }) => pkg.version !== localVersion)
+            .map(({ pkg }) => `${pkg.name}@${pkg.version}`);
+          if (mismatchedLocalVersions.length > 0) {
+            console.warn(
+              `Publishable package versions differ from root ${localVersion}; they will be normalized before publishing: ${mismatchedLocalVersions.join(", ")}`
+            );
+          }
 
           const parseVersion = (version) => {
             const match = version.match(/^(\d+)\.(\d+)\.(\d+)(?:-beta\.(\d+))?$/);
@@ -185,11 +197,6 @@ jobs:
           );
 
           const allPackagesUnpublished = remoteInfos.every((info) => info.distTags === null);
-          const somePackagesUnpublished = remoteInfos.some((info) => info.distTags === null);
-          if (!allPackagesUnpublished && somePackagesUnpublished) {
-            const missing = remoteInfos.filter((info) => info.distTags === null).map((info) => info.packageName);
-            throw new Error(`Some packages are missing from npm while others are published: ${missing.join(", ")}`);
-          }
           if (latestVersions.size > 1) {
             throw new Error(`Expected all npm latest versions to match before publishing, found: ${[...latestVersions].join(", ")}`);
           }
@@ -202,6 +209,7 @@ jobs:
           const currentBetaVersion = [...betaVersions][0] ?? null;
           let nextVersion;
           let skipPublish = false;
+          let packagesToPublish = publishedPackages;
 
           if (allPackagesUnpublished) {
             const nextBase = bumpStable(parsedLocal, bump);
@@ -210,16 +218,19 @@ jobs:
               : formatStable(nextBase);
           } else {
             if (bump === "current") {
-              const missingCurrent = remoteInfos
-                .filter((info) => !Object.values(info.distTags ?? {}).includes(localVersion))
-                .map((info) => info.packageName);
-              if (missingCurrent.length > 0) {
+              const remotePackagesMissingCurrent = remoteInfos
+                .filter((info) => info.distTags !== null && !Object.values(info.distTags).includes(localVersion))
+                .map((info) => `${info.packageName} (${Object.values(info.distTags).join(", ")})`);
+              if (remotePackagesMissingCurrent.length > 0) {
                 throw new Error(
-                  `version_bump=current can only resume an already-published version. Missing ${localVersion}: ${missingCurrent.join(", ")}`
+                  `version_bump=current can only resume ${localVersion} or publish packages missing from npm. Remote packages without ${localVersion}: ${remotePackagesMissingCurrent.join(", ")}`
                 );
               }
               nextVersion = localVersion;
-              skipPublish = true;
+              packagesToPublish = remoteInfos
+                .filter((info) => info.distTags === null)
+                .map((info) => info.packageName);
+              skipPublish = packagesToPublish.length === 0;
             } else {
               if (!currentVersion) {
                 throw new Error("No remote latest version found on npm.");
@@ -249,6 +260,7 @@ jobs:
               } else {
                 throw new Error(`Unsupported release channel: ${channel}`);
               }
+              packagesToPublish = publishedPackages;
             }
           }
 
@@ -261,6 +273,7 @@ jobs:
 
           fs.appendFileSync(process.env.GITHUB_OUTPUT, `release_version=${nextVersion}\n`);
           fs.appendFileSync(process.env.GITHUB_OUTPUT, `skip_publish=${skipPublish ? "true" : "false"}\n`);
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `publish_filters=${packagesToPublish.join(" ")}\n`);
           EOF
 
       - name: Run checks
@@ -272,6 +285,9 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           publish_cmd=(pnpm publish -r --access public --no-git-checks)
+          for package_name in ${{ steps.versioning.outputs.publish_filters }}; do
+            publish_cmd+=(--filter "$package_name")
+          done
           if [ "${{ inputs.npm_tag }}" = "beta" ]; then
             publish_cmd+=(--tag beta)
           fi
