@@ -5,7 +5,7 @@ import type {
   RuntimeRequestContext,
   ToolCallRequest,
   ToolSource,
-} from '@amaster.ai/pi-types';
+} from '@amaster.ai/pi-shared';
 
 export type SecurityDecision =
   | { kind: 'allow'; reason?: string }

@@ -1,7 +1,7 @@
+import type { TelemetryConfig } from './config.js';
 import {
   NoopRuntimeEventExporter,
   type RuntimeEventExporter,
-  type RuntimeTelemetryOptions,
   type TelemetryEnvironment,
   type TelemetryFetch,
 } from './index.js';
@@ -11,6 +11,32 @@ const DEFAULT_OTEL_FLUSH_AT = 20;
 const DEFAULT_OTEL_FLUSH_INTERVAL_MS = 5000;
 
 export { type OtelExporterConfig, OtelRuntimeEventExporter, type TelemetryFetch };
+
+export function createOtelExporter(
+  telemetryConfig: TelemetryConfig,
+  fetchImpl?: TelemetryFetch,
+): RuntimeEventExporter {
+  const config = resolveOtelExporterConfig(telemetryConfig);
+  return config.enabled
+    ? new OtelRuntimeEventExporter(config, fetchImpl)
+    : new NoopRuntimeEventExporter();
+}
+
+export function resolveOtelExporterConfig(telemetryConfig: TelemetryConfig): OtelExporterConfig {
+  const otel = telemetryConfig.otel;
+  const endpoint = otel?.endpoint ?? '';
+  return {
+    enabled: Boolean(otel?.enabled && endpoint),
+    endpoint,
+    ...(otel?.headers ? { headers: otel.headers } : {}),
+    flushAt: otel?.flushAt ?? DEFAULT_OTEL_FLUSH_AT,
+    flushIntervalMs: otel?.flushIntervalMs ?? DEFAULT_OTEL_FLUSH_INTERVAL_MS,
+    ...(otel?.errorLabel ? { errorLabel: otel.errorLabel } : {}),
+    serviceName: telemetryConfig.serviceName ?? 'pi',
+    ...(telemetryConfig.serviceVersion ? { serviceVersion: telemetryConfig.serviceVersion } : {}),
+    includePayloads: telemetryConfig.includePayloads ?? true,
+  };
+}
 
 export function createOtelRuntimeEventExporterFromEnv(
   env: TelemetryEnvironment,

@@ -12,7 +12,7 @@ import type {
   RuntimeLlmGenerationEvent,
   RuntimeModelConfig,
   RuntimeSession,
-} from '@amaster.ai/pi-types';
+} from '@amaster.ai/pi-shared';
 import type { AssistantMessage, ImageContent } from '@earendil-works/pi-ai';
 import {
   type ActiveQueuedChatInput,

@@ -7,55 +7,85 @@ The root package exposes stable exporter contracts plus no-op and composite expo
 ## Entry Points
 
 - `@amaster.ai/pi-telemetry`: stable contracts, `NoopRuntimeEventExporter`, and `CompositeRuntimeEventExporter`.
+- `@amaster.ai/pi-telemetry/config`: `TelemetryConfig` type, `resolveConfig`, and `loadConfigFromFile`.
 - `@amaster.ai/pi-telemetry/langfuse`: Langfuse SDK and ingestion API exporters.
 - `@amaster.ai/pi-telemetry/otel`: generic OTLP/HTTP traces exporter.
 
-## Langfuse
+## Configuration
 
-```ts
-import { createRuntimeEventExporterFromEnv } from "@amaster.ai/pi-telemetry/langfuse";
+Configuration is read from `.pi/settings.json` under the `"pi-telemetry"` key. Project-level settings (`.pi/settings.json` in the working directory) take priority over user-level settings (`~/.pi/agent/settings.json`).
 
-const exporter = createRuntimeEventExporterFromEnv(process.env);
+```json
+{
+  "pi-telemetry": {
+    "serviceName": "my-service",
+    "serviceVersion": "1.0.0",
+    "includePayloads": true,
+    "langfuse": {
+      "enabled": true,
+      "publicKey": "pk-lf-...",
+      "secretKey": "sk-lf-...",
+      "baseUrl": "https://cloud.langfuse.com",
+      "transport": "sdk",
+      "flushAt": 20,
+      "flushIntervalMs": 5000
+    },
+    "otel": {
+      "enabled": true,
+      "endpoint": "https://otel-collector.example.com",
+      "headers": { "Authorization": "Bearer ..." },
+      "flushAt": 20,
+      "flushIntervalMs": 5000
+    }
+  }
+}
 ```
 
-Telemetry is disabled unless credentials are present. Supported environment variables include:
+### Config Fields
 
-- `LANGFUSE_ENABLED`
-- `LANGFUSE_PUBLIC_KEY`
-- `LANGFUSE_SECRET_KEY`
-- `LANGFUSE_BASE_URL`
-- `LANGFUSE_TRANSPORT`
-- `TELEMETRY_SERVICE_NAME`
-- `TELEMETRY_SERVICE_VERSION`
-- `TELEMETRY_INCLUDE_PAYLOADS`
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `serviceName` | `string` | `"pi-server"` | Service name for traces |
+| `serviceVersion` | `string` | — | Service version for traces |
+| `includePayloads` | `boolean` | `true` | Include chat payloads, tool args, LLM I/O |
 
-Set `TELEMETRY_INCLUDE_PAYLOADS=false` to remove chat payloads, tool args, and LLM input/output from exported telemetry. For finer control, construct a Langfuse exporter directly and pass `redactEvent`.
+### Langfuse Config
 
-## Generic OTEL
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | `boolean` | `false` | Enable Langfuse exporter |
+| `publicKey` | `string` | — | Langfuse public API key |
+| `secretKey` | `string` | — | Langfuse secret API key |
+| `baseUrl` | `string` | `"https://cloud.langfuse.com"` | Langfuse server URL |
+| `transport` | `"sdk" \| "ingestion"` | `"sdk"` | Transport mode |
+| `flushAt` | `number` | `20` | Batch size before flush |
+| `flushIntervalMs` | `number` | `5000` | Flush interval in ms |
 
-```ts
-import { createOtelRuntimeEventExporterFromEnv } from "@amaster.ai/pi-telemetry/otel";
+### OTEL Config
 
-const exporter = createOtelRuntimeEventExporterFromEnv(process.env);
-```
-
-Supported generic OTEL environment variables include:
-
-- `OTEL_EXPORTER_OTLP_ENDPOINT`
-- `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`
-- `OTEL_EXPORTER_OTLP_HEADERS`
-- `OTEL_EXPORTER_OTLP_TRACES_HEADERS`
-- `OTEL_BSP_MAX_EXPORT_BATCH_SIZE`
-- `OTEL_BSP_SCHEDULE_DELAY`
-- `OTEL_SERVICE_NAME`
-- `OTEL_RESOURCE_ATTRIBUTES`
-- `OTEL_SDK_DISABLED`
-- `TELEMETRY_INCLUDE_PAYLOADS`
-- `TELEMETRY_SERVICE_VERSION`
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | `boolean` | `false` | Enable OTEL exporter |
+| `endpoint` | `string` | — | OTLP traces endpoint |
+| `headers` | `Record<string, string>` | — | Request headers |
+| `flushAt` | `number` | `20` | Batch size before flush |
+| `flushIntervalMs` | `number` | `5000` | Flush interval in ms |
+| `errorLabel` | `string` | — | Custom label for error messages |
 
 When the endpoint does not end with `/v1/traces`, the exporter appends `/v1/traces`.
-Use this entry point for any OTLP/HTTP collector, including Langfuse's OTEL endpoint.
+
+## Programmatic Usage
+
+```ts
+import { loadConfigFromFile, resolveConfig } from "@amaster.ai/pi-telemetry/config";
+import { createLangfuseExporter } from "@amaster.ai/pi-telemetry/langfuse";
+import { createOtelExporter } from "@amaster.ai/pi-telemetry/otel";
+
+const config = resolveConfig(loadConfigFromFile());
+const langfuse = createLangfuseExporter(config);
+const otel = createOtelExporter(config);
+```
 
 ## Privacy
 
-Runtime events may include user prompts, assistant responses, tool arguments, tool outputs, and model inputs/outputs. Keep telemetry disabled by default in downstream applications unless users explicitly configure an exporter.
+Runtime events may include user prompts, assistant responses, tool arguments, tool outputs, and model inputs/outputs. Set `includePayloads: false` to strip these from exported telemetry. For finer control, construct an exporter directly and pass `redactEvent`.

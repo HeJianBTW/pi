@@ -34,6 +34,7 @@
     "test": "vitest run src"
   },
   "dependencies": {
+    "@amaster.ai/pi-shared": "workspace:*",
     "ws": "^8.18.0"
   },
   "peerDependencies": {

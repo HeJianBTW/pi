@@ -2,7 +2,7 @@ import type {
   RuntimeLifecycleEvent,
   RuntimeLlmGenerationEvent,
   RuntimeToolEvent,
-} from '@amaster.ai/pi-types';
+} from '@amaster.ai/pi-shared';
 
 export type RuntimeTelemetryEvent =
   | RuntimeLifecycleEvent

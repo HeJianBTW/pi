@@ -2,7 +2,7 @@ import type {
   RuntimeLifecycleEvent,
   RuntimeLlmGenerationEvent,
   RuntimeSession,
-} from '@amaster.ai/pi-types';
+} from '@amaster.ai/pi-shared';
 import { describe, expect, it } from 'vitest';
 import { ChatTurnTimeoutError, type PromptChatSession, promptChatTurn } from './prompt-turn.js';
 

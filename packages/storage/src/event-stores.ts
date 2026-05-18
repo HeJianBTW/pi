@@ -19,7 +19,7 @@ import type {
   RuntimeTimelineEventStore,
   RuntimeToolEvent,
   ToolEventStore,
-} from '@amaster.ai/pi-types';
+} from '@amaster.ai/pi-shared';
 import { readJsonFile, writeJsonFile } from './json-file.js';
 
 export class JsonFileRuntimeTimelineEventStore implements RuntimeTimelineEventStore {

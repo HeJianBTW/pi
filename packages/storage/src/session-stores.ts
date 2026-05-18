@@ -20,7 +20,7 @@ import type {
   RuntimeSessionStore,
   RuntimeSessionSummary,
   TranscriptStore,
-} from '@amaster.ai/pi-types';
+} from '@amaster.ai/pi-shared';
 import { readJsonFile, writeJsonFile } from './json-file.js';
 
 type RuntimeSessionSummaryFields = Omit<RuntimeSessionSummary, keyof RuntimeSession>;

@@ -6,7 +6,7 @@
     "outDir": "dist"
   },
   "references": [
-    { "path": "../types" },
+    { "path": "../shared" },
     { "path": "../task-scheduler" }
   ],
   "include": ["src/**/*.ts"],

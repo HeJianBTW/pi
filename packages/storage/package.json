@@ -59,7 +59,7 @@
   },
   "dependencies": {
     "@amaster.ai/pi-task-scheduler": "workspace:*",
-    "@amaster.ai/pi-types": "workspace:*",
+    "@amaster.ai/pi-shared": "workspace:*",
     "@prisma/client": "^6.19.3",
     "ioredis": "^5.10.1"
   },

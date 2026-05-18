@@ -38,7 +38,7 @@ import type {
   SubagentRunStore,
   ToolEventStore,
   TranscriptStore,
-} from '@amaster.ai/pi-types';
+} from '@amaster.ai/pi-shared';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { RedisLockManager } from './redis-locks.js';
 import { isTerminalSubagentStatus } from './subagent-store.js';

@@ -1,4 +1,4 @@
-import type { RuntimeRequestContext, ToolCallRequest } from '@amaster.ai/pi-types';
+import type { RuntimeRequestContext, ToolCallRequest } from '@amaster.ai/pi-shared';
 import { describe, expect, it } from 'vitest';
 import {
   assessRisk,

@@ -28,7 +28,7 @@ export type {
   SubagentRunStore,
   ToolEventStore,
   TranscriptStore,
-} from '@amaster.ai/pi-types';
+} from '@amaster.ai/pi-shared';
 export {
   createRuntimeStorage,
   type RuntimeStorageBundle,

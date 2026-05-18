@@ -4,7 +4,7 @@
  * Owns global/session/subagent concurrency limits, busy strategies, queue
  * timeouts, and observable turn status. It does not execute chat logic itself.
  */
-import type { JsonObject, RuntimeScope } from '@amaster.ai/pi-types';
+import type { JsonObject, RuntimeScope } from '@amaster.ai/pi-shared';
 
 export type SessionBusyStrategy = 'reject' | 'queue';
 export type TurnSource = 'chat' | 'scheduled' | 'subagent';

@@ -1,5 +1,5 @@
 {
-  "name": "@amaster.ai/pi-types",
+  "name": "@amaster.ai/pi-shared",
   "version": "0.1.1-beta.0",
   "license": "Apache-2.0",
   "type": "module",
@@ -10,6 +10,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./settings": {
+      "types": "./dist/settings.d.ts",
+      "default": "./dist/settings.js"
     },
     "./package.json": {
       "default": "./package.json"
@@ -24,7 +28,7 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/TGYD-helige/pi.git",
-    "directory": "packages/types"
+    "directory": "packages/shared"
   },
   "scripts": {
     "build": "tsc -b",

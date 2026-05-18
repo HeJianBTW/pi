@@ -1,4 +1,4 @@
-import type { RuntimeLifecycleEvent, RuntimeToolEvent } from '@amaster.ai/pi-types';
+import type { RuntimeLifecycleEvent, RuntimeToolEvent } from '@amaster.ai/pi-shared';
 import { describe, expect, it } from 'vitest';
 import {
   CompositeRuntimeEventExporter,

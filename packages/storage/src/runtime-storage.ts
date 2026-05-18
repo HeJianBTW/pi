@@ -15,7 +15,7 @@ import type {
   SubagentRunStore,
   ToolEventStore,
   TranscriptStore,
-} from '@amaster.ai/pi-types';
+} from '@amaster.ai/pi-shared';
 import { JsonFileArtifactStore } from './artifact-stores.js';
 import { createDbRuntimeStores, verifyDbRuntimeSchema } from './db-runtime-storage.js';
 import {

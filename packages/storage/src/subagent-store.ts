@@ -12,7 +12,7 @@ import type {
   SubagentRun,
   SubagentRunStatus,
   SubagentRunStore,
-} from '@amaster.ai/pi-types';
+} from '@amaster.ai/pi-shared';
 import { readJsonFile, writeJsonFile } from './json-file.js';
 
 type SubagentRunCreateInput = Parameters<SubagentRunStore['create']>[0];

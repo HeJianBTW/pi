@@ -1,13 +1,14 @@
 import { randomUUID } from 'node:crypto';
-import type { JsonObject, RuntimeModelConfig } from '@amaster.ai/pi-types';
+import type { JsonObject, RuntimeModelConfig } from '@amaster.ai/pi-shared';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
+import { loadConfigFromFile, resolveConfig } from './config.js';
 import {
   CompositeRuntimeEventExporter,
   NoopRuntimeEventExporter,
   type RuntimeEventExporter,
 } from './index.js';
-import { createRuntimeEventExporterFromEnv } from './langfuse.js';
-import { createOtelRuntimeEventExporterFromEnv } from './otel.js';
+import { createLangfuseExporter } from './langfuse.js';
+import { createOtelExporter } from './otel.js';
 
 function extractModelConfig(payload: unknown): RuntimeModelConfig {
   if (payload && typeof payload === 'object' && 'model' in payload) {
@@ -27,9 +28,9 @@ export default function telemetryExtension(pi: ExtensionAPI): void {
   let llmGenerationCounter = 0;
 
   pi.on('session_start', async () => {
-    const env = process.env as Record<string, string | undefined>;
-    const langfuse = createRuntimeEventExporterFromEnv(env);
-    const otel = createOtelRuntimeEventExporterFromEnv(env);
+    const config = resolveConfig(loadConfigFromFile());
+    const langfuse = createLangfuseExporter(config);
+    const otel = createOtelExporter(config);
 
     const active = [langfuse, otel].filter((e) => !(e instanceof NoopRuntimeEventExporter));
     if (active.length > 1) {

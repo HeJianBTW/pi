@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import type { ConversationTurn, RuntimeSession } from '@amaster.ai/pi-types';
+import type { ConversationTurn, RuntimeSession } from '@amaster.ai/pi-shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { JsonFileConversationStore, JsonFileTranscriptStore } from './session-stores.js';
 
