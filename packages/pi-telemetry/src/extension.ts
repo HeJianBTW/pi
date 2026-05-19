@@ -47,8 +47,8 @@ export default function telemetryExtension(pi: ExtensionAPI): void {
   let llmGenerationCounter = 0;
   let pendingInput: string | undefined;
 
-  pi.on('session_start', async () => {
-    const config = resolveConfig(loadConfigFromFile());
+  pi.on('session_start', async (_event, ctx) => {
+    const config = resolveConfig(loadConfigFromFile({ cwd: ctx.cwd }));
     const langfuse = createLangfuseExporter(config);
     const otel = createOtelExporter(config);
 

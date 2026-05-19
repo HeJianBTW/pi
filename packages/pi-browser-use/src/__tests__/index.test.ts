@@ -87,7 +87,7 @@ const mockPi = {
   registerTool: vi.fn((tool: RegisteredTool) => {
     registeredTools.set(tool.name, tool);
   }),
-  on: vi.fn((event: string, handler: () => Promise<void>) => {
+  on: vi.fn((event: string, handler: (...args: any[]) => Promise<void>) => {
     if (event === 'session_start') sessionStartHandlers.push(handler);
     if (event === 'session_shutdown') sessionShutdownHandlers.push(handler);
   }),
@@ -106,8 +106,10 @@ async function startExtension(config?: Record<string, unknown>) {
 
   browserUseExtension(mockPi as any);
 
+  const fakeEvent = { type: 'session_start', reason: 'startup' };
+  const fakeCtx = { cwd: process.cwd() };
   for (const handler of sessionStartHandlers) {
-    await handler();
+    await handler(fakeEvent, fakeCtx);
   }
 }
 
