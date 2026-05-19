@@ -12,7 +12,7 @@ import type {
   RuntimeArtifactListInput,
   RuntimeArtifactStore,
   RuntimeScope,
-} from '@amaster.ai/pi-types';
+} from '@amaster.ai/pi-shared';
 import { readJsonFile, writeJsonFile } from './json-file.js';
 
 export class JsonFileArtifactStore implements RuntimeArtifactStore {

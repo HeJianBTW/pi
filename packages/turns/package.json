@@ -33,7 +33,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@amaster.ai/pi-types": "workspace:*",
+    "@amaster.ai/pi-shared": "workspace:*",
     "@earendil-works/pi-ai": "0.74.0"
   },
   "devDependencies": {

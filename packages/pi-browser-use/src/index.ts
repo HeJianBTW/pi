@@ -1,5 +1,4 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { loadPiSettings } from '@amaster.ai/pi-shared/settings';
 import { type TextContent as AiTextContent, complete } from '@earendil-works/pi-ai';
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -129,16 +128,9 @@ export class DevToolsClient {
   }
 }
 
-/** Read the pi-browser-use section from config.json in the working directory. */
+/** Read the pi-browser-use section from .pi/settings.json. */
 function loadConfigFromFile(): BrowserUseConfig {
-  try {
-    const configPath = resolve(process.cwd(), 'config.json');
-    const raw = readFileSync(configPath, 'utf-8');
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    return (parsed['pi-browser-use'] ?? {}) as BrowserUseConfig;
-  } catch {
-    return {};
-  }
+  return loadPiSettings<BrowserUseConfig>('pi-browser-use');
 }
 
 /** Convert upstream MCP result into pi-agent TextContent[], applying post-processing. */

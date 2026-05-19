@@ -11,7 +11,7 @@ import type {
   RuntimeLifecycleEvent,
   RuntimeModelConfig,
   RuntimeSession,
-} from '@amaster.ai/pi-types';
+} from '@amaster.ai/pi-shared';
 
 export type ChatTurnMode = 'reject' | 'queue' | 'steer' | 'followup';
 export type SubagentRoutingMode = 'auto' | 'off' | 'force';

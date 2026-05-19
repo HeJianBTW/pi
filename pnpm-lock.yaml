@@ -32,6 +32,9 @@ importers:
 
   packages/pi-browser-use:
     dependencies:
+      '@amaster.ai/pi-shared':
+        specifier: workspace:*
+        version: link:../shared
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
         version: 1.29.0(zod@4.4.3)
@@ -54,6 +57,9 @@ importers:
 
   packages/pi-computer-use:
     dependencies:
+      '@amaster.ai/pi-shared':
+        specifier: workspace:*
+        version: link:../shared
       ws:
         specifier: ^8.18.0
         version: 8.20.1
@@ -79,9 +85,9 @@ importers:
 
   packages/pi-security:
     dependencies:
-      '@amaster.ai/pi-types':
+      '@amaster.ai/pi-shared':
         specifier: workspace:*
-        version: link:../types
+        version: link:../shared
     devDependencies:
       '@earendil-works/pi-coding-agent':
         specifier: 0.74.0
@@ -92,9 +98,9 @@ importers:
 
   packages/pi-telemetry:
     dependencies:
-      '@amaster.ai/pi-types':
+      '@amaster.ai/pi-shared':
         specifier: workspace:*
-        version: link:../types
+        version: link:../shared
       langfuse:
         specifier: ^3.38.20
         version: 3.38.20
@@ -106,14 +112,16 @@ importers:
         specifier: ^4.0.0
         version: 4.1.6(@types/node@24.12.4)(vite@8.0.13(@types/node@24.12.4)(esbuild@0.27.7)(jiti@2.7.0)(yaml@2.9.0))
 
+  packages/shared: {}
+
   packages/storage:
     dependencies:
+      '@amaster.ai/pi-shared':
+        specifier: workspace:*
+        version: link:../shared
       '@amaster.ai/pi-task-scheduler':
         specifier: workspace:*
         version: link:../task-scheduler
-      '@amaster.ai/pi-types':
-        specifier: workspace:*
-        version: link:../types
       '@prisma/client':
         specifier: ^6.19.3
         version: 6.19.3(prisma@6.19.3(typescript@5.9.3))(typescript@5.9.3)
@@ -130,9 +138,9 @@ importers:
 
   packages/subagents:
     dependencies:
-      '@amaster.ai/pi-types':
+      '@amaster.ai/pi-shared':
         specifier: workspace:*
-        version: link:../types
+        version: link:../shared
       '@earendil-works/pi-ai':
         specifier: 0.74.0
         version: 0.74.0(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.20.1)(zod@4.4.3)
@@ -156,9 +164,9 @@ importers:
 
   packages/turns:
     dependencies:
-      '@amaster.ai/pi-types':
+      '@amaster.ai/pi-shared':
         specifier: workspace:*
-        version: link:../types
+        version: link:../shared
       '@earendil-works/pi-ai':
         specifier: 0.74.0
         version: 0.74.0(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.20.1)(zod@4.4.3)
@@ -166,8 +174,6 @@ importers:
       vitest:
         specifier: ^4.0.0
         version: 4.1.6(@types/node@24.12.4)(vite@8.0.13(@types/node@24.12.4)(esbuild@0.27.7)(jiti@2.7.0)(yaml@2.9.0))
-
-  packages/types: {}
 
 packages:
 

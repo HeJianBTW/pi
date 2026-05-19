@@ -6,8 +6,9 @@ import type {
   RuntimeLlmGenerationEvent,
   RuntimeLlmUsage,
   RuntimeToolEvent,
-} from '@amaster.ai/pi-types';
+} from '@amaster.ai/pi-shared';
 import { Langfuse } from 'langfuse';
+import type { TelemetryConfig } from './config.js';
 import {
   NoopRuntimeEventExporter,
   type RuntimeEventExporter,
@@ -691,6 +692,40 @@ export function createRuntimeEventExporterFromEnv(env: TelemetryEnvironment): Ru
     return new LangfuseSdkRuntimeEventExporter(config);
   }
   return new LangfuseHttpRuntimeEventExporter(config);
+}
+
+export function createLangfuseExporter(telemetryConfig: TelemetryConfig): RuntimeEventExporter {
+  const config = resolveLangfuseExporterConfig(telemetryConfig);
+  if (!config.enabled) {
+    return new NoopRuntimeEventExporter();
+  }
+  if (config.transport === 'sdk') {
+    return new LangfuseSdkRuntimeEventExporter(config);
+  }
+  return new LangfuseHttpRuntimeEventExporter(config);
+}
+
+export function resolveLangfuseExporterConfig(
+  telemetryConfig: TelemetryConfig,
+): LangfuseExporterConfig {
+  const lf = telemetryConfig.langfuse;
+  const publicKey = lf?.publicKey ?? '';
+  const secretKey = lf?.secretKey ?? '';
+  const credentialsPresent = Boolean(publicKey && secretKey);
+  const requestedTransport = lf?.transport;
+  const transport = requestedTransport ?? (credentialsPresent ? 'sdk' : 'ingestion');
+  return {
+    enabled: Boolean(lf?.enabled && credentialsPresent),
+    transport,
+    publicKey,
+    secretKey,
+    baseUrl: lf?.baseUrl ?? DEFAULT_LANGFUSE_BASE_URL,
+    flushAt: lf?.flushAt ?? DEFAULT_FLUSH_AT,
+    flushIntervalMs: lf?.flushIntervalMs ?? DEFAULT_FLUSH_INTERVAL_MS,
+    serviceName: telemetryConfig.serviceName ?? 'pi-server',
+    ...(telemetryConfig.serviceVersion ? { serviceVersion: telemetryConfig.serviceVersion } : {}),
+    includePayloads: telemetryConfig.includePayloads ?? true,
+  };
 }
 
 export function resolveLangfuseConfig(env: TelemetryEnvironment): LangfuseExporterConfig {

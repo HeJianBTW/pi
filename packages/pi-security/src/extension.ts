@@ -4,7 +4,7 @@ import type {
   RuntimeRequestContext,
   ToolCallRequest,
   ToolSource,
-} from '@amaster.ai/pi-types';
+} from '@amaster.ai/pi-shared';
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -21,6 +21,7 @@ import {
   SecurityGate,
   securityEvaluationDetails,
 } from './index.js';
+import { loadFilePolicies } from './policy-loader.js';
 
 const SETTINGS_KEY = 'pi-security';
 const EXTENSION_STATUS_KEY = 'pi-security';
@@ -184,6 +185,7 @@ function createGate(ctx: ExtensionContext, state: PiSecurityExtensionState): Sec
   return new SecurityGate({
     profile: state.config.profile,
     ...(state.config.security ? { config: state.config.security } : {}),
+    filePolicies: loadFilePolicies(ctx.cwd),
     approvalHandler: async ({ toolCall, decision }) =>
       resolveApproval(ctx, state, toolCall, decision),
     auditSink: (event) => {

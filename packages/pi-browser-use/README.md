@@ -29,7 +29,7 @@ Install the package and pi-coding-agent will automatically discover and load the
 bun add @amaster.ai/pi-browser-use
 ```
 
-Configure via `config.json` in the working directory under the `"pi-browser-use"` key:
+Configure via `.pi/settings.json` (project-level) or `~/.pi/agent/settings.json` (user-level) under the `"pi-browser-use"` key:
 
 ```json
 {
@@ -96,7 +96,7 @@ npx @amaster.ai/pi-browser-use --config path/to/config.json
 
 ### Vision Model (Optional)
 
-Enable `browser_analyze_screenshot` by providing a vision model config in `config.json`:
+Enable `browser_analyze_screenshot` by providing a vision model config in `.pi/settings.json`:
 
 ```json
 {

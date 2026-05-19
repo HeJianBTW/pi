@@ -13,7 +13,7 @@ import type {
   SubagentRunStatus,
   SubagentRunStore,
   ToolSource,
-} from '@amaster.ai/pi-types';
+} from '@amaster.ai/pi-shared';
 import { Type } from '@earendil-works/pi-ai';
 import { defineTool, type ToolDefinition } from '@earendil-works/pi-coding-agent';
 

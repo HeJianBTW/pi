@@ -1,8 +1,13 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 import type { RuntimeTelemetryEvent } from '../index.js';
 
+vi.mock('../config.js', () => ({
+  loadConfigFromFile: vi.fn(() => ({})),
+  resolveConfig: vi.fn((config: unknown) => config ?? {}),
+}));
+
 vi.mock('../langfuse.js', () => ({
-  createRuntimeEventExporterFromEnv: vi.fn(() => ({
+  createLangfuseExporter: vi.fn(() => ({
     publish: vi.fn(() => Promise.resolve()),
     flush: vi.fn(() => Promise.resolve()),
     close: vi.fn(() => Promise.resolve()),
@@ -10,7 +15,7 @@ vi.mock('../langfuse.js', () => ({
 }));
 
 vi.mock('../otel.js', () => ({
-  createOtelRuntimeEventExporterFromEnv: vi.fn(() => ({
+  createOtelExporter: vi.fn(() => ({
     publish: vi.fn(() => Promise.resolve()),
     flush: vi.fn(() => Promise.resolve()),
     close: vi.fn(() => Promise.resolve()),
@@ -18,8 +23,8 @@ vi.mock('../otel.js', () => ({
 }));
 
 import { NoopRuntimeEventExporter } from '../index.js';
-import { createRuntimeEventExporterFromEnv } from '../langfuse.js';
-import { createOtelRuntimeEventExporterFromEnv } from '../otel.js';
+import { createLangfuseExporter } from '../langfuse.js';
+import { createOtelExporter } from '../otel.js';
 
 type EventHandler = (...args: any[]) => Promise<void> | void;
 
@@ -40,8 +45,8 @@ async function fireEvent(name: string, event?: unknown) {
 }
 
 function getPublishedEvents(): RuntimeTelemetryEvent[] {
-  const langfuseExporter = (createRuntimeEventExporterFromEnv as ReturnType<typeof vi.fn>).mock
-    .results[0]?.value;
+  const langfuseExporter = (createLangfuseExporter as ReturnType<typeof vi.fn>).mock.results[0]
+    ?.value;
   if (!langfuseExporter) return [];
   return (langfuseExporter.publish as ReturnType<typeof vi.fn>).mock.calls.map(
     (call: unknown[]) => call[0] as RuntimeTelemetryEvent,
@@ -53,15 +58,15 @@ describe('telemetryExtension', () => {
     handlers.clear();
     mockPi.on.mockClear();
     mockPi.registerTool.mockClear();
-    (createRuntimeEventExporterFromEnv as ReturnType<typeof vi.fn>).mockClear();
-    (createOtelRuntimeEventExporterFromEnv as ReturnType<typeof vi.fn>).mockClear();
+    (createLangfuseExporter as ReturnType<typeof vi.fn>).mockClear();
+    (createOtelExporter as ReturnType<typeof vi.fn>).mockClear();
 
-    (createRuntimeEventExporterFromEnv as ReturnType<typeof vi.fn>).mockReturnValue({
+    (createLangfuseExporter as ReturnType<typeof vi.fn>).mockReturnValue({
       publish: vi.fn(() => Promise.resolve()),
       flush: vi.fn(() => Promise.resolve()),
       close: vi.fn(() => Promise.resolve()),
     });
-    (createOtelRuntimeEventExporterFromEnv as ReturnType<typeof vi.fn>).mockReturnValue(
+    (createOtelExporter as ReturnType<typeof vi.fn>).mockReturnValue(
       new NoopRuntimeEventExporter(),
     );
   });
@@ -80,12 +85,12 @@ describe('telemetryExtension', () => {
     expect(registered).toContain('after_provider_response');
   });
 
-  test('initializes exporter from env on session_start', async () => {
+  test('initializes exporter from config on session_start', async () => {
     telemetryExtension(mockPi as any);
     await fireEvent('session_start', { type: 'session_start', reason: 'startup' });
 
-    expect(createRuntimeEventExporterFromEnv).toHaveBeenCalledTimes(1);
-    expect(createOtelRuntimeEventExporterFromEnv).toHaveBeenCalledTimes(1);
+    expect(createLangfuseExporter).toHaveBeenCalledTimes(1);
+    expect(createOtelExporter).toHaveBeenCalledTimes(1);
   });
 
   test('publishes chat_turn_started on turn_start', async () => {
@@ -352,8 +357,8 @@ describe('telemetryExtension', () => {
     telemetryExtension(mockPi as any);
     await fireEvent('session_start', { type: 'session_start', reason: 'startup' });
 
-    const langfuseExporter = (createRuntimeEventExporterFromEnv as ReturnType<typeof vi.fn>).mock
-      .results[0]?.value;
+    const langfuseExporter = (createLangfuseExporter as ReturnType<typeof vi.fn>).mock.results[0]
+      ?.value;
 
     await fireEvent('session_shutdown', { type: 'session_shutdown', reason: 'quit' });
 

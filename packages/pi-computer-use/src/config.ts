@@ -1,5 +1,4 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { loadPiSettings } from '@amaster.ai/pi-shared/settings';
 
 export interface VisionModelConfig {
   provider: string;
@@ -48,12 +47,5 @@ export function resolveConfig(config?: ComputerUseConfig): ComputerUseConfig {
 }
 
 export function loadConfigFromFile(): ComputerUseConfig {
-  try {
-    const configPath = resolve(process.cwd(), 'config.json');
-    const raw = readFileSync(configPath, 'utf-8');
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    return (parsed['pi-computer-use'] ?? {}) as ComputerUseConfig;
-  } catch {
-    return {};
-  }
+  return loadPiSettings<ComputerUseConfig>('pi-computer-use');
 }
