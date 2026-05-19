@@ -925,3 +925,5 @@ function summarizeTarget(value: string): string {
     ? `${value.slice(0, 200)}...[${value.length - 200} chars truncated]`
     : value;
 }
+
+export { default } from './extension.js';
