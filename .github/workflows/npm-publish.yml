@@ -11,17 +11,6 @@ on:
         options:
           - beta
           - latest
-      version_bump:
-        description: version bump level; use current for the first release
-        required: true
-        default: current
-        type: choice
-        options:
-          - current
-          - patch
-          - minor
-          - major
-
 permissions:
   contents: write
 
@@ -79,11 +68,10 @@ jobs:
           git config user.name "$GIT_ACTOR"
           git config user.email "${GIT_ACTOR}@users.noreply.github.com"
 
-      - name: Resolve release version from npm and update package versions
+      - name: Resolve monorepo release version
         id: versioning
         env:
           RELEASE_CHANNEL: ${{ inputs.npm_tag }}
-          VERSION_BUMP: ${{ inputs.version_bump }}
         run: |
           node <<'EOF'
           const fs = require("node:fs");
@@ -91,9 +79,11 @@ jobs:
           const { execFileSync } = require("node:child_process");
 
           const channel = process.env.RELEASE_CHANNEL;
-          const bump = process.env.VERSION_BUMP;
-          if (!channel || !bump) {
-            throw new Error("RELEASE_CHANNEL and VERSION_BUMP are required");
+          if (!channel) {
+            throw new Error("RELEASE_CHANNEL is required");
+          }
+          if (channel !== "beta" && channel !== "latest") {
+            throw new Error(`Unsupported release channel: ${channel}`);
           }
 
           const rootPackageFile = path.join(process.cwd(), "package.json");
@@ -103,7 +93,6 @@ jobs:
             .map((entry) => path.join(packagesDir, entry.name, "package.json"))
             .filter((file) => fs.existsSync(file));
 
-          const packageJsonFiles = [rootPackageFile, ...packageFiles];
           const rootPackage = JSON.parse(fs.readFileSync(rootPackageFile, "utf8"));
           const packages = packageFiles.map((file) => ({
             file,
@@ -119,12 +108,12 @@ jobs:
           if (!localVersion) {
             throw new Error("Root package version is required.");
           }
-          const mismatchedLocalVersions = publishablePackages
+          const mismatchedLocalVersions = packages
             .filter(({ pkg }) => pkg.version !== localVersion)
             .map(({ pkg }) => `${pkg.name}@${pkg.version}`);
           if (mismatchedLocalVersions.length > 0) {
-            console.warn(
-              `Publishable package versions differ from root ${localVersion}; they will be normalized before publishing: ${mismatchedLocalVersions.join(", ")}`
+            throw new Error(
+              `Package versions must match root ${localVersion} before publishing: ${mismatchedLocalVersions.join(", ")}`
             );
           }
 
@@ -140,33 +129,11 @@ jobs:
               beta: match[4] === undefined ? null : Number(match[4]),
             };
           };
+          parseVersion(localVersion);
 
-          const formatStable = ({ major, minor, patch }) => `${major}.${minor}.${patch}`;
-          const formatBeta = ({ major, minor, patch, beta }) => `${major}.${minor}.${patch}-beta.${beta}`;
-          const compareStable = (left, right) => {
-            if (left.major !== right.major) return left.major - right.major;
-            if (left.minor !== right.minor) return left.minor - right.minor;
-            return left.patch - right.patch;
-          };
-          const bumpStable = (parsed, level) => {
-            if (level === "major") {
-              return { major: parsed.major + 1, minor: 0, patch: 0 };
-            }
-            if (level === "minor") {
-              return { major: parsed.major, minor: parsed.minor + 1, patch: 0 };
-            }
-            if (level === "patch") {
-              return { major: parsed.major, minor: parsed.minor, patch: parsed.patch + 1 };
-            }
-            if (level === "current") {
-              return { major: parsed.major, minor: parsed.minor, patch: parsed.patch };
-            }
-            throw new Error(`Unsupported version bump: ${level}`);
-          };
-
-          const npmViewDistTags = (packageName) => {
+          const npmViewJson = (packageName, field) => {
             try {
-              const output = execFileSync("npm", ["view", packageName, "dist-tags", "--json"], {
+              const output = execFileSync("npm", ["view", packageName, field, "--json"], {
                 encoding: "utf8",
                 stdio: ["ignore", "pipe", "pipe"],
               }).trim();
@@ -176,105 +143,43 @@ jobs:
               if (stderr.includes("E404")) {
                 return null;
               }
-              throw new Error(`Failed to read npm dist-tags for ${packageName}: ${stderr || error.message}`);
+              throw new Error(`Failed to read npm ${field} for ${packageName}: ${stderr || error.message}`);
             }
+          };
+          const normalizeVersions = (versions) => {
+            if (versions === null) return null;
+            if (Array.isArray(versions)) return versions;
+            if (typeof versions === "string") return [versions];
+            return [];
           };
 
           const remoteInfos = publishedPackages.map((packageName) => ({
             packageName,
-            distTags: npmViewDistTags(packageName),
+            versions: normalizeVersions(npmViewJson(packageName, "versions")),
           }));
+          const nextVersion = localVersion;
+          const packagesToPublish = remoteInfos
+            .filter((info) => !info.versions?.includes(nextVersion))
+            .map((info) => info.packageName);
+          const skipPublish = packagesToPublish.length === 0;
 
-          const latestVersions = new Set(
-            remoteInfos
-              .map((info) => info.distTags?.latest)
-              .filter(Boolean)
-          );
-          const betaVersions = new Set(
-            remoteInfos
-              .map((info) => info.distTags?.beta)
-              .filter(Boolean)
-          );
-
-          const allPackagesUnpublished = remoteInfos.every((info) => info.distTags === null);
-          if (latestVersions.size > 1) {
-            throw new Error(`Expected all npm latest versions to match before publishing, found: ${[...latestVersions].join(", ")}`);
-          }
-          if (betaVersions.size > 1) {
-            throw new Error(`Expected all npm beta versions to match before publishing, found: ${[...betaVersions].join(", ")}`);
-          }
-
-          const parsedLocal = parseVersion(localVersion);
-          const currentVersion = [...latestVersions][0] ?? null;
-          const currentBetaVersion = [...betaVersions][0] ?? null;
-          let nextVersion;
-          let skipPublish = false;
-          let packagesToPublish = publishedPackages;
-
-          if (allPackagesUnpublished) {
-            const nextBase = bumpStable(parsedLocal, bump);
-            nextVersion = channel === "beta"
-              ? formatBeta({ ...nextBase, beta: 0 })
-              : formatStable(nextBase);
-          } else {
-            if (bump === "current") {
-              const remotePackagesMissingCurrent = remoteInfos
-                .filter((info) => info.distTags !== null && !Object.values(info.distTags).includes(localVersion))
-                .map((info) => `${info.packageName} (${Object.values(info.distTags).join(", ")})`);
-              if (remotePackagesMissingCurrent.length > 0) {
-                throw new Error(
-                  `version_bump=current can only resume ${localVersion} or publish packages missing from npm. Remote packages without ${localVersion}: ${remotePackagesMissingCurrent.join(", ")}`
-                );
-              }
-              nextVersion = localVersion;
-              packagesToPublish = remoteInfos
-                .filter((info) => info.distTags === null)
-                .map((info) => info.packageName);
-              skipPublish = packagesToPublish.length === 0;
-            } else {
-              if (!currentVersion) {
-                throw new Error("No remote latest version found on npm.");
-              }
-              const parsedLatest = parseVersion(currentVersion);
-              const parsedBeta = currentBetaVersion ? parseVersion(currentBetaVersion) : null;
-              const betaAheadOfLatest = parsedBeta ? compareStable(parsedBeta, parsedLatest) > 0 : false;
-
-              if (channel === "beta") {
-                if (bump === "patch" && parsedBeta && betaAheadOfLatest) {
-                  nextVersion = formatBeta({
-                    major: parsedBeta.major,
-                    minor: parsedBeta.minor,
-                    patch: parsedBeta.patch,
-                    beta: parsedBeta.beta + 1,
-                  });
-                } else {
-                  const nextBase = bumpStable(parsedLatest, bump);
-                  nextVersion = formatBeta({ ...nextBase, beta: 0 });
-                }
-              } else if (channel === "latest") {
-                if (bump === "patch" && parsedBeta && betaAheadOfLatest) {
-                  nextVersion = formatStable(parsedBeta);
-                } else {
-                  nextVersion = formatStable(bumpStable(parsedLatest, bump));
-                }
-              } else {
-                throw new Error(`Unsupported release channel: ${channel}`);
-              }
-              packagesToPublish = publishedPackages;
-            }
-          }
-
-          for (const file of packageJsonFiles) {
-            const pkg = JSON.parse(fs.readFileSync(file, "utf8"));
-            pkg.version = nextVersion;
-            fs.writeFileSync(file, `${JSON.stringify(pkg, null, 2)}\n`);
-            console.log(`updated ${pkg.name}: ${pkg.version}`);
-          }
+          console.log(`monorepo release version: ${nextVersion}`);
+          console.log(`packages to publish: ${packagesToPublish.length > 0 ? packagesToPublish.join(", ") : "(none)"}`);
 
           fs.appendFileSync(process.env.GITHUB_OUTPUT, `release_version=${nextVersion}\n`);
           fs.appendFileSync(process.env.GITHUB_OUTPUT, `skip_publish=${skipPublish ? "true" : "false"}\n`);
           fs.appendFileSync(process.env.GITHUB_OUTPUT, `publish_filters=${packagesToPublish.join(" ")}\n`);
           EOF
+
+      - name: Ensure release workflow did not change versions
+        run: |
+          if git diff --quiet -- package.json packages/*/package.json; then
+            exit 0
+          fi
+
+          echo "Version changes must be committed through a reviewed PR before publishing from master."
+          git diff -- package.json packages/*/package.json
+          exit 1
 
       - name: Run checks
         run: pnpm run pr-check
@@ -293,23 +198,16 @@ jobs:
           fi
           "${publish_cmd[@]}"
 
-      - name: Commit and tag version changes
+      - name: Tag release
         env:
           RELEASE_VERSION: ${{ steps.versioning.outputs.release_version }}
         run: |
           tag_name="v${RELEASE_VERSION}"
-          git add package.json packages/*/package.json
-          if git diff --cached --quiet; then
-            echo "No version changes were staged."
-          else
-            git commit -m "chore: release ${RELEASE_VERSION}"
-          fi
           if git rev-parse "${tag_name}" >/dev/null 2>&1; then
             echo "Tag ${tag_name} already exists locally."
           else
             git tag -a "${tag_name}" -m "${tag_name}"
           fi
-          git push origin HEAD:${GITHUB_REF_NAME}
           git push origin "refs/tags/${tag_name}"
 
       - name: Create GitHub release
