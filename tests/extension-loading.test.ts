@@ -135,10 +135,10 @@ describe('Extension loading contract', () => {
 
       const sessionStartHandler = pi.on.mock.calls.find(
         (c: unknown[]) => c[0] === 'session_start',
-      )?.[1] as () => Promise<void>;
+      )?.[1] as (...args: unknown[]) => Promise<void>;
       expect(sessionStartHandler).toBeDefined();
 
-      await sessionStartHandler();
+      await sessionStartHandler({ type: 'session_start', reason: 'startup' }, { cwd: process.cwd() });
 
       expect(pi.registerTool).toHaveBeenCalled();
       const toolNames = pi.registerTool.mock.calls.map((c: unknown[]) => c[0].name);
