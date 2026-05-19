@@ -2,6 +2,7 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { isCapabilityExposed, resolveCapabilityPolicy } from '../index.js';
 import { loadFilePolicies, loadPolicyDir } from '../policy-loader.js';
 
 describe('loadPolicyDir', () => {
@@ -176,5 +177,71 @@ describe('loadFilePolicies', () => {
 
     const result = loadFilePolicies(cwd);
     expect(result).toEqual({});
+  });
+});
+
+describe('loadFilePolicies 3-layer with agentDir', () => {
+  let base: string;
+  let agentDir: string;
+  let agentPolicyDir: string;
+  let cwd: string;
+  let projectPolicyDir: string;
+  let originalHome: string | undefined;
+
+  beforeEach(() => {
+    base = join(tmpdir(), `pi-policy-3layer-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    agentDir = join(base, 'agent-config');
+    agentPolicyDir = join(agentDir, 'policy');
+    cwd = join(base, 'project');
+    projectPolicyDir = join(cwd, '.pi', 'policy');
+    mkdirSync(join(base, 'home', '.pi', 'agent', 'policy'), { recursive: true });
+    mkdirSync(agentPolicyDir, { recursive: true });
+    mkdirSync(projectPolicyDir, { recursive: true });
+    originalHome = process.env.HOME;
+    process.env.HOME = join(base, 'home');
+  });
+
+  afterEach(() => {
+    if (originalHome !== undefined) {
+      process.env.HOME = originalHome;
+    }
+    rmSync(base, { recursive: true, force: true });
+  });
+
+  it('agentDir policy is loaded via loadFilePolicies', () => {
+    writeFileSync(
+      join(agentPolicyDir, 'sandbox-exec.json'),
+      JSON.stringify({
+        capabilities: { allow: ['browser_*'] },
+      }),
+    );
+
+    const result = loadFilePolicies(cwd, agentDir);
+    expect(result['sandbox-exec']).toEqual({
+      capabilities: { allow: ['browser_*'] },
+    });
+  });
+
+  it('project policy overrides agentDir policy', () => {
+    writeFileSync(join(agentPolicyDir, 'custom.json'), JSON.stringify({ extends: 'chat' }));
+    writeFileSync(join(projectPolicyDir, 'custom.json'), JSON.stringify({ extends: 'admin' }));
+
+    const result = loadFilePolicies(cwd, agentDir);
+    expect(result.custom).toEqual({ extends: 'admin' });
+  });
+
+  it('sandbox-exec.json merges browser_* into built-in sandbox-exec capabilities', () => {
+    writeFileSync(
+      join(agentPolicyDir, 'sandbox-exec.json'),
+      JSON.stringify({
+        capabilities: { allow: ['browser_*'] },
+      }),
+    );
+
+    const filePolicies = loadFilePolicies(cwd, agentDir);
+    const policy = resolveCapabilityPolicy('sandbox-exec', {}, filePolicies);
+    expect(isCapabilityExposed('browser_list_pages', policy)).toBe(true);
+    expect(isCapabilityExposed('read_file', policy)).toBe(true);
+    expect(isCapabilityExposed('run_shell', policy)).toBe(true);
   });
 });

@@ -10,9 +10,9 @@ export type { ComputerUseConfig };
 export { loadConfigFromFile, resolveConfig };
 
 export default function computerUseExtension(pi: ExtensionAPI): void {
-  const config = resolveConfig(loadConfigFromFile());
+  let config = resolveConfig(loadConfigFromFile());
   const serverProcess = new ComputerServerProcess();
-  const client = new ComputerClient(config);
+  let client = new ComputerClient(config);
   let started = false;
 
   async function ensureRunning(): Promise<void> {
@@ -49,7 +49,7 @@ export default function computerUseExtension(pi: ExtensionAPI): void {
         scroll_x: Type.Optional(Type.Number({ description: 'Horizontal scroll amount' })),
         scroll_y: Type.Optional(Type.Number({ description: 'Vertical scroll amount' })),
         path: Type.Optional(
-          Type.Array(Type.Tuple([Type.Number(), Type.Number()]), {
+          Type.Array(Type.Array(Type.Number(), { minItems: 2, maxItems: 2 }), {
             description: 'Drag path as [[x,y], ...] coordinates',
           }),
         ),
@@ -121,8 +121,9 @@ export default function computerUseExtension(pi: ExtensionAPI): void {
     },
   });
 
-  pi.on('session_start', async () => {
-    // Lazy — actual startup happens on first tool call
+  pi.on('session_start', async (_event, ctx) => {
+    config = resolveConfig(loadConfigFromFile({ cwd: ctx.cwd }));
+    client = new ComputerClient(config);
   });
 
   pi.on('session_shutdown', async () => {

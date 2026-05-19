@@ -1,6 +1,7 @@
-import { loadPiSettings } from '@amaster.ai/pi-shared/settings';
+import { loadPiSettings, type PiSettingsOptions } from '@amaster.ai/pi-shared/settings';
 import { type TextContent as AiTextContent, complete } from '@earendil-works/pi-ai';
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
+import { getAgentDir } from '@earendil-works/pi-coding-agent';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
@@ -129,8 +130,11 @@ export class DevToolsClient {
 }
 
 /** Read the pi-browser-use section from .pi/settings.json. */
-function loadConfigFromFile(): BrowserUseConfig {
-  return loadPiSettings<BrowserUseConfig>('pi-browser-use');
+function loadConfigFromFile(options?: PiSettingsOptions): BrowserUseConfig {
+  return loadPiSettings<BrowserUseConfig>('pi-browser-use', {
+    agentDir: getAgentDir(),
+    ...options,
+  });
 }
 
 /** Convert upstream MCP result into pi-agent TextContent[], applying post-processing. */
@@ -179,11 +183,12 @@ function toTextContent(
  * If visionModel is configured, an additional analyze_screenshot tool is registered.
  */
 export default function browserUseExtension(pi: ExtensionAPI): void {
-  const config = resolveConfig(loadConfigFromFile());
-  const client = new DevToolsClient(config);
+  let config: BrowserUseConfig | undefined;
+  let client: DevToolsClient | undefined;
   let connected = false;
 
   async function ensureConnected(): Promise<void> {
+    if (!client) throw new Error('browser-use: session not started');
     if (!connected) {
       await client.connect();
       connected = true;
@@ -192,7 +197,7 @@ export default function browserUseExtension(pi: ExtensionAPI): void {
 
   async function registerUpstreamTools(): Promise<void> {
     await ensureConnected();
-    const upstreamTools = await client.listAllTools();
+    const upstreamTools = await client!.listAllTools();
 
     for (const tool of upstreamTools) {
       if (EXCLUDED_TOOLS.has(tool.name)) continue;
@@ -213,7 +218,8 @@ export default function browserUseExtension(pi: ExtensionAPI): void {
           _onUpdate: unknown,
           _ctx: ExtensionContext,
         ) {
-          const result = await client.callTool(originalName, params);
+          await ensureConnected();
+          const result = await client!.callTool(originalName, params);
           const { content } = toTextContent(result, originalName);
           return { content, details: undefined };
         },
@@ -297,7 +303,7 @@ export default function browserUseExtension(pi: ExtensionAPI): void {
       ) {
         await ensureConnected();
         const callVision = createPiVisionCaller(visionConfig, ctx);
-        const result = await handleAnalyzeScreenshot(client, callVision, params);
+        const result = await handleAnalyzeScreenshot(client!, callVision, params);
         const content: Array<{ type: 'text'; text: string }> = [];
         if (result.content) {
           for (const item of result.content) {
@@ -314,7 +320,10 @@ export default function browserUseExtension(pi: ExtensionAPI): void {
     });
   }
 
-  pi.on('session_start', async () => {
+  pi.on('session_start', async (_event, ctx) => {
+    config = resolveConfig(loadConfigFromFile({ cwd: ctx.cwd }));
+    client = new DevToolsClient(config);
+    connected = false;
     await registerUpstreamTools();
     if (config.visionModel) {
       await registerVisionTool(config.visionModel);
@@ -322,7 +331,7 @@ export default function browserUseExtension(pi: ExtensionAPI): void {
   });
 
   pi.on('session_shutdown', async () => {
-    if (connected) {
+    if (connected && client) {
       await client.close();
       connected = false;
     }

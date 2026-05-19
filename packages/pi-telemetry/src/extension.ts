@@ -20,15 +20,35 @@ function extractModelConfig(payload: unknown): RuntimeModelConfig {
   return { provider: 'unknown', model: 'unknown' };
 }
 
+function extractOutput(message: unknown): string | undefined {
+  if (!message || typeof message !== 'object') return undefined;
+  const msg = message as Record<string, unknown>;
+  if (msg.role !== 'assistant' || !Array.isArray(msg.content)) return undefined;
+  const texts: string[] = [];
+  for (const block of msg.content) {
+    if (
+      block &&
+      typeof block === 'object' &&
+      'type' in block &&
+      block.type === 'text' &&
+      'text' in block
+    ) {
+      texts.push(String(block.text));
+    }
+  }
+  return texts.length > 0 ? texts.join('\n') : undefined;
+}
+
 export default function telemetryExtension(pi: ExtensionAPI): void {
   let exporter: RuntimeEventExporter = new NoopRuntimeEventExporter();
   const sessionId = randomUUID();
   let currentTraceId: string | undefined;
   let turnStartTime: number | undefined;
   let llmGenerationCounter = 0;
+  let pendingInput: string | undefined;
 
-  pi.on('session_start', async () => {
-    const config = resolveConfig(loadConfigFromFile());
+  pi.on('session_start', async (_event, ctx) => {
+    const config = resolveConfig(loadConfigFromFile({ cwd: ctx.cwd }));
     const langfuse = createLangfuseExporter(config);
     const otel = createOtelExporter(config);
 
@@ -38,6 +58,10 @@ export default function telemetryExtension(pi: ExtensionAPI): void {
     } else if (active.length === 1) {
       exporter = active[0]!;
     }
+  });
+
+  pi.on('input', async (event) => {
+    pendingInput = event.text;
   });
 
   pi.on('turn_start', async (event) => {
@@ -51,13 +75,16 @@ export default function telemetryExtension(pi: ExtensionAPI): void {
       type: 'chat_turn_started',
       sessionId,
       createdAt: new Date(event.timestamp).toISOString(),
+      ...(pendingInput !== undefined ? { details: { input: pendingInput } } : {}),
     });
+    pendingInput = undefined;
   });
 
-  pi.on('turn_end', async () => {
+  pi.on('turn_end', async (event) => {
     if (!currentTraceId) return;
     const now = Date.now();
     const durationMs = turnStartTime ? now - turnStartTime : undefined;
+    const output = extractOutput(event.message);
 
     await exporter.publish({
       id: randomUUID(),
@@ -66,6 +93,7 @@ export default function telemetryExtension(pi: ExtensionAPI): void {
       sessionId,
       createdAt: new Date(now).toISOString(),
       ...(durationMs !== undefined ? { durationMs } : {}),
+      ...(output !== undefined ? { details: { output } } : {}),
     });
 
     currentTraceId = undefined;

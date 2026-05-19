@@ -1,4 +1,5 @@
-import { loadPiSettings } from '@amaster.ai/pi-shared/settings';
+import { loadPiSettings, type PiSettingsOptions } from '@amaster.ai/pi-shared/settings';
+import { getAgentDir } from '@earendil-works/pi-coding-agent';
 
 export interface VisionModelConfig {
   provider: string;
@@ -46,6 +47,9 @@ export function resolveConfig(config?: ComputerUseConfig): ComputerUseConfig {
   return { ...DEFAULTS, ...config };
 }
 
-export function loadConfigFromFile(): ComputerUseConfig {
-  return loadPiSettings<ComputerUseConfig>('pi-computer-use');
+export function loadConfigFromFile(options?: PiSettingsOptions): ComputerUseConfig {
+  return loadPiSettings<ComputerUseConfig>('pi-computer-use', {
+    agentDir: getAgentDir(),
+    ...options,
+  });
 }

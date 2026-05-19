@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
+import { loadPiPolicyProfiles } from '@amaster.ai/pi-shared/settings';
 import type { SecurityProfileConfig } from './index.js';
 
 export function loadPolicyDir(dirPath: string): Record<string, SecurityProfileConfig> {
@@ -27,10 +27,12 @@ export function loadPolicyDir(dirPath: string): Record<string, SecurityProfileCo
   return result;
 }
 
-export function loadFilePolicies(cwd: string): Record<string, SecurityProfileConfig> {
-  const userDir = join(homedir(), '.pi', 'agent', 'policy');
-  const projectDir = join(cwd, '.pi', 'policy');
-  const userPolicies = loadPolicyDir(userDir);
-  const projectPolicies = loadPolicyDir(projectDir);
-  return { ...userPolicies, ...projectPolicies };
+export function loadFilePolicies(
+  cwd: string,
+  agentDir?: string,
+): Record<string, SecurityProfileConfig> {
+  return loadPiPolicyProfiles<SecurityProfileConfig>({
+    cwd,
+    ...(agentDir !== undefined ? { agentDir } : {}),
+  });
 }

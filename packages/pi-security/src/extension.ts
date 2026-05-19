@@ -5,6 +5,7 @@ import type {
   ToolCallRequest,
   ToolSource,
 } from '@amaster.ai/pi-shared';
+import { loadPiSettings } from '@amaster.ai/pi-shared/settings';
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -13,7 +14,7 @@ import type {
   UserBashEvent,
   UserBashEventResult,
 } from '@earendil-works/pi-coding-agent';
-import { getAgentDir, SettingsManager } from '@earendil-works/pi-coding-agent';
+import { getAgentDir } from '@earendil-works/pi-coding-agent';
 import {
   type SecurityAuditEvent,
   type SecurityConfig,
@@ -185,7 +186,7 @@ function createGate(ctx: ExtensionContext, state: PiSecurityExtensionState): Sec
   return new SecurityGate({
     profile: state.config.profile,
     ...(state.config.security ? { config: state.config.security } : {}),
-    filePolicies: loadFilePolicies(ctx.cwd),
+    filePolicies: loadFilePolicies(ctx.cwd, getAgentDir()),
     approvalHandler: async ({ toolCall, decision }) =>
       resolveApproval(ctx, state, toolCall, decision),
     auditSink: (event) => {
@@ -236,27 +237,14 @@ async function resolveApproval(
 
 function loadSettings(cwd: string): PiSecurityExtensionConfig | undefined {
   try {
-    const settings = SettingsManager.create(cwd, getAgentDir());
-    const global = settings.getGlobalSettings() as Record<string, unknown>;
-    const project = settings.getProjectSettings() as Record<string, unknown>;
-    return mergePlainObjects(global[SETTINGS_KEY], project[SETTINGS_KEY]) as
-      | PiSecurityExtensionConfig
-      | undefined;
+    const config = loadPiSettings<Partial<PiSecurityExtensionConfig>>(SETTINGS_KEY, {
+      cwd,
+      agentDir: getAgentDir(),
+    });
+    return Object.keys(config).length > 0 ? (config as PiSecurityExtensionConfig) : undefined;
   } catch {
     return undefined;
   }
-}
-
-function mergePlainObjects(first: unknown, second: unknown): Record<string, unknown> | undefined {
-  const a = isPlainObject(first) ? first : undefined;
-  const b = isPlainObject(second) ? second : undefined;
-  if (!a && !b) {
-    return undefined;
-  }
-  return {
-    ...(a ?? {}),
-    ...(b ?? {}),
-  };
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
