@@ -20,6 +20,7 @@
 .env
 .env.*
 !.env.example
+.pi/settings.json
 
 # Build
 dist/
