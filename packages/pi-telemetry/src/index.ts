@@ -57,3 +57,5 @@ export class CompositeRuntimeEventExporter implements RuntimeEventExporter {
     await Promise.allSettled(this.exporters.map((exporter) => exporter.close?.()));
   }
 }
+
+export { default } from './extension.js';

@@ -1,6 +1,6 @@
 {
   "name": "@amaster.ai/pi-browser-use",
-  "version": "0.1.2-beta.0",
+  "version": "0.1.2-beta.1",
   "description": "MCP proxy plugin for chrome-devtools-mcp with browser_ prefixed tools",
   "license": "Apache-2.0",
   "type": "module",
@@ -23,6 +23,11 @@
     "dist",
     "README.md"
   ],
+  "pi": {
+    "extensions": [
+      "./dist/index.js"
+    ]
+  },
   "publishConfig": {
     "access": "public"
   },

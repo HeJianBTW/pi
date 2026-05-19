@@ -1,6 +1,6 @@
 {
   "name": "@amaster.ai/pi-computer-use",
-  "version": "0.1.2-beta.0",
+  "version": "0.1.2-beta.1",
   "description": "Pi extension for CUA computer-use: spawns and controls cua-computer-server",
   "license": "Apache-2.0",
   "type": "module",
@@ -20,6 +20,11 @@
     "dist",
     "README.md"
   ],
+  "pi": {
+    "extensions": [
+      "./dist/index.js"
+    ]
+  },
   "publishConfig": {
     "access": "public"
   },
