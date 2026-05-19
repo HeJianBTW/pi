@@ -7,7 +7,7 @@ const mockWsClose = vi.fn();
 const mockWsOn = vi.fn();
 const mockWsOff = vi.fn();
 let wsOpenCallback: (() => void) | null = null;
-let wsMessageCallback: ((data: string) => void) | null = null;
+let _wsMessageCallback: ((data: string) => void) | null = null;
 
 vi.mock('ws', () => ({
   default: class MockWebSocket {
@@ -17,7 +17,7 @@ vi.mock('ws', () => ({
     close = mockWsClose;
     on = vi.fn((event: string, handler: (...args: unknown[]) => void) => {
       if (event === 'open') wsOpenCallback = handler as () => void;
-      if (event === 'message') wsMessageCallback = handler as (data: string) => void;
+      if (event === 'message') _wsMessageCallback = handler as (data: string) => void;
       mockWsOn(event, handler);
     });
     off = mockWsOff;
@@ -45,7 +45,7 @@ vi.mock('node:fs', async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,
-    readFileSync: vi.fn((...args: unknown[]) => {
+    readFileSync: vi.fn((..._args: unknown[]) => {
       if (mockConfigContent !== null) return mockConfigContent;
       throw new Error('ENOENT');
     }),
@@ -110,7 +110,7 @@ describe('computerUseExtension', () => {
     mockWsClose.mockClear();
     mockSpawn.mockClear();
     wsOpenCallback = null;
-    wsMessageCallback = null;
+    _wsMessageCallback = null;
   });
 
   test('registers session_start and session_shutdown handlers', () => {

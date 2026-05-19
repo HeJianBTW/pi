@@ -2,9 +2,9 @@ import { beforeEach, describe, expect, test, vi } from 'vitest';
 
 const mockClientConnect = vi.fn(() => Promise.resolve());
 const mockClientClose = vi.fn(() => Promise.resolve());
-let listToolsCalls = 0;
+let _listToolsCalls = 0;
 const mockListTools = vi.fn((opts?: { cursor?: string }) => {
-  listToolsCalls++;
+  _listToolsCalls++;
   if (!opts?.cursor) {
     return Promise.resolve({
       tools: [{ name: 'click', description: 'Click', inputSchema: {} }],
@@ -44,7 +44,7 @@ describe('DevToolsClient', () => {
     mockClientClose.mockClear();
     mockListTools.mockClear();
     mockCallTool.mockClear();
-    listToolsCalls = 0;
+    _listToolsCalls = 0;
   });
 
   describe('connect()', () => {

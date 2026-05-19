@@ -214,7 +214,7 @@ export class LangfuseSdkRuntimeEventExporter implements RuntimeEventExporter {
       case 'subagent_spawned':
       case 'subagent_started': {
         const key = subagentSpanKey(event);
-        const rootSpan = this.ensureSdkRootSpan(trace, rootKey, event);
+        this.ensureSdkRootSpan(trace, rootKey, event);
         const body = {
           id: langfuseSpanId(traceId, key),
           name: 'subagent',
@@ -240,7 +240,7 @@ export class LangfuseSdkRuntimeEventExporter implements RuntimeEventExporter {
       case 'subagent_cancelled': {
         const key = subagentSpanKey(event);
         const output = event.details?.output ?? (event.error ? { error: event.error } : undefined);
-        const rootSpan = this.ensureSdkRootSpan(trace, rootKey, event);
+        this.ensureSdkRootSpan(trace, rootKey, event);
         const span =
           this.spans.get(key) ??
           this.getSdkSubagentParent(trace, rootKey, event).span({

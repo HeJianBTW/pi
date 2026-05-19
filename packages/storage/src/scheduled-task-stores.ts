@@ -5,7 +5,6 @@ import {
   type ScheduledTask,
   type ScheduledTaskModelConfig,
   type ScheduledTaskRunHistoryEntry,
-  type ScheduledTaskStatus,
   type ScheduledTaskStore,
   type SchedulerLock,
   type TaskSchedulerScope,
@@ -293,6 +292,7 @@ export class DbScheduledTaskStore implements ScheduledTaskStore {
   }
 }
 
+// biome-ignore lint/suspicious/noExplicitAny: Prisma record shape is dynamic
 type PrismaRecord = Record<string, any>;
 
 function taskMatchesScope(task: ScheduledTask, scope: TaskSchedulerScope): boolean {

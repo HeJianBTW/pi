@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, test, vi } from 'vitest';
 const mockSend = vi.fn();
 const mockClose = vi.fn();
 const mockOff = vi.fn();
-let openHandler: (() => void) | null = null;
+let _openHandler: (() => void) | null = null;
 let errorHandler: ((err: Error) => void) | null = null;
 let messageHandler: ((data: string) => void) | null = null;
 let shouldAutoOpen = true;
@@ -17,7 +17,7 @@ vi.mock('ws', () => ({
     off = mockOff;
     on = vi.fn((event: string, handler: (...args: unknown[]) => void) => {
       if (event === 'open') {
-        openHandler = handler as () => void;
+        _openHandler = handler as () => void;
         if (shouldAutoOpen) setTimeout(() => handler(), 0);
       }
       if (event === 'error') errorHandler = handler as (err: Error) => void;
@@ -33,7 +33,7 @@ describe('ComputerClient', () => {
     mockSend.mockClear();
     mockClose.mockClear();
     mockOff.mockClear();
-    openHandler = null;
+    _openHandler = null;
     errorHandler = null;
     messageHandler = null;
     shouldAutoOpen = true;
