@@ -49,9 +49,10 @@ export default function computerUseExtension(pi: ExtensionAPI): void {
         scroll_x: Type.Optional(Type.Number({ description: 'Horizontal scroll amount' })),
         scroll_y: Type.Optional(Type.Number({ description: 'Vertical scroll amount' })),
         path: Type.Optional(
-          Type.Array(Type.Tuple([Type.Number(), Type.Number()]), {
-            description: 'Drag path as [[x,y], ...] coordinates',
-          }),
+          Type.Array(
+            Type.Array(Type.Number(), { minItems: 2, maxItems: 2 }),
+            { description: 'Drag path as [[x,y], ...] coordinates' },
+          ),
         ),
         command: Type.Optional(Type.String({ description: 'Shell command (run_command action)' })),
       }),
