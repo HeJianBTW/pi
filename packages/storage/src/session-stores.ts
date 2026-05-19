@@ -7,14 +7,11 @@
  */
 import { randomUUID } from 'node:crypto';
 import type {
-  ConversationHistoryStore,
   ConversationMessage,
-  ConversationStore,
   ConversationTurn,
   CopilotMemoryStore,
   JsonObject,
   MemoryRecord,
-  MemoryStore,
   RuntimeScope,
   RuntimeSession,
   RuntimeSessionStore,

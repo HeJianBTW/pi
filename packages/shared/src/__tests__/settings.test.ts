@@ -3,6 +3,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+// Helper to build env-var placeholder strings without triggering biome's noTemplateCurlyInString
+function envRef(expr: string): string {
+  return '$' + `{${expr}}`;
+}
+
 describe('loadPiSettings env var resolution', () => {
   let tempDir: string;
   let settingsPath: string;
@@ -29,46 +34,46 @@ describe('loadPiSettings env var resolution', () => {
     return mod.loadPiSettings<T>(key);
   }
 
-  it('resolves ${VAR} to env value', async () => {
+  it('resolves env ref to env value', async () => {
     process.env.TEST_MODEL = 'claude-opus';
     writeFileSync(settingsPath, JSON.stringify({
-      myExt: { name: '${TEST_MODEL}' },
+      myExt: { name: envRef('TEST_MODEL') },
     }));
     const result = await loadSettings<{ name: string }>('myExt');
     expect(result.name).toBe('claude-opus');
   });
 
-  it('resolves ${VAR:-default} to default when env is unset', async () => {
+  it('resolves env ref with default to default when env is unset', async () => {
     delete process.env.UNSET_VAR;
     writeFileSync(settingsPath, JSON.stringify({
-      myExt: { name: '${UNSET_VAR:-fallback-model}' },
+      myExt: { name: envRef('UNSET_VAR:-fallback-model') },
     }));
     const result = await loadSettings<{ name: string }>('myExt');
     expect(result.name).toBe('fallback-model');
   });
 
-  it('resolves ${VAR:-default} to env value when set', async () => {
+  it('resolves env ref with default to env value when set', async () => {
     process.env.SET_VAR = 'actual-value';
     writeFileSync(settingsPath, JSON.stringify({
-      myExt: { name: '${SET_VAR:-fallback}' },
+      myExt: { name: envRef('SET_VAR:-fallback') },
     }));
     const result = await loadSettings<{ name: string }>('myExt');
     expect(result.name).toBe('actual-value');
   });
 
-  it('resolves ${VAR:-} to empty string when env is unset', async () => {
+  it('resolves env ref with empty default when env is unset', async () => {
     delete process.env.EMPTY_VAR;
     writeFileSync(settingsPath, JSON.stringify({
-      myExt: { name: '${EMPTY_VAR:-}' },
+      myExt: { name: envRef('EMPTY_VAR:-') },
     }));
     const result = await loadSettings<{ name: string }>('myExt');
     expect(result.name).toBe('');
   });
 
-  it('resolves ${VAR:-} to empty string when env is empty', async () => {
+  it('resolves env ref with empty default when env is empty', async () => {
     process.env.EMPTY_VAR = '';
     writeFileSync(settingsPath, JSON.stringify({
-      myExt: { name: '${EMPTY_VAR:-}' },
+      myExt: { name: envRef('EMPTY_VAR:-') },
     }));
     const result = await loadSettings<{ name: string }>('myExt');
     expect(result.name).toBe('');
@@ -77,7 +82,7 @@ describe('loadPiSettings env var resolution', () => {
   it('resolves env vars in nested objects', async () => {
     process.env.NESTED_VAL = 'deep';
     writeFileSync(settingsPath, JSON.stringify({
-      myExt: { outer: { inner: '${NESTED_VAL}' } },
+      myExt: { outer: { inner: envRef('NESTED_VAL') } },
     }));
     const result = await loadSettings<{ outer: { inner: string } }>('myExt');
     expect(result.outer.inner).toBe('deep');
@@ -86,7 +91,7 @@ describe('loadPiSettings env var resolution', () => {
   it('resolves env vars in arrays', async () => {
     process.env.ARR_VAL = 'item1';
     writeFileSync(settingsPath, JSON.stringify({
-      myExt: { items: ['${ARR_VAL}', 'literal'] },
+      myExt: { items: [envRef('ARR_VAL'), 'literal'] },
     }));
     const result = await loadSettings<{ items: string[] }>('myExt');
     expect(result.items).toEqual(['item1', 'literal']);
@@ -96,7 +101,7 @@ describe('loadPiSettings env var resolution', () => {
     process.env.HOST = 'localhost';
     process.env.PORT = '8080';
     writeFileSync(settingsPath, JSON.stringify({
-      myExt: { url: 'http://${HOST}:${PORT}/api' },
+      myExt: { url: `http://${envRef('HOST')}:${envRef('PORT')}/api` },
     }));
     const result = await loadSettings<{ url: string }>('myExt');
     expect(result.url).toBe('http://localhost:8080/api');
@@ -115,7 +120,7 @@ describe('loadPiSettings env var resolution', () => {
   it('handles default value containing :-', async () => {
     delete process.env.TRICKY_VAR;
     writeFileSync(settingsPath, JSON.stringify({
-      myExt: { val: '${TRICKY_VAR:-a:-b}' },
+      myExt: { val: envRef('TRICKY_VAR:-a:-b') },
     }));
     const result = await loadSettings<{ val: string }>('myExt');
     expect(result.val).toBe('a:-b');

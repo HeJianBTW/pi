@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, test, vi } from 'vitest';
 
 const mockKill = vi.fn();
 let processExitHandler: ((code: number | null) => void) | null = null;
-let processErrorHandler: ((err: Error) => void) | null = null;
+let _processErrorHandler: ((err: Error) => void) | null = null;
 let mockExitCode: number | null = null;
 
 const mockSpawn = vi.fn((_cmd: string, _args: string[], _opts: object) => ({
@@ -14,7 +14,7 @@ const mockSpawn = vi.fn((_cmd: string, _args: string[], _opts: object) => ({
   },
   on: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
     if (event === 'exit') processExitHandler = handler as (code: number | null) => void;
-    if (event === 'error') processErrorHandler = handler as (err: Error) => void;
+    if (event === 'error') _processErrorHandler = handler as (err: Error) => void;
   }),
   kill: mockKill,
 }));
@@ -58,7 +58,7 @@ describe('ComputerServerProcess', () => {
     mockSpawn.mockClear();
     mockKill.mockClear();
     processExitHandler = null;
-    processErrorHandler = null;
+    _processErrorHandler = null;
     mockExitCode = null;
     wsProbeCallCount = 0;
     wsProbeSuccess = () => true;

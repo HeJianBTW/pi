@@ -838,6 +838,7 @@ class DbArtifactStore implements RuntimeArtifactStore {
   }
 }
 
+// biome-ignore lint/suspicious/noExplicitAny: Prisma record shape is dynamic
 type PrismaRecord = Record<string, any>;
 
 async function nextBigIntSeq(aggregatePromise: Promise<unknown>, key: string): Promise<bigint> {

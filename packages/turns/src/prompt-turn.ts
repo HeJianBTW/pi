@@ -10,7 +10,6 @@ import type {
   JsonObject,
   RuntimeLifecycleEvent,
   RuntimeLlmGenerationEvent,
-  RuntimeModelConfig,
   RuntimeSession,
 } from '@amaster.ai/pi-shared';
 import type { AssistantMessage, ImageContent } from '@earendil-works/pi-ai';

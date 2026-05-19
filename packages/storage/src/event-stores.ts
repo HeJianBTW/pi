@@ -6,8 +6,6 @@
  * in event-recorders.
  */
 import type {
-  AppendOnlyEventStore,
-  JsonValue,
   LlmGenerationEventStore,
   RuntimeEventStore,
   RuntimeLifecycleEvent,
