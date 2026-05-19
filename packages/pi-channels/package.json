@@ -1,6 +1,6 @@
 {
   "name": "@amaster.ai/pi-channels",
-  "version": "0.1.2-beta.1",
+  "version": "0.1.2-beta.2",
   "description": "Pi extension for native messaging channels including Feishu, WeCom, and webhooks.",
   "license": "Apache-2.0",
   "type": "module",
