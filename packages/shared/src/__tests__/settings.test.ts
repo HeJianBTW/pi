@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 // Helper to build env-var placeholder strings without triggering biome's noTemplateCurlyInString
 function envRef(expr: string): string {
+  // biome-ignore lint/style/useTemplate: intentional concatenation to avoid noTemplateCurlyInString
   return '$' + `{${expr}}`;
 }
 
