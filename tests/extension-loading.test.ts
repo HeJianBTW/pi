@@ -4,9 +4,15 @@ import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('@modelcontextprotocol/sdk/client/index.js', () => ({
   Client: vi.fn().mockImplementation(() => ({
-    connect: vi.fn(),
-    close: vi.fn(),
-    listTools: vi.fn().mockResolvedValue({ tools: [] }),
+    connect: vi.fn().mockResolvedValue(undefined),
+    close: vi.fn().mockResolvedValue(undefined),
+    listTools: vi.fn().mockResolvedValue({
+      tools: [
+        { name: 'click', description: 'Click', inputSchema: { type: 'object' } },
+        { name: 'take_snapshot', description: 'Snapshot', inputSchema: { type: 'object' } },
+      ],
+      nextCursor: undefined,
+    }),
     callTool: vi.fn().mockResolvedValue({ content: [] }),
   })),
 }));
@@ -119,6 +125,25 @@ describe('Extension loading contract', () => {
       const onCalls = pi.on.mock.calls.map((c: unknown[]) => c[0]);
       expect(onCalls).toContain('session_start');
       expect(onCalls).toContain('session_shutdown');
+    });
+
+    it('registers browser_ prefixed tools after session_start', async () => {
+      const mod = await import(join(EXTENSIONS_DIR, 'pi-browser-use', 'src', 'index.ts'));
+      const pi = createMockExtensionAPI();
+      // biome-ignore lint/suspicious/noExplicitAny: mock API
+      mod.default(pi as any);
+
+      const sessionStartHandler = pi.on.mock.calls.find(
+        (c: unknown[]) => c[0] === 'session_start',
+      )?.[1] as () => Promise<void>;
+      expect(sessionStartHandler).toBeDefined();
+
+      await sessionStartHandler();
+
+      expect(pi.registerTool).toHaveBeenCalled();
+      const toolNames = pi.registerTool.mock.calls.map((c: unknown[]) => c[0].name);
+      expect(toolNames).toContain('browser_click');
+      expect(toolNames).toContain('browser_take_snapshot');
     });
   });
 
