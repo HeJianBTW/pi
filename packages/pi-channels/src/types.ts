@@ -1,0 +1,126 @@
+export type AdapterDirection = 'outgoing' | 'incoming' | 'bidirectional';
+
+export type ChannelPayloadMode = 'envelope' | 'raw';
+
+export type ChannelMessage = {
+  adapter: string;
+  recipient: string;
+  text?: string;
+  source?: string;
+  metadata?: Record<string, unknown>;
+  payloadMode?: ChannelPayloadMode;
+  rawBody?: unknown;
+  webhook?: {
+    method?: string;
+    contentType?: string;
+  };
+};
+
+export type IncomingAttachment = {
+  type: 'image' | 'document' | 'audio' | 'file';
+  path: string;
+  filename?: string;
+  mimeType?: string;
+  size?: number;
+};
+
+export type IncomingMessage = {
+  adapter: string;
+  sender: string;
+  text: string;
+  attachments?: IncomingAttachment[];
+  metadata?: Record<string, unknown>;
+};
+
+export type OnIncomingMessage = (message: IncomingMessage) => void | Promise<void>;
+
+export type ChannelAdapter = {
+  direction: AdapterDirection;
+  send?(message: ChannelMessage): Promise<void>;
+  start?(onMessage: OnIncomingMessage): Promise<void>;
+  stop?(): Promise<void>;
+  sendTyping?(recipient: string): Promise<void>;
+};
+
+export type AdapterConfig = {
+  type: string;
+  [key: string]: unknown;
+};
+
+export type HttpIncomingConfig = {
+  enabled?: boolean;
+  host?: string;
+  port?: number;
+  path?: string;
+};
+
+export type FeishuAdapterConfig = AdapterConfig & {
+  type: 'feishu';
+  appId?: string;
+  appSecret?: string;
+  /**
+   * Event transport. Defaults to websocket. Set "off" for outgoing-only use,
+   * or "http" when the deployment already exposes an event callback endpoint.
+   */
+  eventMode?: 'websocket' | 'http' | 'off';
+  appType?: 'self_build' | 'selfBuild' | 'SelfBuild' | 'isv' | 'ISV';
+  domain?: 'feishu' | 'lark' | string;
+  verificationToken?: string;
+  encryptKey?: string;
+  botOpenId?: string;
+  receiveIdType?: 'chat_id' | 'open_id' | 'user_id' | 'union_id' | 'email';
+  respondToMentionsOnly?: boolean;
+  respondToMentionAll?: boolean;
+  replyInThread?: boolean;
+  allowedChatIds?: string[];
+  allowedSenderIds?: string[];
+  dmMode?: 'open' | 'allowlist' | 'pair' | 'disabled';
+  dmAllowlist?: string[];
+  loggerLevel?: 'error' | 'warn' | 'info' | 'debug' | 'trace';
+  handshakeTimeoutMs?: number;
+  wsPingTimeoutSeconds?: number;
+  incoming?: HttpIncomingConfig;
+};
+
+export type WeComAdapterConfig = AdapterConfig & {
+  type: 'wecom';
+  corpId?: string;
+  agentId?: string | number;
+  secret?: string;
+  baseUrl?: string;
+  timeoutMs?: number;
+  tokenRefreshBufferSeconds?: number;
+  token?: string;
+  encodingAesKey?: string;
+  receiveId?: string;
+  incoming?: HttpIncomingConfig;
+};
+
+export type WebhookAdapterConfig = AdapterConfig & {
+  type: 'webhook';
+  method?: string;
+  contentType?: string;
+  payloadMode?: ChannelPayloadMode;
+  secret?: string;
+  headers?: Record<string, string>;
+};
+
+export type BridgeConfig = {
+  enabled?: boolean;
+  timeoutMs?: number;
+  maxQueuePerSender?: number;
+  maxConcurrent?: number;
+  model?: string | null;
+  commands?: boolean;
+};
+
+export type ChannelConfig = {
+  adapters?: Record<string, AdapterConfig>;
+  routes?: Record<string, { adapter: string; recipient: string }>;
+  bridge?: BridgeConfig;
+};
+
+export type SendResult = {
+  ok: boolean;
+  error?: string;
+};
