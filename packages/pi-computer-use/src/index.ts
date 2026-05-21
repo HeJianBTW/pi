@@ -2,7 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-a
 import { Type } from 'typebox';
 import { type ComputerUseConfig, loadConfigFromFile, resolveConfig } from './config.js';
 import { CuaDriverClient } from './mcp-client.js';
-import { createPiVisionCaller, VISUAL_SYSTEM_PROMPT, type VisionCaller } from './vision.js';
+import { createPiVisionCaller } from './vision.js';
 
 export type { ComputerUseConfig };
 export { loadConfigFromFile, resolveConfig };
@@ -66,9 +66,7 @@ export default function computerUseExtension(pi: ExtensionAPI): void {
           const result = await client!.callTool(originalName, params);
 
           if (originalName === 'screenshot' && config?.visionModel) {
-            const imageContent = result.content?.find(
-              (c) => c.type === 'image' && c.data,
-            );
+            const imageContent = result.content?.find((c) => c.type === 'image' && c.data);
             if (imageContent?.data) {
               const callVision = createPiVisionCaller(config.visionModel, ctx);
               const analysis = await callVision(
@@ -130,9 +128,7 @@ export default function computerUseExtension(pi: ExtensionAPI): void {
         await ensureConnected();
 
         const screenshotResult = await client!.callTool('screenshot', {});
-        const imageContent = screenshotResult.content?.find(
-          (c) => c.type === 'image' && c.data,
-        );
+        const imageContent = screenshotResult.content?.find((c) => c.type === 'image' && c.data);
 
         if (!imageContent?.data) {
           return {

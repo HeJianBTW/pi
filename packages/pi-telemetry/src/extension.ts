@@ -1,5 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import type { JsonObject, JsonValue, RuntimeLlmUsage, RuntimeModelConfig } from '@amaster.ai/pi-shared';
+import type {
+  JsonObject,
+  JsonValue,
+  RuntimeLlmUsage,
+  RuntimeModelConfig,
+} from '@amaster.ai/pi-shared';
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { loadConfigFromFile, resolveConfig } from './config.js';
 import {
@@ -44,7 +49,8 @@ function simplifyContent(content: unknown): JsonValue | undefined {
   if (typeof content === 'string') return content;
   if (!Array.isArray(content) || content.length === 0) return content as JsonValue | undefined;
   const allText = content.every(
-    (b: unknown) => b && typeof b === 'object' && 'type' in b && (b as Record<string, unknown>).type === 'text',
+    (b: unknown) =>
+      b && typeof b === 'object' && 'type' in b && (b as Record<string, unknown>).type === 'text',
   );
   if (allText) {
     const texts = content.map((b: unknown) => String((b as Record<string, unknown>).text));
@@ -291,7 +297,10 @@ export default function telemetryExtension(pi: ExtensionAPI): void {
       details: {
         eventType: 'model_switch',
         from: previousModel
-          ? { provider: String(previousModel.provider ?? 'unknown'), model: String(previousModel.id ?? 'unknown') }
+          ? {
+              provider: String(previousModel.provider ?? 'unknown'),
+              model: String(previousModel.id ?? 'unknown'),
+            }
           : null,
         to: model
           ? { provider: String(model.provider ?? 'unknown'), model: String(model.id ?? 'unknown') }

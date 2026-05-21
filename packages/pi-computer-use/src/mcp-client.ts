@@ -32,10 +32,7 @@ export class CuaDriverClient {
       console.error(`[pi-computer-use] cua-driver transport error: ${error.message}`);
     };
 
-    this.client = new Client(
-      { name: 'pi-computer-use', version: '0.1.0' },
-      { capabilities: {} },
-    );
+    this.client = new Client({ name: 'pi-computer-use', version: '0.1.0' }, { capabilities: {} });
 
     await this.client.connect(this.transport);
   }
@@ -86,7 +83,8 @@ export class CuaDriverClient {
       return this.config.binaryPath;
     }
 
-    const platform = process.platform === 'win32' ? 'win32-x64' : `${process.platform}-${process.arch}`;
+    const platform =
+      process.platform === 'win32' ? 'win32-x64' : `${process.platform}-${process.arch}`;
     const ext = process.platform === 'win32' ? '.exe' : '';
     const binPath = path.resolve(__dirname, '..', 'bin', platform, `cua-driver${ext}`);
 

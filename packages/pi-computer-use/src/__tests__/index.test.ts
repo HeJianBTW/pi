@@ -34,7 +34,6 @@ vi.mock('@modelcontextprotocol/sdk/client/index.js', () => ({
 vi.mock('@modelcontextprotocol/sdk/client/stdio.js', () => ({
   StdioClientTransport: class MockStdioClientTransport {
     onerror: ((error: Error) => void) | null = null;
-    constructor() {}
   },
 }));
 
@@ -90,13 +89,13 @@ async function initExtension(config?: Record<string, unknown>) {
     mockConfigContent = null;
   }
   registeredTools.clear();
-  Object.keys(eventHandlers).forEach((k) => delete eventHandlers[k]);
+  for (const k of Object.keys(eventHandlers)) delete eventHandlers[k];
   mockPi.registerTool.mockClear();
   mockPi.on.mockClear();
 
   computerUseExtension(mockPi as any);
 
-  for (const handler of eventHandlers['session_start'] ?? []) {
+  for (const handler of eventHandlers.session_start ?? []) {
     await handler({}, mockCtx);
   }
 }
@@ -104,7 +103,7 @@ async function initExtension(config?: Record<string, unknown>) {
 describe('computerUseExtension', () => {
   beforeEach(() => {
     registeredTools.clear();
-    Object.keys(eventHandlers).forEach((k) => delete eventHandlers[k]);
+    for (const k of Object.keys(eventHandlers)) delete eventHandlers[k];
   });
 
   test('registers session_start and session_shutdown handlers', () => {
@@ -114,31 +113,31 @@ describe('computerUseExtension', () => {
     expect(mockPi.on).toHaveBeenCalledWith('session_shutdown', expect.any(Function));
   });
 
-  test('auto-discovers and registers upstream MCP tools with cua_ prefix', async () => {
+  test('auto-discovers and registers upstream MCP tools with computer_use_ prefix', async () => {
     await initExtension();
 
-    expect(registeredTools.has('cua_screenshot')).toBe(true);
-    expect(registeredTools.has('cua_click')).toBe(true);
-    expect(registeredTools.has('cua_type_text')).toBe(true);
+    expect(registeredTools.has('computer_use_screenshot')).toBe(true);
+    expect(registeredTools.has('computer_use_click')).toBe(true);
+    expect(registeredTools.has('computer_use_type_text')).toBe(true);
   });
 
   test('registered tools have correct descriptions', async () => {
     await initExtension();
 
-    const clickTool = registeredTools.get('cua_click')!;
+    const clickTool = registeredTools.get('computer_use_click')!;
     expect(clickTool.description).toBe('Click at coordinates');
   });
 
   test('registers analyze_screenshot tool when visionModel is configured', async () => {
     await initExtension({ visionModel: { provider: 'openai', model: 'gpt-4o' } });
 
-    expect(registeredTools.has('cua_analyze_screenshot')).toBe(true);
+    expect(registeredTools.has('computer_use_analyze_screenshot')).toBe(true);
   });
 
   test('does not register analyze_screenshot without visionModel', async () => {
     await initExtension();
 
-    expect(registeredTools.has('cua_analyze_screenshot')).toBe(false);
+    expect(registeredTools.has('computer_use_analyze_screenshot')).toBe(false);
   });
 });
 

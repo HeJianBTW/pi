@@ -73,7 +73,6 @@ export function resolveConfig(config?: BrowserUseConfig): BrowserUseConfig {
         resolved.isolated = true;
       }
       break;
-    case 'persistent':
     default:
       if (!resolved.userDataDir && !resolved.browserUrl && !resolved.wsEndpoint) {
         resolved.userDataDir = DEFAULT_PROFILE_DIR;

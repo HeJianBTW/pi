@@ -338,7 +338,11 @@ describe('telemetryExtension', () => {
     });
     await fireEvent('message_end', {
       type: 'message_end',
-      message: { role: 'assistant', content: [{ type: 'text', text: 'hi' }], usage: { input: 10, output: 5 } },
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'hi' }],
+        usage: { input: 10, output: 5 },
+      },
     });
     await fireEvent('before_provider_request', {
       type: 'before_provider_request',
@@ -518,7 +522,10 @@ describe('telemetryExtension', () => {
       cacheWrite: 0,
       totalTokens: 170,
     });
-    expect(completed.model).toMatchObject({ provider: 'anthropic', model: 'claude-3-opus-20240229' });
+    expect(completed.model).toMatchObject({
+      provider: 'anthropic',
+      model: 'claude-3-opus-20240229',
+    });
   });
 
   test('message_end keeps content array when it includes tool_use blocks', async () => {
@@ -574,7 +581,11 @@ describe('telemetryExtension', () => {
     await fireEvent('model_select', {
       type: 'model_select',
       model: { id: 'claude-3-opus-20240229', name: 'Claude 3 Opus', provider: 'anthropic' },
-      previousModel: { id: 'claude-3-sonnet-20240229', name: 'Claude 3 Sonnet', provider: 'anthropic' },
+      previousModel: {
+        id: 'claude-3-sonnet-20240229',
+        name: 'Claude 3 Sonnet',
+        provider: 'anthropic',
+      },
       source: 'auto',
     });
 
