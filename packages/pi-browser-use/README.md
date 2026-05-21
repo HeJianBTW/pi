@@ -56,6 +56,22 @@ npx @amaster.ai/pi-browser-use --config path/to/config.json
 
 ## Configuration
 
+### Session Mode
+
+| Mode | Description |
+|------|-------------|
+| `persistent` (default) | Reuses a shared browser profile at `~/.pi/browser-profile`. Cookies, logins, and extensions persist across sessions. |
+| `isolated` | Launches a fresh ephemeral browser profile each session. No state carried over. |
+| `existing` | Connects to an already-running browser instance (via `browserUrl`, `wsEndpoint`, or auto-discovery). |
+
+```json
+{
+  "pi-browser-use": {
+    "sessionMode": "persistent"
+  }
+}
+```
+
 ### Browser
 
 | Option | Type | Default | Description |

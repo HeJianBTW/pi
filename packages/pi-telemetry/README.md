@@ -11,6 +11,29 @@ The root package exposes stable exporter contracts plus no-op and composite expo
 - `@amaster.ai/pi-telemetry/langfuse`: Langfuse SDK and ingestion API exporters.
 - `@amaster.ai/pi-telemetry/otel`: generic OTLP/HTTP traces exporter.
 
+## Events
+
+The extension hooks into the following Pi lifecycle events:
+
+| Event | Telemetry action |
+|-------|-----------------|
+| `session_start` | Initialize exporters from config |
+| `input` | Start a new trace (traceId boundary = user input) |
+| `turn_start` | Begin a generation span |
+| `before_provider_request` | Record model input |
+| `after_provider_response` | Record model output, usage, latency |
+| `turn_end` | End generation span |
+| `tool_execution_start` | Begin tool span |
+| `tool_execution_end` | End tool span with result |
+| `message_end` | Publish accumulated trace to exporters |
+| `model_select` | Record model switch events |
+| `session_compact` | Record context compaction events |
+| `session_shutdown` | Flush and shutdown exporters |
+
+### Trace lifecycle
+
+Traces are scoped to user input boundaries (not individual turns). A single user message may trigger multiple LLM turns and tool calls — all grouped under one trace. The trace is published on `message_end`.
+
 ## Configuration
 
 Configuration is read from `.pi/settings.json` under the `"pi-telemetry"` key. Project-level settings (`.pi/settings.json` in the working directory) take priority over user-level settings (`~/.pi/agent/settings.json`).
