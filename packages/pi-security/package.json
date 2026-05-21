@@ -1,7 +1,8 @@
 {
   "name": "@amaster.ai/pi-security",
   "version": "0.1.2-beta.2",
-  "description": "Security policy engine and Pi extension for resource-aware tool authorization.",
+  "description": "Pi extension for resource-aware security policy engine and tool authorization",
+  "keywords": ["pi", "extension", "security", "policy", "authorization", "access-control"],
   "license": "Apache-2.0",
   "type": "module",
   "sideEffects": false,
