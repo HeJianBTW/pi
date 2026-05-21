@@ -6,11 +6,11 @@
  * elements by visual attributes (color, layout, coordinates) when the
  * accessibility tree is insufficient.
  *
- * Two calling modes:
- * - Extension mode: uses pi-ai's complete() via the model registry (no raw fetch)
- * - CLI mode: uses raw fetch to OpenAI-compatible APIs (createFetchVisionCaller)
+ * Both extension mode and CLI mode resolve credentials from Pi's model registry.
  */
 
+import { type TextContent as AiTextContent, complete } from '@earendil-works/pi-ai';
+import { AuthStorage, ModelRegistry } from '@earendil-works/pi-coding-agent';
 import type { VisionModelConfig } from './config.js';
 import type { DevToolsClient } from './index.js';
 
@@ -45,86 +45,56 @@ export type VisionCaller = (
   mimeType: string,
 ) => Promise<string>;
 
-// ---------------------------------------------------------------------------
-// Raw-fetch implementation for standalone CLI mode
-// ---------------------------------------------------------------------------
-
-interface ChatMessage {
-  role: 'system' | 'user' | 'assistant';
-  content: string | Array<{ type: string; text?: string; image_url?: { url: string } }>;
-}
-
-function getApiKeyFromEnv(provider: string): string | undefined {
-  const envMap: Record<string, string> = {
-    openai: 'OPENAI_API_KEY',
-    anthropic: 'ANTHROPIC_API_KEY',
-    google: 'GOOGLE_API_KEY',
-  };
-  const envVar = envMap[provider.toLowerCase()];
-  return envVar ? process.env[envVar] : undefined;
-}
-
-function getDefaultBaseUrl(provider: string): string {
-  const urlMap: Record<string, string> = {
-    openai: 'https://api.openai.com/v1',
-    anthropic: 'https://api.anthropic.com/v1',
-  };
-  return urlMap[provider.toLowerCase()] ?? `https://api.${provider}.com/v1`;
-}
-
-/** Create a VisionCaller backed by raw fetch (OpenAI-compatible API). Used in CLI standalone mode. */
+/** Create a VisionCaller that resolves credentials from Pi's model registry. Used in CLI standalone mode. */
 export function createFetchVisionCaller(visionConfig: VisionModelConfig): VisionCaller {
+  const authStorage = AuthStorage.create();
+  const registry = ModelRegistry.create(authStorage);
+
   return async (instruction: string, imageBase64: string, mimeType: string): Promise<string> => {
-    const apiKey = visionConfig.apiKey ?? getApiKeyFromEnv(visionConfig.provider);
-    if (!apiKey) {
+    const model = registry.find(visionConfig.provider, visionConfig.model);
+    if (!model) {
       throw new Error(
-        `No API key for vision model provider "${visionConfig.provider}". ` +
-          `Set apiKey in visionModel config or the appropriate environment variable.`,
+        `Vision model "${visionConfig.provider}/${visionConfig.model}" not found in model registry.`,
       );
     }
 
-    const baseUrl = visionConfig.baseUrl ?? getDefaultBaseUrl(visionConfig.provider);
+    const auth = await registry.getApiKeyAndHeaders(model);
+    if (!auth.ok) {
+      throw new Error(`Auth failed for vision model: ${auth.error}`);
+    }
 
-    const messages: ChatMessage[] = [
-      { role: 'system', content: VISUAL_SYSTEM_PROMPT },
+    const options: Record<string, unknown> = {
+      temperature: 0,
+      maxTokens: 2048,
+    };
+    if (auth.apiKey) options.apiKey = auth.apiKey;
+    if (auth.headers) options.headers = auth.headers;
+
+    const result = await complete(
+      model,
       {
-        role: 'user',
-        content: [
+        systemPrompt: VISUAL_SYSTEM_PROMPT,
+        messages: [
           {
-            type: 'text',
-            text: `Analyze this screenshot and respond to the following instruction:\n\n${instruction}`,
-          },
-          {
-            type: 'image_url',
-            image_url: { url: `data:${mimeType};base64,${imageBase64}` },
+            role: 'user' as const,
+            content: [
+              {
+                type: 'text' as const,
+                text: `Analyze this screenshot and respond to the following instruction:\n\n${instruction}`,
+              },
+              { type: 'image' as const, data: imageBase64, mimeType },
+            ],
+            timestamp: Date.now(),
           },
         ],
       },
-    ];
+      options,
+    );
 
-    const response = await fetch(`${baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: visionConfig.model,
-        messages,
-        temperature: 0,
-        max_tokens: 2048,
-      }),
-    });
-
-    if (!response.ok) {
-      const body = await response.text();
-      throw new Error(`Vision model API error (${response.status}): ${body}`);
-    }
-
-    const data = (await response.json()) as {
-      choices?: Array<{ message?: { content?: string } }>;
-    };
-    return data.choices?.[0]?.message?.content ?? '';
+    return result.content
+      .filter((c): c is AiTextContent => c.type === 'text')
+      .map((c) => c.text)
+      .join('');
   };
 }
 

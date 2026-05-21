@@ -4,8 +4,6 @@ import { getAgentDir } from '@earendil-works/pi-coding-agent';
 export interface VisionModelConfig {
   provider: string;
   model: string;
-  apiKey?: string;
-  baseUrl?: string;
 }
 
 export interface ComputerUseConfig {

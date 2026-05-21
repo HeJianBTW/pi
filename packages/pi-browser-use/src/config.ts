@@ -5,8 +5,6 @@ import { join } from 'node:path';
 export interface VisionModelConfig {
   provider: string;
   model: string;
-  apiKey?: string;
-  baseUrl?: string;
 }
 
 export type BrowserSessionMode = 'persistent' | 'isolated' | 'existing';
