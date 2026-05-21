@@ -1,6 +1,6 @@
 # @amaster.ai/pi-computer-use
 
-pi-coding-agent extension that wraps [cua-driver-rs](https://github.com/anthropics/cua-driver-rs), exposing desktop automation tools with a `computer_use_` prefix.
+pi-coding-agent extension that wraps [cua-driver-rs](https://github.com/trycua/cua/), exposing desktop automation tools with a `computer_use_` prefix.
 
 ## Features
 
@@ -44,20 +44,20 @@ Configure via `.pi/settings.json` (project-level) or `~/.pi/agent/settings.json`
 
 ### Vision Model (Optional)
 
-Enable `computer_use_analyze_screenshot` by providing a vision model config:
+Enable `computer_use_analyze_screenshot` by referencing a model already configured in Pi's model registry (`models.json`):
 
 ```json
 {
   "pi-computer-use": {
     "visionModel": {
       "provider": "openai",
-      "model": "gpt-4o",
-      "apiKey": "sk-...",
-      "baseUrl": "https://api.openai.com/v1"
+      "model": "gpt-4o"
     }
   }
 }
 ```
+
+The extension resolves API key, base URL, and headers from the model registry automatically — no need to duplicate credentials here.
 
 ## Exposed Tools (18)
 
