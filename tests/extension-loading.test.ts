@@ -111,6 +111,9 @@ describe('Extension loading contract', () => {
       expect(onCalls).toContain('tool_execution_end');
       expect(onCalls).toContain('before_provider_request');
       expect(onCalls).toContain('after_provider_response');
+      expect(onCalls).toContain('message_end');
+      expect(onCalls).toContain('model_select');
+      expect(onCalls).toContain('session_compact');
       expect(onCalls).toContain('session_shutdown');
     });
   });
