@@ -12,6 +12,7 @@ import {
   type VisionCaller,
 } from './analyze-screenshot.js';
 import {
+  type BrowserSessionMode,
   type BrowserUseConfig,
   configToArgs,
   resolveConfig,
@@ -23,7 +24,7 @@ import {
   postProcessToolResult,
 } from './tool-augment.js';
 
-export type { BrowserUseConfig, VisionModelConfig };
+export type { BrowserSessionMode, BrowserUseConfig, VisionModelConfig };
 export { configToArgs, resolveConfig };
 
 // All upstream tools are re-exported with this prefix to avoid name collisions with other extensions.
