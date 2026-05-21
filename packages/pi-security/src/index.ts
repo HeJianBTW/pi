@@ -180,6 +180,8 @@ const OPEN_SANDBOX_CAPABILITIES = [
   'mcp:*',
   'mcp_*',
   'mcp__*',
+  'computer_use_*',
+  'browser_*',
 ];
 
 const DEFAULT_CAPABILITY_POLICY: CapabilityPolicy = {
