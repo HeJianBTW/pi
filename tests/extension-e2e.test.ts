@@ -80,30 +80,10 @@ describe('Extension E2E loading via jiti', () => {
     });
   }
 
-  it('pi-computer-use: loads via jiti and registers computer_use tool', async () => {
+  it('pi-computer-use: loads via jiti and registers session handlers', async () => {
     const { ext } = await loadExtensionWithJiti('pi-computer-use');
-    expect(ext.tools.has('computer_use')).toBe(true);
+    expect(ext.handlers.has('session_start')).toBe(true);
     expect(ext.handlers.has('session_shutdown')).toBe(true);
-  });
-
-  it('pi-computer-use: tool schema has no tuple (items as array)', async () => {
-    const { ext } = await loadExtensionWithJiti('pi-computer-use');
-    const tool = ext.tools.get('computer_use')!;
-    const violations = findSchemaViolations(tool.parameters);
-    expect(violations).toEqual([]);
-  });
-
-  it('pi-computer-use: path field uses minItems/maxItems for coordinate pairs', async () => {
-    const { ext } = await loadExtensionWithJiti('pi-computer-use');
-    const tool = ext.tools.get('computer_use')!;
-    const params = tool.parameters as Record<string, unknown>;
-    const action = (params.properties as Record<string, unknown>).action as Record<string, unknown>;
-    const pathProp = (action.properties as Record<string, unknown>).path as Record<string, unknown>;
-    const innerItems = pathProp.items as Record<string, unknown>;
-    expect(innerItems.type).toBe('array');
-    expect(innerItems.items).toEqual({ type: 'number' });
-    expect(innerItems.minItems).toBe(2);
-    expect(innerItems.maxItems).toBe(2);
   });
 
   it('pi-browser-use: loads via jiti and registers session handlers', async () => {

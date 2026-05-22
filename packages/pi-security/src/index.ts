@@ -203,7 +203,7 @@ const BUILTIN_CAPABILITY_POLICIES: Record<string, CapabilityPolicy> = {
   },
   'sandbox-exec': { allow: OPEN_SANDBOX_CAPABILITIES },
   copilot: { allow: OPEN_SANDBOX_CAPABILITIES },
-  'auto-review': { allow: OPEN_SANDBOX_CAPABILITIES },
+  'auto-review': { allow: ['*'] },
   default: {
     allow: ['read_file', 'list_files', 'search_files', 'write_file', 'edit_file', 'memory_search'],
     deny: ['run_shell', 'run_code'],

@@ -35,6 +35,44 @@ Install the extension entry point `@amaster.ai/pi-security/extension` and load t
 
 The extension listens to Pi `tool_call` and `user_bash` events. It does not register an LLM-callable tool that can bypass policy. Human approvals are requested through Pi UI primitives when UI is available; non-interactive contexts fail closed when a rule requires approval.
 
+## Security profiles
+
+Built-in profiles and their capability policies:
+
+| Profile | Mode | Description |
+|---------|------|-------------|
+| `auto-review` | Denylist (`allow: ['*']`) | All tools exposed by default; risk-based rules gate dangerous ops |
+| `admin` / `full-access` | Denylist (`allow: ['*']`) | All tools allowed, no security rules |
+| `sandbox-exec` / `copilot` | Allowlist | Core tools + MCP allowed |
+| `workspace-write` | Allowlist | File R/W, no shell |
+| `workspace-read` | Allowlist | Read-only file access |
+| `chat` | Allowlist | Memory search only |
+| `scheduled` | Allowlist | Read + MCP, no mutations |
+| `subagent` | Allowlist | Like sandbox-exec but no memory_write/sessions_spawn |
+
+### Denylist vs Allowlist
+
+- **Denylist mode** (`allow: ['*']`): All capabilities exposed; use `deny` array and security rules to block specific tools or risky operations. `auto-review` uses this mode — new tools are automatically available without config changes.
+- **Allowlist mode** (explicit `allow` list): Only listed capabilities are exposed; unlisted tools are denied.
+
+Custom profiles can override capability policies via settings:
+
+```json
+{
+  "pi-security": {
+    "security": {
+      "profiles": {
+        "auto-review": {
+          "capabilities": {
+            "deny": ["sessions_spawn"]
+          }
+        }
+      }
+    }
+  }
+}
+```
+
 ## Commands
 
 - `/pi-security-status` shows the active profile, audit count, and in-session grants.

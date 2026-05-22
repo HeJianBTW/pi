@@ -1,17 +1,36 @@
-import { afterEach, describe, expect, test, vi } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 import {
   createFetchVisionCaller,
   handleAnalyzeScreenshot,
   type VisionCaller,
 } from '../analyze-screenshot.js';
-import type { VisionModelConfig } from '../config.js';
 
-const visionConfig: VisionModelConfig = {
-  provider: 'openai',
-  model: 'gpt-4o',
-  apiKey: 'test-key',
-  baseUrl: 'https://api.openai.com/v1',
-};
+vi.mock('@earendil-works/pi-coding-agent', () => {
+  const mockModel = { id: 'gpt-4o', provider: 'openai' };
+  const mockRegistry = {
+    find: vi.fn((provider: string, model: string) => {
+      if (provider === 'openai' && model === 'gpt-4o') return mockModel;
+      return undefined;
+    }),
+    getApiKeyAndHeaders: vi.fn(() =>
+      Promise.resolve({ ok: true, apiKey: 'resolved-key', headers: {} }),
+    ),
+  };
+  const mockAuthStorage = {};
+  return {
+    AuthStorage: { create: () => mockAuthStorage },
+    ModelRegistry: { create: () => mockRegistry },
+    __mockRegistry: mockRegistry,
+  };
+});
+
+vi.mock('@earendil-works/pi-ai', () => ({
+  complete: vi.fn(() =>
+    Promise.resolve({
+      content: [{ type: 'text', text: 'Analysis result' }],
+    }),
+  ),
+}));
 
 function createMockClient(screenshotContent?: any[]) {
   return {
@@ -37,12 +56,6 @@ function mockVisionCaller(response: string): VisionCaller {
 function failingVisionCaller(error: string): VisionCaller {
   return vi.fn(() => Promise.reject(new Error(error)));
 }
-
-const originalFetch = globalThis.fetch;
-
-afterEach(() => {
-  globalThis.fetch = originalFetch;
-});
 
 describe('handleAnalyzeScreenshot', () => {
   test('successful flow returns analysis', async () => {
@@ -156,120 +169,46 @@ describe('handleAnalyzeScreenshot', () => {
 });
 
 describe('createFetchVisionCaller', () => {
-  test('calls fetch with correct URL, headers, and body', async () => {
-    const fetchMock = vi.fn(() =>
-      Promise.resolve(
-        new Response(
-          JSON.stringify({
-            choices: [{ message: { content: 'Analysis result' } }],
-          }),
-          { status: 200 },
-        ),
-      ),
-    );
-    globalThis.fetch = fetchMock as any;
-
-    const caller = createFetchVisionCaller(visionConfig);
+  test('resolves model from registry and calls complete()', async () => {
+    const caller = createFetchVisionCaller({ provider: 'openai', model: 'gpt-4o' });
     const result = await caller('Find button', 'aW1hZ2VkYXRh', 'image/png');
 
     expect(result).toBe('Analysis result');
-    const [url, options] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe('https://api.openai.com/v1/chat/completions');
-    expect(options.headers).toEqual(expect.objectContaining({ Authorization: 'Bearer test-key' }));
+
+    const { complete } = await import('@earendil-works/pi-ai');
+    expect(complete).toHaveBeenCalled();
   });
 
-  test('throws on missing API key', async () => {
-    const caller = createFetchVisionCaller({ provider: 'openai', model: 'gpt-4o' });
-    await expect(caller('Find button', 'aW1hZ2VkYXRh', 'image/png')).rejects.toThrow('No API key');
-  });
-
-  test('throws on non-OK response', async () => {
-    globalThis.fetch = vi.fn(() =>
-      Promise.resolve(new Response('Not Found', { status: 404 })),
-    ) as any;
-
-    const caller = createFetchVisionCaller(visionConfig);
-    await expect(caller('Find button', 'aW1hZ2VkYXRh', 'image/png')).rejects.toThrow(
-      'Vision model API error (404)',
+  test('throws when model not found in registry', async () => {
+    const caller = createFetchVisionCaller({ provider: 'unknown', model: 'no-model' });
+    await expect(caller('test', 'data', 'image/png')).rejects.toThrow(
+      'not found in model registry',
     );
   });
 
-  test('uses custom baseUrl when provided', async () => {
-    const fetchMock = vi.fn(() =>
-      Promise.resolve(
-        new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }), {
-          status: 200,
-        }),
-      ),
-    );
-    globalThis.fetch = fetchMock as any;
-
-    const caller = createFetchVisionCaller({
-      provider: 'openai',
-      model: 'gpt-4o',
-      apiKey: 'key',
-      baseUrl: 'https://custom.proxy.com/v1',
+  test('throws when auth fails', async () => {
+    const { __mockRegistry } = (await import('@earendil-works/pi-coding-agent')) as any;
+    __mockRegistry.getApiKeyAndHeaders.mockResolvedValueOnce({
+      ok: false,
+      error: 'no key configured',
     });
-    await caller('test', 'data', 'image/png');
 
-    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe('https://custom.proxy.com/v1/chat/completions');
+    const caller = createFetchVisionCaller({ provider: 'openai', model: 'gpt-4o' });
+    await expect(caller('test', 'data', 'image/png')).rejects.toThrow('Auth failed');
   });
 
-  test('reads API key from env when not in config', async () => {
-    const originalEnv = process.env.OPENAI_API_KEY;
-    process.env.OPENAI_API_KEY = 'env-key';
+  test('passes image data and mimeType to complete()', async () => {
+    const piAi = await import('@earendil-works/pi-ai');
+    (piAi.complete as any).mockClear();
 
-    const fetchMock = vi.fn(() =>
-      Promise.resolve(
-        new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }), {
-          status: 200,
-        }),
-      ),
-    );
-    globalThis.fetch = fetchMock as any;
+    const caller = createFetchVisionCaller({ provider: 'openai', model: 'gpt-4o' });
+    await caller('Describe this', 'aW1hZ2U=', 'image/jpeg');
 
-    try {
-      const caller = createFetchVisionCaller({ provider: 'openai', model: 'gpt-4o' });
-      await caller('test', 'data', 'image/png');
-
-      const [, options] = fetchMock.mock.calls[0] as [string, RequestInit];
-      expect((options.headers as Record<string, string>).Authorization).toBe('Bearer env-key');
-    } finally {
-      if (originalEnv === undefined) {
-        delete process.env.OPENAI_API_KEY;
-      } else {
-        process.env.OPENAI_API_KEY = originalEnv;
-      }
-    }
-  });
-
-  test('returns empty string when API returns no content', async () => {
-    globalThis.fetch = vi.fn(() =>
-      Promise.resolve(new Response(JSON.stringify({ choices: [] }), { status: 200 })),
-    ) as any;
-
-    const caller = createFetchVisionCaller(visionConfig);
-    const result = await caller('Find button', 'data', 'image/png');
-    expect(result).toBe('');
-  });
-
-  test('sends image as data URI in request body', async () => {
-    const fetchMock = vi.fn(() =>
-      Promise.resolve(
-        new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }), {
-          status: 200,
-        }),
-      ),
-    );
-    globalThis.fetch = fetchMock as any;
-
-    const caller = createFetchVisionCaller(visionConfig);
-    await caller('test', 'aW1hZ2U=', 'image/jpeg');
-
-    const [, options] = fetchMock.mock.calls[0] as [string, RequestInit];
-    const body = JSON.parse(options.body as string);
-    const imageContent = body.messages[1].content[1];
-    expect(imageContent.image_url.url).toBe('data:image/jpeg;base64,aW1hZ2U=');
+    const callArgs = (piAi.complete as any).mock.calls[0];
+    const messages = callArgs[1].messages;
+    const imageContent = messages[0].content[1];
+    expect(imageContent.type).toBe('image');
+    expect(imageContent.data).toBe('aW1hZ2U=');
+    expect(imageContent.mimeType).toBe('image/jpeg');
   });
 });

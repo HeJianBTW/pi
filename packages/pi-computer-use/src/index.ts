@@ -1,136 +1,173 @@
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
-import { type ComputerAction, dispatchAction } from './actions.js';
-import { ComputerClient } from './computer-client.js';
 import { type ComputerUseConfig, loadConfigFromFile, resolveConfig } from './config.js';
-import { ComputerServerProcess } from './server-process.js';
+import { CuaDriverClient } from './mcp-client.js';
 import { createPiVisionCaller } from './vision.js';
 
 export type { ComputerUseConfig };
 export { loadConfigFromFile, resolveConfig };
 
-export default function computerUseExtension(pi: ExtensionAPI): void {
-  let config = resolveConfig(loadConfigFromFile());
-  const serverProcess = new ComputerServerProcess();
-  let client = new ComputerClient(config);
-  let started = false;
+const TOOL_PREFIX = 'computer_use_';
 
-  async function ensureRunning(): Promise<void> {
-    if (started) return;
-    if (config.mode !== 'external') {
-      await serverProcess.start(config);
+const EXCLUDED_TOOLS = new Set([
+  'set_agent_cursor_enabled',
+  'set_agent_cursor_motion',
+  'set_agent_cursor_style',
+  'get_agent_cursor_state',
+  'set_recording',
+  'get_recording_state',
+  'replay_trajectory',
+  'check_permissions',
+  'get_config',
+  'set_config',
+  'move_cursor',
+  'zoom',
+  'type_text_chars',
+  'page',
+  'browser_eval',
+]);
+
+export default function computerUseExtension(pi: ExtensionAPI): void {
+  let config: ComputerUseConfig | undefined;
+  let client: CuaDriverClient | undefined;
+  let connected = false;
+
+  async function ensureConnected(): Promise<void> {
+    if (!client) throw new Error('pi-computer-use: session not started');
+    if (!connected) {
+      await client.connect();
+      connected = true;
     }
-    await client.connect();
-    started = true;
   }
 
-  pi.registerTool({
-    name: 'computer_use',
-    label: 'computer_use',
-    description:
-      'Control a computer desktop. Actions: screenshot, click, double_click, type, keypress, scroll, move, drag, wait, run_command. Each call executes one action and returns the resulting screen state.',
-    promptSnippet:
-      'computer_use — control a desktop: screenshot, click, type, scroll, keypress, drag, run_command',
-    parameters: Type.Object({
-      action: Type.Object({
-        type: Type.String({
-          description:
-            'Action type: screenshot | click | double_click | type | keypress | scroll | move | drag | wait | run_command',
-        }),
-        x: Type.Optional(Type.Number({ description: 'X coordinate (click, double_click, move)' })),
-        y: Type.Optional(Type.Number({ description: 'Y coordinate (click, double_click, move)' })),
-        button: Type.Optional(
-          Type.String({ description: 'Mouse button: left | right (default: left)' }),
-        ),
-        text: Type.Optional(Type.String({ description: 'Text to type (type action)' })),
-        keys: Type.Optional(
-          Type.Array(Type.String(), { description: 'Keys to press (keypress action)' }),
-        ),
-        scroll_x: Type.Optional(Type.Number({ description: 'Horizontal scroll amount' })),
-        scroll_y: Type.Optional(Type.Number({ description: 'Vertical scroll amount' })),
-        path: Type.Optional(
-          Type.Array(Type.Array(Type.Number(), { minItems: 2, maxItems: 2 }), {
-            description: 'Drag path as [[x,y], ...] coordinates',
+  async function registerUpstreamTools(): Promise<void> {
+    await ensureConnected();
+    const upstreamTools = await client!.listAllTools();
+
+    for (const tool of upstreamTools) {
+      if (EXCLUDED_TOOLS.has(tool.name)) continue;
+
+      const prefixedName = `${TOOL_PREFIX}${tool.name}`;
+      const originalName = tool.name;
+
+      pi.registerTool({
+        name: prefixedName,
+        label: prefixedName,
+        description: tool.description ?? '',
+        parameters: Type.Unsafe(tool.inputSchema),
+        async execute(
+          _toolCallId: string,
+          params: Record<string, unknown>,
+          _signal: AbortSignal | undefined,
+          _onUpdate: unknown,
+          ctx: ExtensionContext,
+        ) {
+          await ensureConnected();
+          const result = await client!.callTool(originalName, params);
+
+          if (originalName === 'screenshot' && config?.visionModel) {
+            const imageContent = result.content?.find((c) => c.type === 'image' && c.data);
+            if (imageContent?.data) {
+              const callVision = createPiVisionCaller(config.visionModel, ctx);
+              const analysis = await callVision(
+                'Describe the full screen: identify all visible windows, UI elements, buttons, text fields, and their positions.',
+                imageContent.data,
+                imageContent.mimeType ?? 'image/png',
+              );
+              return {
+                content: [{ type: 'text' as const, text: analysis }],
+                details: undefined,
+              };
+            }
+          }
+
+          const content: Array<{ type: 'text'; text: string }> = [];
+          if (result.content) {
+            for (const item of result.content) {
+              if (item.type === 'text' && item.text) {
+                content.push({ type: 'text', text: item.text });
+              }
+            }
+          }
+          if (content.length === 0) {
+            content.push({ type: 'text', text: 'Action executed.' });
+          }
+
+          return result.isError
+            ? { content, details: undefined, isError: true }
+            : { content, details: undefined };
+        },
+      });
+    }
+  }
+
+  async function registerVisionTool(): Promise<void> {
+    if (!config?.visionModel) return;
+    const visionConfig = config.visionModel;
+
+    pi.registerTool({
+      name: `${TOOL_PREFIX}analyze_screenshot`,
+      label: `${TOOL_PREFIX}analyze_screenshot`,
+      description:
+        'Take a screenshot and analyze it visually using a vision model. Use when you need to identify elements by visual attributes (color, layout, position) or need precise pixel coordinates.',
+      parameters: Type.Object({
+        instruction: Type.Optional(
+          Type.String({
+            description:
+              'What to identify or analyze visually (e.g., "Find the coordinates of the blue submit button").',
           }),
         ),
-        command: Type.Optional(Type.String({ description: 'Shell command (run_command action)' })),
       }),
-    }),
-    async execute(
-      _toolCallId: string,
-      params: { action: ComputerAction },
-      _signal: AbortSignal | undefined,
-      _onUpdate: unknown,
-      ctx: ExtensionContext,
-    ) {
-      await ensureRunning();
+      async execute(
+        _toolCallId: string,
+        params: Record<string, unknown>,
+        _signal: AbortSignal | undefined,
+        _onUpdate: unknown,
+        ctx: ExtensionContext,
+      ) {
+        await ensureConnected();
 
-      if (params.action.type === 'screenshot') {
-        const screenshotBase64 = await client.screenshot();
-        if (config.visionModel) {
-          const callVision = createPiVisionCaller(config.visionModel, ctx);
-          const analysis = await callVision(
-            'Describe the full screen: identify all visible windows, UI elements, buttons, text fields, and their positions.',
-            screenshotBase64,
-            'image/png',
-          );
-          return { content: [{ type: 'text' as const, text: analysis }], details: undefined };
-        }
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: 'Screenshot captured (no vision model configured to analyze it).',
-            },
-          ],
-          details: undefined,
-        };
-      }
+        const screenshotResult = await client!.callTool('screenshot', {});
+        const imageContent = screenshotResult.content?.find((c) => c.type === 'image' && c.data);
 
-      const actionResult = await dispatchAction(client, params.action);
-
-      if (config.autoScreenshot !== false) {
-        const screenshotBase64 = await client.screenshot();
-        if (config.visionModel) {
-          const callVision = createPiVisionCaller(config.visionModel, ctx);
-          const analysis = await callVision(
-            'Describe the current screen state after the action. Focus on what changed and what is now visible.',
-            screenshotBase64,
-            'image/png',
-          );
+        if (!imageContent?.data) {
           return {
-            content: [
-              {
-                type: 'text' as const,
-                text: `${actionResult}\n\nScreen state:\n${analysis}`,
-              },
-            ],
+            content: [{ type: 'text' as const, text: 'Failed to capture screenshot.' }],
             details: undefined,
+            isError: true,
           };
         }
+
+        const callVision = createPiVisionCaller(visionConfig, ctx);
+        const instruction =
+          (params.instruction as string) ??
+          'Describe the full screen: identify all visible windows, UI elements, buttons, text fields, and their positions.';
+        const analysis = await callVision(
+          instruction,
+          imageContent.data,
+          imageContent.mimeType ?? 'image/png',
+        );
+
         return {
-          content: [{ type: 'text' as const, text: actionResult ?? 'Action executed.' }],
+          content: [{ type: 'text' as const, text: analysis }],
           details: undefined,
         };
-      }
-
-      return {
-        content: [{ type: 'text' as const, text: actionResult ?? 'Action executed.' }],
-        details: undefined,
-      };
-    },
-  });
+      },
+    });
+  }
 
   pi.on('session_start', async (_event, ctx) => {
     config = resolveConfig(loadConfigFromFile({ cwd: ctx.cwd }));
-    client = new ComputerClient(config);
+    client = new CuaDriverClient(config);
+    connected = false;
+    await registerUpstreamTools();
+    await registerVisionTool();
   });
 
   pi.on('session_shutdown', async () => {
-    if (started) {
+    if (connected && client) {
       await client.close();
-      await serverProcess.stop();
-      started = false;
+      connected = false;
     }
   });
 }

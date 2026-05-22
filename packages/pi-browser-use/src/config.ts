@@ -1,13 +1,17 @@
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+
 /** Vision model used by the optional analyze_screenshot tool. */
 export interface VisionModelConfig {
   provider: string;
   model: string;
-  apiKey?: string;
-  baseUrl?: string;
 }
+
+export type BrowserSessionMode = 'persistent' | 'isolated' | 'existing';
 
 /** Configuration for the chrome-devtools-mcp upstream process. */
 export interface BrowserUseConfig {
+  sessionMode?: BrowserSessionMode;
   headless?: boolean;
   channel?: 'canary' | 'dev' | 'beta' | 'stable';
   browserUrl?: string;
@@ -37,7 +41,10 @@ export interface BrowserUseConfig {
   extraArgs?: string[];
 }
 
+const DEFAULT_PROFILE_DIR = join(homedir(), '.pi', 'browser-profile');
+
 const DEFAULTS: Partial<BrowserUseConfig> = {
+  sessionMode: 'persistent',
   categoryPerformance: false,
   categoryNetwork: true,
   categoryEmulation: true,
@@ -51,7 +58,27 @@ const DEFAULTS: Partial<BrowserUseConfig> = {
 
 /** Merge user config over sane defaults. */
 export function resolveConfig(config?: BrowserUseConfig): BrowserUseConfig {
-  return { ...DEFAULTS, ...config };
+  const resolved = { ...DEFAULTS, ...config };
+
+  switch (resolved.sessionMode) {
+    case 'existing':
+      if (!resolved.autoConnect && !resolved.browserUrl && !resolved.wsEndpoint) {
+        resolved.autoConnect = true;
+      }
+      break;
+    case 'isolated':
+      if (!resolved.isolated) {
+        resolved.isolated = true;
+      }
+      break;
+    default:
+      if (!resolved.userDataDir && !resolved.browserUrl && !resolved.wsEndpoint) {
+        resolved.userDataDir = DEFAULT_PROFILE_DIR;
+      }
+      break;
+  }
+
+  return resolved;
 }
 
 /** Convert config into CLI flags for the chrome-devtools-mcp subprocess. */

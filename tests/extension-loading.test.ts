@@ -25,6 +25,11 @@ vi.mock('@earendil-works/pi-ai', () => ({
   complete: vi.fn().mockResolvedValue({ text: 'mock' }),
 }));
 
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  return { ...actual, existsSync: vi.fn().mockReturnValue(true) };
+});
+
 interface MockExtensionAPI {
   on: ReturnType<typeof vi.fn>;
   registerTool: ReturnType<typeof vi.fn>;
@@ -111,6 +116,9 @@ describe('Extension loading contract', () => {
       expect(onCalls).toContain('tool_execution_end');
       expect(onCalls).toContain('before_provider_request');
       expect(onCalls).toContain('after_provider_response');
+      expect(onCalls).toContain('message_end');
+      expect(onCalls).toContain('model_select');
+      expect(onCalls).toContain('session_compact');
       expect(onCalls).toContain('session_shutdown');
     });
   });
@@ -148,18 +156,26 @@ describe('Extension loading contract', () => {
   });
 
   describe('pi-computer-use registrations', () => {
-    it('registers computer_use tool and session_shutdown handler', async () => {
+    it('registers session_start and session_shutdown handlers, tools registered on session_start', async () => {
       const mod = await import(join(EXTENSIONS_DIR, 'pi-computer-use', 'src', 'index.ts'));
       const pi = createMockExtensionAPI();
       // biome-ignore lint/suspicious/noExplicitAny: mock API
       mod.default(pi as any);
 
-      expect(pi.registerTool).toHaveBeenCalled();
-      const toolName = pi.registerTool.mock.calls[0][0].name;
-      expect(toolName).toBe('computer_use');
-
       const onCalls = pi.on.mock.calls.map((c: unknown[]) => c[0]);
+      expect(onCalls).toContain('session_start');
       expect(onCalls).toContain('session_shutdown');
+
+      const sessionStartHandler = pi.on.mock.calls.find(
+        (c: unknown[]) => c[0] === 'session_start',
+      )?.[1] as (...args: unknown[]) => Promise<void>;
+      expect(sessionStartHandler).toBeDefined();
+
+      await sessionStartHandler({ type: 'session_start', reason: 'startup' }, { cwd: process.cwd() });
+
+      expect(pi.registerTool).toHaveBeenCalled();
+      const toolNames = pi.registerTool.mock.calls.map((c: unknown[]) => c[0].name);
+      expect(toolNames).toContain('computer_use_click');
     });
   });
 });

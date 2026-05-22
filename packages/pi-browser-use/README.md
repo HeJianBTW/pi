@@ -56,6 +56,22 @@ npx @amaster.ai/pi-browser-use --config path/to/config.json
 
 ## Configuration
 
+### Session Mode
+
+| Mode | Description |
+|------|-------------|
+| `persistent` (default) | Reuses a shared browser profile at `~/.pi/browser-profile`. Cookies, logins, and extensions persist across sessions. |
+| `isolated` | Launches a fresh ephemeral browser profile each session. No state carried over. |
+| `existing` | Connects to an already-running browser instance (via `browserUrl`, `wsEndpoint`, or auto-discovery). |
+
+```json
+{
+  "pi-browser-use": {
+    "sessionMode": "persistent"
+  }
+}
+```
+
 ### Browser
 
 | Option | Type | Default | Description |
@@ -96,22 +112,20 @@ npx @amaster.ai/pi-browser-use --config path/to/config.json
 
 ### Vision Model (Optional)
 
-Enable `browser_analyze_screenshot` by providing a vision model config in `.pi/settings.json`:
+Enable `browser_analyze_screenshot` by referencing a model already configured in Pi's model registry (`models.json`):
 
 ```json
 {
   "pi-browser-use": {
     "visionModel": {
       "provider": "openai",
-      "model": "gpt-4o",
-      "apiKey": "sk-...",
-      "baseUrl": "https://api.openai.com/v1"
+      "model": "gpt-4o"
     }
   }
 }
 ```
 
-Supported providers: `openai`, `anthropic`, or any OpenAI-compatible API. API keys can also be set via environment variables (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`).
+The extension resolves API key, base URL, and headers from the model registry automatically — no need to duplicate credentials here.
 
 ## Tool Augmentation
 
