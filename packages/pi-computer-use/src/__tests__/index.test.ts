@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
+let mockCallToolFn: (name: string, args: Record<string, unknown>) => unknown = () => ({
+  content: [{ type: 'text', text: 'Action executed.' }],
+});
+
 vi.mock('@modelcontextprotocol/sdk/client/index.js', () => ({
   Client: class MockClient {
     async connect() {}
@@ -25,8 +29,8 @@ vi.mock('@modelcontextprotocol/sdk/client/index.js', () => ({
         nextCursor: undefined,
       };
     }
-    async callTool() {
-      return { content: [{ type: 'text', text: 'Action executed.' }] };
+    async callTool(req: { name: string; arguments: Record<string, unknown> }) {
+      return mockCallToolFn(req.name, req.arguments ?? {});
     }
   },
 }));
@@ -78,11 +82,19 @@ const mockPi = {
   }),
 };
 
-const mockCtx = { cwd: '/tmp', modelRegistry: { find: vi.fn(), getApiKeyAndHeaders: vi.fn() } };
+const mockNotify = vi.fn();
+const mockCtx = {
+  cwd: '/tmp',
+  ui: { notify: mockNotify },
+  modelRegistry: { find: vi.fn(), getApiKeyAndHeaders: vi.fn() },
+};
 
 const { default: computerUseExtension } = await import('../index.js');
 
-async function initExtension(config?: Record<string, unknown>) {
+async function initExtension(
+  config?: Record<string, unknown>,
+  callToolOverride?: (name: string, args: Record<string, unknown>) => unknown,
+) {
   if (config) {
     mockConfigContent = JSON.stringify({ 'pi-computer-use': config });
   } else {
@@ -92,6 +104,9 @@ async function initExtension(config?: Record<string, unknown>) {
   for (const k of Object.keys(eventHandlers)) delete eventHandlers[k];
   mockPi.registerTool.mockClear();
   mockPi.on.mockClear();
+  mockNotify.mockClear();
+  mockCallToolFn =
+    callToolOverride ?? (() => ({ content: [{ type: 'text', text: 'Action executed.' }] }));
 
   computerUseExtension(mockPi as any);
 
@@ -161,5 +176,184 @@ describe('config', () => {
       visionModel: { provider: 'openai', model: 'gpt-4o' },
     });
     expect(config.visionModel).toEqual({ provider: 'openai', model: 'gpt-4o' });
+  });
+});
+
+describe('permissions', () => {
+  beforeEach(() => {
+    registeredTools.clear();
+    for (const k of Object.keys(eventHandlers)) delete eventHandlers[k];
+  });
+
+  test('notifies warning when accessibility is not granted on session_start', async () => {
+    await initExtension(undefined, (name: string) => {
+      if (name === 'check_permissions') {
+        return {
+          content: [{ type: 'text', text: '❌ Accessibility: NOT granted.' }],
+          structuredContent: { accessibility: false, screen_recording: true },
+        };
+      }
+      return { content: [{ type: 'text', text: 'Action executed.' }] };
+    });
+
+    expect(mockNotify).toHaveBeenCalledWith(
+      expect.stringContaining('Accessibility not granted'),
+      'warning',
+    );
+    expect(mockNotify).not.toHaveBeenCalledWith(
+      expect.stringContaining('Screen Recording not granted'),
+      expect.anything(),
+    );
+  });
+
+  test('notifies warning when screen recording is not granted on session_start', async () => {
+    await initExtension(undefined, (name: string) => {
+      if (name === 'check_permissions') {
+        return {
+          content: [{ type: 'text', text: '❌ Screen Recording: NOT granted.' }],
+          structuredContent: { accessibility: true, screen_recording: false },
+        };
+      }
+      return { content: [{ type: 'text', text: 'Action executed.' }] };
+    });
+
+    expect(mockNotify).toHaveBeenCalledWith(
+      expect.stringContaining('Screen Recording not granted'),
+      'warning',
+    );
+    expect(mockNotify).not.toHaveBeenCalledWith(
+      expect.stringContaining('Accessibility not granted'),
+      expect.anything(),
+    );
+  });
+
+  test('notifies both warnings when neither permission is granted', async () => {
+    await initExtension(undefined, (name: string) => {
+      if (name === 'check_permissions') {
+        return {
+          content: [{ type: 'text', text: 'Not granted.' }],
+          structuredContent: { accessibility: false, screen_recording: false },
+        };
+      }
+      return { content: [{ type: 'text', text: 'Action executed.' }] };
+    });
+
+    expect(mockNotify).toHaveBeenCalledWith(
+      expect.stringContaining('Accessibility not granted'),
+      'warning',
+    );
+    expect(mockNotify).toHaveBeenCalledWith(
+      expect.stringContaining('Screen Recording not granted'),
+      'warning',
+    );
+  });
+
+  test('does not notify when all permissions are granted', async () => {
+    await initExtension(undefined, (name: string) => {
+      if (name === 'check_permissions') {
+        return {
+          content: [{ type: 'text', text: 'All granted.' }],
+          structuredContent: { accessibility: true, screen_recording: true },
+        };
+      }
+      return { content: [{ type: 'text', text: 'Action executed.' }] };
+    });
+
+    expect(mockNotify).not.toHaveBeenCalled();
+  });
+
+  test('does not block session_start if check_permissions throws', async () => {
+    await initExtension(undefined, (name: string) => {
+      if (name === 'check_permissions') {
+        throw new Error('cua-driver crashed');
+      }
+      return { content: [{ type: 'text', text: 'Action executed.' }] };
+    });
+
+    expect(registeredTools.has('computer_use_click')).toBe(true);
+    expect(mockNotify).not.toHaveBeenCalled();
+  });
+
+  test('tool returns friendly message on ax_not_granted error', async () => {
+    const callToolImpl = (name: string) => {
+      if (name === 'check_permissions') {
+        return {
+          content: [{ type: 'text', text: 'All granted.' }],
+          structuredContent: { accessibility: true, screen_recording: true },
+        };
+      }
+      return {
+        content: [{ type: 'text', text: 'ax_not_granted: permission denied' }],
+        isError: true,
+      };
+    };
+    await initExtension(undefined, callToolImpl);
+
+    const clickTool = registeredTools.get('computer_use_click')!;
+    const result = (await clickTool.execute(
+      'id',
+      { x: 100, y: 100 },
+      undefined,
+      undefined,
+      mockCtx,
+    )) as any;
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Accessibility permission not granted');
+    expect(result.content[0].text).toContain('System Settings');
+  });
+
+  test('tool returns friendly message on sc_not_granted error', async () => {
+    const callToolImpl = (name: string) => {
+      if (name === 'check_permissions') {
+        return {
+          content: [{ type: 'text', text: 'All granted.' }],
+          structuredContent: { accessibility: true, screen_recording: true },
+        };
+      }
+      if (name === 'screenshot') {
+        return {
+          content: [{ type: 'text', text: 'sc_not_granted: screen recording denied' }],
+          isError: true,
+        };
+      }
+      return { content: [{ type: 'text', text: 'Action executed.' }] };
+    };
+    await initExtension(undefined, callToolImpl);
+
+    const screenshotTool = registeredTools.get('computer_use_screenshot')!;
+    const result = (await screenshotTool.execute('id', {}, undefined, undefined, mockCtx)) as any;
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Screen Recording permission not granted');
+    expect(result.content[0].text).toContain('System Settings');
+  });
+
+  test('tool passes through non-permission errors unchanged', async () => {
+    const callToolImpl = (name: string) => {
+      if (name === 'check_permissions') {
+        return {
+          content: [{ type: 'text', text: 'All granted.' }],
+          structuredContent: { accessibility: true, screen_recording: true },
+        };
+      }
+      return {
+        content: [{ type: 'text', text: 'element_not_found: ref is stale' }],
+        isError: true,
+      };
+    };
+    await initExtension(undefined, callToolImpl);
+
+    const clickTool = registeredTools.get('computer_use_click')!;
+    const result = (await clickTool.execute(
+      'id',
+      { x: 100, y: 100 },
+      undefined,
+      undefined,
+      mockCtx,
+    )) as any;
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toBe('element_not_found: ref is stale');
   });
 });

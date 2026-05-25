@@ -65,6 +65,34 @@ export default function computerUseExtension(pi: ExtensionAPI): void {
           await ensureConnected();
           const result = await client!.callTool(originalName, params);
 
+          if (result.isError) {
+            const errorText = result.content?.map((c) => c.text ?? '').join('') ?? '';
+            if (errorText.includes('ax_not_granted')) {
+              return {
+                content: [
+                  {
+                    type: 'text' as const,
+                    text: 'Accessibility permission not granted. The user needs to enable it in System Settings → Privacy & Security → Accessibility, then restart the app.',
+                  },
+                ],
+                details: undefined,
+                isError: true,
+              };
+            }
+            if (errorText.includes('sc_not_granted')) {
+              return {
+                content: [
+                  {
+                    type: 'text' as const,
+                    text: 'Screen Recording permission not granted. The user needs to enable it in System Settings → Privacy & Security → Screen & System Audio Recording, then restart the app.',
+                  },
+                ],
+                details: undefined,
+                isError: true,
+              };
+            }
+          }
+
           if (originalName === 'screenshot' && config?.visionModel) {
             const imageContent = result.content?.find((c) => c.type === 'image' && c.data);
             if (imageContent?.data) {
@@ -162,6 +190,29 @@ export default function computerUseExtension(pi: ExtensionAPI): void {
     connected = false;
     await registerUpstreamTools();
     await registerVisionTool();
+
+    try {
+      const permResult = await client!.callTool('check_permissions', {});
+      const structured = (permResult as Record<string, unknown>).structuredContent as
+        | { accessibility?: boolean; screen_recording?: boolean }
+        | undefined;
+      if (structured) {
+        if (!structured.accessibility) {
+          ctx.ui.notify(
+            'pi-computer-use: Accessibility not granted. Go to System Settings → Privacy & Security → Accessibility to enable.',
+            'warning',
+          );
+        }
+        if (!structured.screen_recording) {
+          ctx.ui.notify(
+            'pi-computer-use: Screen Recording not granted. Go to System Settings → Privacy & Security → Screen & System Audio Recording to enable.',
+            'warning',
+          );
+        }
+      }
+    } catch {
+      // permission check is best-effort — do not block session start
+    }
   });
 
   pi.on('session_shutdown', async () => {
