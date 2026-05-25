@@ -1,4 +1,3 @@
-import type { RuntimeLifecycleEvent, RuntimeToolEvent } from '@amaster.ai/pi-shared';
 import { describe, expect, it } from 'vitest';
 import {
   CompositeRuntimeEventExporter,
@@ -7,13 +6,11 @@ import {
 } from '../index.js';
 import {
   createRuntimeEventExporterFromEnv as createLangfuseRuntimeEventExporterFromEnv,
-  LangfuseHttpRuntimeEventExporter,
   type LangfuseSdkClient,
   type LangfuseSdkGenerationClient,
   LangfuseSdkRuntimeEventExporter,
   type LangfuseSdkSpanClient,
   type LangfuseSdkTraceClient,
-  mapRuntimeEventToLangfuse,
   resolveLangfuseConfig,
 } from '../langfuse.js';
 import {
@@ -69,7 +66,6 @@ describe('telemetry', () => {
   it('keeps Langfuse disabled until keys are present', () => {
     expect(resolveLangfuseConfig({ LANGFUSE_ENABLED: 'true' })).toMatchObject({
       enabled: false,
-      transport: 'ingestion',
       baseUrl: 'https://cloud.langfuse.com',
       flushAt: 20,
       flushIntervalMs: 5000,
@@ -86,7 +82,6 @@ describe('telemetry', () => {
       }),
     ).toMatchObject({
       enabled: true,
-      transport: 'sdk',
       publicKey: 'public',
       secretKey: 'secret',
       baseUrl: 'https://langfuse.example.com/',
@@ -102,265 +97,27 @@ describe('telemetry', () => {
       }),
     ).toMatchObject({
       enabled: true,
-      transport: 'sdk',
-    });
-
-    expect(
-      resolveLangfuseConfig({
-        LANGFUSE_ENABLED: 'true',
-        LANGFUSE_TRANSPORT: 'ingestion',
-        LANGFUSE_PUBLIC_KEY: 'public',
-        LANGFUSE_SECRET_KEY: 'secret',
-      }),
-    ).toMatchObject({
-      enabled: true,
-      transport: 'ingestion',
     });
   });
 
-  it('creates the requested Langfuse transport from environment', () => {
+  it('creates Langfuse SDK exporter from environment', () => {
     expect(createLangfuseRuntimeEventExporterFromEnv({ LANGFUSE_ENABLED: 'true' })).toBeInstanceOf(
       NoopRuntimeEventExporter,
     );
     expect(
       createLangfuseRuntimeEventExporterFromEnv({
         LANGFUSE_ENABLED: 'true',
-        LANGFUSE_TRANSPORT: 'ingestion',
         LANGFUSE_PUBLIC_KEY: 'public',
         LANGFUSE_SECRET_KEY: 'secret',
       }),
-    ).toBeInstanceOf(LangfuseHttpRuntimeEventExporter);
+    ).toBeInstanceOf(LangfuseSdkRuntimeEventExporter);
   });
 
-  it('maps chat lifecycle events to Langfuse trace events', () => {
-    const event: RuntimeLifecycleEvent = {
-      id: 'event-1',
-      traceId,
-      type: 'chat_turn_started',
-      sessionId: 'session-1',
-      conversationId: 'conversation-1',
-      createdAt: '2026-05-02T00:00:00.000Z',
-      model: { provider: 'anthropic-compatible', model: 'kimi-k2.5', thinkingLevel: 'off' },
-      toolPolicyProfile: 'sandbox-exec',
-    };
-
-    const [mapped] = mapRuntimeEventToLangfuse(event);
-
-    expect(mapped?.type).toBe('trace-create');
-    expect(mapped?.body).toMatchObject({
-      sessionId: 'session-1',
-      name: 'copilot-chat-turn',
-      metadata: {
-        eventType: 'chat_turn_started',
-        sessionId: 'session-1',
-        conversationId: 'conversation-1',
-        model: 'anthropic-compatible/kimi-k2.5',
-        thinkingLevel: 'off',
-      },
-    });
-    expect(mapped?.body.id).toMatch(/^[0-9a-f]{32}$/);
-  });
-
-  it('maps steered chat input to a child Langfuse span', () => {
-    const event: RuntimeLifecycleEvent = {
-      id: 'steer-event-1',
-      traceId,
-      type: 'chat_turn_steered',
-      sessionId: 'session-1',
-      conversationId: 'conversation-1',
-      createdAt: '2026-05-02T00:00:01.000Z',
-      model: { provider: 'anthropic-compatible', model: 'kimi-k2.5', thinkingLevel: 'off' },
-      toolPolicyProfile: 'sandbox-exec',
-      details: {
-        input: '开发一个 helloworld 页面',
-        turnMode: 'steer',
-        accepted: true,
-      },
-    };
-
-    const [spanCreate, spanUpdate] = mapRuntimeEventToLangfuse(event);
-
-    expect(spanCreate?.type).toBe('span-create');
-    expect(spanUpdate?.type).toBe('span-update');
-    expect(spanCreate?.body.id).toBe(spanUpdate?.body.id);
-    expect(spanCreate?.body).toMatchObject({
-      name: 'chat-steer [开发一个 helloworld 页面]',
-      input: '开发一个 helloworld 页面',
-      metadata: {
-        eventType: 'chat_turn_steered',
-        details: expect.objectContaining({ turnMode: 'steer' }),
-      },
-    });
-    expect(spanUpdate?.body).toMatchObject({
-      output: { accepted: true, turnMode: 'steer' },
-    });
-  });
-
-  it('maps delivered steered chat input to a child Langfuse span', () => {
-    const event: RuntimeLifecycleEvent = {
-      id: 'steer-delivered-event-1',
-      traceId,
-      type: 'chat_turn_steer_delivered',
-      sessionId: 'session-1',
-      conversationId: 'conversation-1',
-      createdAt: '2026-05-02T00:00:02.000Z',
-      model: { provider: 'anthropic-compatible', model: 'kimi-k2.5', thinkingLevel: 'off' },
-      toolPolicyProfile: 'sandbox-exec',
-      details: {
-        input: '开发一个 helloworld 页面',
-        turnMode: 'steer',
-        delivered: true,
-        acceptedEventId: 'steer-event-1',
-      },
-    };
-
-    const [spanCreate, spanUpdate] = mapRuntimeEventToLangfuse(event);
-
-    expect(spanCreate?.type).toBe('span-create');
-    expect(spanUpdate?.type).toBe('span-update');
-    expect(spanCreate?.body).toMatchObject({
-      name: 'chat-steer-delivered [开发一个 helloworld 页面]',
-      input: '开发一个 helloworld 页面',
-      metadata: {
-        eventType: 'chat_turn_steer_delivered',
-        details: expect.objectContaining({ acceptedEventId: 'steer-event-1' }),
-      },
-    });
-    expect(spanUpdate?.body).toMatchObject({
-      output: { delivered: true, turnMode: 'steer' },
-    });
-  });
-
-  it('maps tool started and completed events to stable Langfuse spans', () => {
-    const started: RuntimeToolEvent = {
-      id: 'tool-event-1',
-      traceId,
-      sessionId: 'session-1',
-      conversationId: 'conversation-1',
-      toolCallId: 'call-1',
-      toolName: 'read_file',
-      status: 'started',
-      createdAt: '2026-05-02T00:00:00.000Z',
-      args: { path: 'README.md' },
-    };
-    const completed: RuntimeToolEvent = {
-      ...started,
-      id: 'tool-event-2',
-      status: 'completed',
-      createdAt: '2026-05-02T00:00:01.000Z',
-      durationMs: 1000,
-      details: { policy: 'allow' },
-    };
-
-    const [spanCreate] = mapRuntimeEventToLangfuse(started);
-    const [spanUpdate] = mapRuntimeEventToLangfuse(completed);
-
-    expect(spanCreate?.type).toBe('span-create');
-    expect(spanUpdate?.type).toBe('span-update');
-    expect(spanCreate?.body.id).toBe(spanUpdate?.body.id);
-    expect(spanCreate?.body.id).toMatch(/^[0-9a-f]{16}$/);
-    expect(spanCreate?.body).toMatchObject({
-      name: 'read_file [README.md]',
-      input: { path: 'README.md' },
-    });
-    expect(spanUpdate?.body).toMatchObject({
-      output: { policy: 'allow' },
-      metadata: { durationMs: 1000 },
-    });
-  });
-
-  it('flushes Langfuse batches with basic auth', async () => {
-    const requests: Array<{
-      input: string;
-      init: { headers: Record<string, string>; body: string };
-    }> = [];
-    const exporter = new LangfuseHttpRuntimeEventExporter(
+  it('strips payloads when includePayloads is false in SDK transport', async () => {
+    const client = new FakeLangfuseSdkClient();
+    const exporter = new LangfuseSdkRuntimeEventExporter(
       {
         enabled: true,
-        transport: 'ingestion',
-        publicKey: 'public',
-        secretKey: 'secret',
-        baseUrl: 'https://langfuse.example.com/',
-        flushAt: 2,
-        flushIntervalMs: 60_000,
-      },
-      async (input, init) => {
-        requests.push({ input, init });
-        return { ok: true, status: 200, text: async () => '' };
-      },
-    );
-
-    await exporter.publish({
-      id: 'event-1',
-      traceId,
-      type: 'chat_turn_started',
-      sessionId: 'session-1',
-      createdAt: '2026-05-02T00:00:00.000Z',
-      details: { input: 'hello' },
-    });
-    expect(requests).toHaveLength(0);
-
-    await exporter.publish({
-      id: 'event-2',
-      traceId,
-      type: 'chat_turn_completed',
-      sessionId: 'session-1',
-      createdAt: '2026-05-02T00:00:01.000Z',
-      durationMs: 1000,
-      details: { output: 'world' },
-    });
-
-    expect(requests).toHaveLength(1);
-    expect(requests[0]?.input).toBe('https://langfuse.example.com/api/public/ingestion');
-    expect(requests[0]?.init.headers.authorization).toBe('Basic cHVibGljOnNlY3JldA==');
-    expect(JSON.parse(requests[0]?.init.body ?? '{}')).toMatchObject({
-      batch: [
-        { type: 'trace-create', body: { input: 'hello' } },
-        { type: 'trace-update', body: { output: 'world' } },
-      ],
-    });
-  });
-
-  it('keeps failed Langfuse batches queued for retry', async () => {
-    let attempt = 0;
-    const exporter = new LangfuseHttpRuntimeEventExporter(
-      {
-        enabled: true,
-        transport: 'ingestion',
-        publicKey: 'public',
-        secretKey: 'secret',
-        baseUrl: 'https://langfuse.example.com',
-        flushAt: 10,
-        flushIntervalMs: 60_000,
-      },
-      async () => {
-        attempt += 1;
-        if (attempt === 1) {
-          return { ok: false, status: 503, text: async () => 'temporarily unavailable' };
-        }
-        return { ok: true, status: 200, text: async () => '' };
-      },
-    );
-
-    await exporter.publish({
-      id: 'event-1',
-      traceId,
-      type: 'chat_turn_started',
-      sessionId: 'session-1',
-      createdAt: '2026-05-02T00:00:00.000Z',
-    });
-
-    await expect(exporter.flush()).rejects.toThrow('Langfuse ingestion failed with 503');
-    await expect(exporter.flush()).resolves.toBeUndefined();
-    expect(attempt).toBe(2);
-  });
-
-  it('strips payloads before exporting Langfuse ingestion events', async () => {
-    const requests: Array<{ init: { body: string } }> = [];
-    const exporter = new LangfuseHttpRuntimeEventExporter(
-      {
-        enabled: true,
-        transport: 'ingestion',
         publicKey: 'public',
         secretKey: 'secret',
         baseUrl: 'https://langfuse.example.com',
@@ -368,10 +125,7 @@ describe('telemetry', () => {
         flushIntervalMs: 60_000,
         includePayloads: false,
       },
-      async (_input, init) => {
-        requests.push({ init });
-        return { ok: true, status: 200, text: async () => '' };
-      },
+      client,
     );
 
     await exporter.publish({
@@ -379,6 +133,7 @@ describe('telemetry', () => {
       traceId,
       type: 'chat_turn_started',
       sessionId: 'session-1',
+      conversationId: 'conversation-1',
       createdAt: '2026-05-02T00:00:00.000Z',
       details: { input: 'secret prompt', output: 'draft', content: 'raw content', kept: true },
     });
@@ -386,6 +141,7 @@ describe('telemetry', () => {
       id: 'tool-event-1',
       traceId,
       sessionId: 'session-1',
+      conversationId: 'conversation-1',
       toolCallId: 'call-1',
       toolName: 'run_shell',
       status: 'started',
@@ -393,26 +149,18 @@ describe('telemetry', () => {
       args: { command: 'cat private.txt' },
       details: { args: { command: 'cat private.txt' }, kept: true },
     });
-    await exporter.flush();
 
-    const body = requests[0]?.init.body ?? '';
-    expect(body).not.toContain('secret prompt');
-    expect(body).not.toContain('raw content');
-    expect(body).not.toContain('cat private.txt');
-    expect(JSON.parse(body)).toMatchObject({
-      batch: [
-        { body: { metadata: { details: { kept: true } } } },
-        { body: { metadata: { details: { kept: true } } } },
-      ],
-    });
+    const trace = client.traces[0];
+    expect(trace?.body.input).toBeUndefined();
+    const toolSpan = trace?.spans[0]?.spans[0];
+    expect(toolSpan?.body.input).toBeUndefined();
   });
 
-  it('allows redaction hooks to drop telemetry events', async () => {
-    const requests: Array<{ init: { body: string } }> = [];
-    const exporter = new LangfuseHttpRuntimeEventExporter(
+  it('allows redaction hooks to drop telemetry events in SDK transport', async () => {
+    const client = new FakeLangfuseSdkClient();
+    const exporter = new LangfuseSdkRuntimeEventExporter(
       {
         enabled: true,
-        transport: 'ingestion',
         publicKey: 'public',
         secretKey: 'secret',
         baseUrl: 'https://langfuse.example.com',
@@ -420,10 +168,7 @@ describe('telemetry', () => {
         flushIntervalMs: 60_000,
         redactEvent: (event) => (event.id === 'drop-me' ? undefined : event),
       },
-      async (_input, init) => {
-        requests.push({ init });
-        return { ok: true, status: 200, text: async () => '' };
-      },
+      client,
     );
 
     await exporter.publish({
@@ -431,18 +176,22 @@ describe('telemetry', () => {
       traceId,
       type: 'chat_turn_started',
       sessionId: 'session-1',
+      conversationId: 'conversation-1',
       createdAt: '2026-05-02T00:00:00.000Z',
+      details: { input: 'hello' },
     });
     await exporter.publish({
       id: 'keep-me',
       traceId,
-      type: 'chat_turn_completed',
+      type: 'chat_turn_started',
       sessionId: 'session-1',
+      conversationId: 'conversation-1',
       createdAt: '2026-05-02T00:00:01.000Z',
+      details: { input: 'world' },
     });
-    await exporter.flush();
 
-    expect(JSON.parse(requests[0]?.init.body ?? '{}').batch).toHaveLength(1);
+    expect(client.traces).toHaveLength(1);
+    expect(client.traces[0]?.body.input).toBe('world');
   });
 
   it('exports completed spans through a generic OTEL traces endpoint', async () => {
@@ -585,7 +334,6 @@ describe('telemetry', () => {
     const exporter = new LangfuseSdkRuntimeEventExporter(
       {
         enabled: true,
-        transport: 'sdk',
         publicKey: 'public',
         secretKey: 'secret',
         baseUrl: 'https://langfuse.example.com',
@@ -648,7 +396,8 @@ describe('telemetry', () => {
       name: 'copilot-chat-turn',
       input: 'hello',
     });
-    expect(client.traces[0]?.updates.at(-1)).toMatchObject({
+    const traceUpdates = client.traces[0]?.updates ?? [];
+    expect(traceUpdates[traceUpdates.length - 1]).toMatchObject({
       output: 'world',
       metadata: { durationMs: 2000 },
     });
@@ -659,7 +408,8 @@ describe('telemetry', () => {
       input: 'hello',
       level: 'DEFAULT',
     });
-    expect(rootSpan?.updates.at(-1)).toMatchObject({
+    const rootSpanUpdates = rootSpan?.updates ?? [];
+    expect(rootSpanUpdates[rootSpanUpdates.length - 1]).toMatchObject({
       output: 'world',
       endTime: '2026-05-02T00:00:02.000Z',
       level: 'DEFAULT',
@@ -669,7 +419,8 @@ describe('telemetry', () => {
       input: { args: { command: 'pwd' } },
       level: 'DEFAULT',
     });
-    expect(toolSpan?.updates.at(-1)).toMatchObject({
+    const toolSpanUpdates = toolSpan?.updates ?? [];
+    expect(toolSpanUpdates[toolSpanUpdates.length - 1]).toMatchObject({
       output: { exitCode: 0 },
       endTime: '2026-05-02T00:00:01.000Z',
       level: 'DEFAULT',
@@ -681,7 +432,6 @@ describe('telemetry', () => {
     const exporter = new LangfuseSdkRuntimeEventExporter(
       {
         enabled: true,
-        transport: 'sdk',
         publicKey: 'public',
         secretKey: 'secret',
         baseUrl: 'https://langfuse.example.com',
@@ -732,7 +482,8 @@ describe('telemetry', () => {
       model: 'kimi-k2.5',
       input: 'hello',
     });
-    expect(generation?.updates.at(-1)).toMatchObject({
+    const genUpdates = generation?.updates ?? [];
+    expect(genUpdates[genUpdates.length - 1]).toMatchObject({
       output: 'world',
       endTime: '2026-05-02T00:00:01.000Z',
       level: 'DEFAULT',
@@ -746,7 +497,6 @@ describe('telemetry', () => {
     const exporter = new LangfuseSdkRuntimeEventExporter(
       {
         enabled: true,
-        transport: 'sdk',
         publicKey: 'public',
         secretKey: 'secret',
         baseUrl: 'https://langfuse.example.com',
@@ -883,6 +633,428 @@ describe('telemetry', () => {
       name: 'read_file [README.md]',
       input: { args: { path: 'README.md' } },
     });
+  });
+
+  it('keeps nesting tool and LLM events under root span across multiple turns', async () => {
+    const client = new FakeLangfuseSdkClient();
+    const exporter = new LangfuseSdkRuntimeEventExporter(
+      {
+        enabled: true,
+        publicKey: 'public',
+        secretKey: 'secret',
+        baseUrl: 'https://langfuse.example.com',
+        flushAt: 10,
+        flushIntervalMs: 60_000,
+      },
+      client,
+    );
+
+    await exporter.publish({
+      id: 'event-start',
+      traceId,
+      type: 'chat_turn_started',
+      sessionId: 'session-1',
+      conversationId: 'conversation-1',
+      createdAt: '2026-05-02T00:00:00.000Z',
+      details: { input: 'hello' },
+    });
+    await exporter.publish({
+      id: 'gen-1-start',
+      traceId,
+      sessionId: 'session-1',
+      conversationId: 'conversation-1',
+      llmGenerationId: 'gen-1',
+      status: 'started',
+      createdAt: '2026-05-02T00:00:00.100Z',
+      model: { provider: 'anthropic', model: 'claude-4' },
+      input: 'hello',
+    });
+    await exporter.publish({
+      id: 'gen-1-done',
+      traceId,
+      sessionId: 'session-1',
+      conversationId: 'conversation-1',
+      llmGenerationId: 'gen-1',
+      status: 'completed',
+      createdAt: '2026-05-02T00:00:01.000Z',
+      model: { provider: 'anthropic', model: 'claude-4' },
+      output: 'I will use a tool',
+    });
+    await exporter.publish({
+      id: 'turn-end-1',
+      traceId,
+      type: 'chat_turn_completed',
+      sessionId: 'session-1',
+      conversationId: 'conversation-1',
+      createdAt: '2026-05-02T00:00:01.100Z',
+      durationMs: 1100,
+      details: { output: 'I will use a tool' },
+    });
+
+    await exporter.publish({
+      id: 'tool-start-1',
+      traceId,
+      sessionId: 'session-1',
+      conversationId: 'conversation-1',
+      toolCallId: 'call-1',
+      toolName: 'run_shell',
+      status: 'started',
+      createdAt: '2026-05-02T00:00:01.200Z',
+      args: { command: 'ls' },
+    });
+    await exporter.publish({
+      id: 'tool-done-1',
+      traceId,
+      sessionId: 'session-1',
+      conversationId: 'conversation-1',
+      toolCallId: 'call-1',
+      toolName: 'run_shell',
+      status: 'completed',
+      createdAt: '2026-05-02T00:00:01.500Z',
+      details: { exitCode: 0 },
+    });
+    await exporter.publish({
+      id: 'gen-2-start',
+      traceId,
+      sessionId: 'session-1',
+      conversationId: 'conversation-1',
+      llmGenerationId: 'gen-2',
+      status: 'started',
+      createdAt: '2026-05-02T00:00:01.600Z',
+      model: { provider: 'anthropic', model: 'claude-4' },
+      input: 'tool result',
+    });
+    await exporter.publish({
+      id: 'gen-2-done',
+      traceId,
+      sessionId: 'session-1',
+      conversationId: 'conversation-1',
+      llmGenerationId: 'gen-2',
+      status: 'completed',
+      createdAt: '2026-05-02T00:00:02.000Z',
+      model: { provider: 'anthropic', model: 'claude-4' },
+      output: 'done',
+    });
+    await exporter.publish({
+      id: 'turn-end-2',
+      traceId,
+      type: 'chat_turn_completed',
+      sessionId: 'session-1',
+      conversationId: 'conversation-1',
+      createdAt: '2026-05-02T00:00:02.100Z',
+      durationMs: 2100,
+      details: { output: 'done' },
+    });
+
+    const rootSpan = client.traces[0]?.spans[0];
+    expect(rootSpan?.body).toMatchObject({ name: 'copilot-chat-turn' });
+    expect(rootSpan?.generations).toHaveLength(2);
+    expect(rootSpan?.generations[0]?.body).toMatchObject({ name: 'llm-generation [main] [hello]' });
+    expect(rootSpan?.generations[1]?.body).toMatchObject({
+      name: 'llm-generation [main] [tool result]',
+    });
+    expect(rootSpan?.spans).toHaveLength(1);
+    expect(rootSpan?.spans[0]?.body).toMatchObject({ name: 'run_shell [ls]' });
+  });
+
+  it('keeps nesting subagent events under the subagent span across multiple turns', async () => {
+    const client = new FakeLangfuseSdkClient();
+    const exporter = new LangfuseSdkRuntimeEventExporter(
+      {
+        enabled: true,
+        publicKey: 'public',
+        secretKey: 'secret',
+        baseUrl: 'https://langfuse.example.com',
+        flushAt: 10,
+        flushIntervalMs: 60_000,
+      },
+      client,
+    );
+
+    await exporter.publish({
+      id: 'root-start',
+      traceId,
+      type: 'chat_turn_started',
+      sessionId: 'parent',
+      conversationId: 'parent',
+      createdAt: '2026-05-02T00:00:00.000Z',
+      details: { input: 'parent task' },
+    });
+    await exporter.publish({
+      id: 'subagent-start',
+      traceId,
+      type: 'subagent_started',
+      sessionId: 'parent:subagent:1',
+      conversationId: 'parent:subagent:1',
+      parentSessionId: 'parent',
+      childSessionId: 'parent:subagent:1',
+      runId: 'run-1',
+      taskRunId: 'run-1',
+      spawnBatchId: 'trace:11111111111111111111111111111111',
+      parentToolCallId: 'spawn-call-1',
+      createdAt: '2026-05-02T00:00:00.100Z',
+      details: { input: 'child task' },
+    });
+
+    await exporter.publish({
+      id: 'child-gen-1-start',
+      traceId,
+      sessionId: 'parent:subagent:1',
+      conversationId: 'parent:subagent:1',
+      parentSessionId: 'parent',
+      childSessionId: 'parent:subagent:1',
+      runId: 'run-1',
+      taskRunId: 'run-1',
+      spawnBatchId: 'trace:11111111111111111111111111111111',
+      llmGenerationId: 'child-gen-1',
+      status: 'started',
+      createdAt: '2026-05-02T00:00:00.200Z',
+      model: { provider: 'anthropic', model: 'claude-4' },
+      input: 'child task',
+    });
+    await exporter.publish({
+      id: 'child-gen-1-done',
+      traceId,
+      sessionId: 'parent:subagent:1',
+      conversationId: 'parent:subagent:1',
+      parentSessionId: 'parent',
+      childSessionId: 'parent:subagent:1',
+      runId: 'run-1',
+      taskRunId: 'run-1',
+      spawnBatchId: 'trace:11111111111111111111111111111111',
+      llmGenerationId: 'child-gen-1',
+      status: 'completed',
+      createdAt: '2026-05-02T00:00:00.500Z',
+      model: { provider: 'anthropic', model: 'claude-4' },
+      output: 'using tool',
+    });
+
+    await exporter.publish({
+      id: 'subagent-completed-1',
+      traceId,
+      type: 'subagent_completed',
+      sessionId: 'parent:subagent:1',
+      conversationId: 'parent:subagent:1',
+      parentSessionId: 'parent',
+      childSessionId: 'parent:subagent:1',
+      runId: 'run-1',
+      taskRunId: 'run-1',
+      spawnBatchId: 'trace:11111111111111111111111111111111',
+      parentToolCallId: 'spawn-call-1',
+      createdAt: '2026-05-02T00:00:00.600Z',
+      details: { output: 'using tool' },
+    });
+
+    await exporter.publish({
+      id: 'child-tool-start',
+      traceId,
+      sessionId: 'parent:subagent:1',
+      conversationId: 'parent:subagent:1',
+      parentSessionId: 'parent',
+      childSessionId: 'parent:subagent:1',
+      runId: 'run-1',
+      taskRunId: 'run-1',
+      spawnBatchId: 'trace:11111111111111111111111111111111',
+      toolCallId: 'tool-1',
+      toolName: 'read_file',
+      status: 'started',
+      createdAt: '2026-05-02T00:00:00.700Z',
+      args: { path: 'src/index.ts' },
+    });
+    await exporter.publish({
+      id: 'child-tool-done',
+      traceId,
+      sessionId: 'parent:subagent:1',
+      conversationId: 'parent:subagent:1',
+      parentSessionId: 'parent',
+      childSessionId: 'parent:subagent:1',
+      runId: 'run-1',
+      taskRunId: 'run-1',
+      spawnBatchId: 'trace:11111111111111111111111111111111',
+      toolCallId: 'tool-1',
+      toolName: 'read_file',
+      status: 'completed',
+      createdAt: '2026-05-02T00:00:00.900Z',
+      details: { policy: 'allow' },
+    });
+
+    await exporter.publish({
+      id: 'child-gen-2-start',
+      traceId,
+      sessionId: 'parent:subagent:1',
+      conversationId: 'parent:subagent:1',
+      parentSessionId: 'parent',
+      childSessionId: 'parent:subagent:1',
+      runId: 'run-1',
+      taskRunId: 'run-1',
+      spawnBatchId: 'trace:11111111111111111111111111111111',
+      llmGenerationId: 'child-gen-2',
+      status: 'started',
+      createdAt: '2026-05-02T00:00:01.000Z',
+      model: { provider: 'anthropic', model: 'claude-4' },
+      input: 'tool result',
+    });
+    await exporter.publish({
+      id: 'child-gen-2-done',
+      traceId,
+      sessionId: 'parent:subagent:1',
+      conversationId: 'parent:subagent:1',
+      parentSessionId: 'parent',
+      childSessionId: 'parent:subagent:1',
+      runId: 'run-1',
+      taskRunId: 'run-1',
+      spawnBatchId: 'trace:11111111111111111111111111111111',
+      llmGenerationId: 'child-gen-2',
+      status: 'completed',
+      createdAt: '2026-05-02T00:00:01.300Z',
+      model: { provider: 'anthropic', model: 'claude-4' },
+      output: 'final answer',
+    });
+
+    await exporter.publish({
+      id: 'subagent-completed-2',
+      traceId,
+      type: 'subagent_completed',
+      sessionId: 'parent:subagent:1',
+      conversationId: 'parent:subagent:1',
+      parentSessionId: 'parent',
+      childSessionId: 'parent:subagent:1',
+      runId: 'run-1',
+      taskRunId: 'run-1',
+      spawnBatchId: 'trace:11111111111111111111111111111111',
+      parentToolCallId: 'spawn-call-1',
+      createdAt: '2026-05-02T00:00:01.400Z',
+      details: { output: 'final answer' },
+    });
+
+    const trace = client.traces.find((candidate) => candidate.body.sessionId === 'parent');
+    const rootSpan = trace?.spans[0];
+    const batchSpan = rootSpan?.spans.find((span) => span.body.name === 'subagent fan-out');
+    const subagentSpan = batchSpan?.spans[0];
+
+    expect(subagentSpan?.body).toMatchObject({ name: 'subagent' });
+    expect(subagentSpan?.generations).toHaveLength(2);
+    expect(subagentSpan?.generations[0]?.body).toMatchObject({
+      name: 'llm-generation [subagent] [child task]',
+    });
+    expect(subagentSpan?.generations[1]?.body).toMatchObject({
+      name: 'llm-generation [subagent] [tool result]',
+    });
+    expect(subagentSpan?.spans).toHaveLength(1);
+    expect(subagentSpan?.spans[0]?.body).toMatchObject({
+      name: 'read_file [src/index.ts]',
+    });
+  });
+
+  it('preserves batch span for new subagents after closeSdkSubagentBatchSpans', async () => {
+    const client = new FakeLangfuseSdkClient();
+    const exporter = new LangfuseSdkRuntimeEventExporter(
+      {
+        enabled: true,
+        publicKey: 'public',
+        secretKey: 'secret',
+        baseUrl: 'https://langfuse.example.com',
+        flushAt: 10,
+        flushIntervalMs: 60_000,
+      },
+      client,
+    );
+
+    await exporter.publish({
+      id: 'root-start',
+      traceId,
+      type: 'chat_turn_started',
+      sessionId: 'parent',
+      conversationId: 'parent',
+      createdAt: '2026-05-02T00:00:00.000Z',
+      details: { input: 'spawn agents' },
+    });
+
+    await exporter.publish({
+      id: 'subagent-1-start',
+      traceId,
+      type: 'subagent_started',
+      sessionId: 'parent:subagent:1',
+      conversationId: 'parent:subagent:1',
+      parentSessionId: 'parent',
+      childSessionId: 'parent:subagent:1',
+      runId: 'run-1',
+      taskRunId: 'run-1',
+      spawnBatchId: 'trace:11111111111111111111111111111111',
+      parentToolCallId: 'spawn-call-1',
+      createdAt: '2026-05-02T00:00:00.100Z',
+      details: { input: 'task-1' },
+    });
+    await exporter.publish({
+      id: 'subagent-1-done',
+      traceId,
+      type: 'subagent_completed',
+      sessionId: 'parent:subagent:1',
+      conversationId: 'parent:subagent:1',
+      parentSessionId: 'parent',
+      childSessionId: 'parent:subagent:1',
+      runId: 'run-1',
+      taskRunId: 'run-1',
+      spawnBatchId: 'trace:11111111111111111111111111111111',
+      parentToolCallId: 'spawn-call-1',
+      createdAt: '2026-05-02T00:00:01.000Z',
+      details: { output: 'result-1' },
+    });
+
+    await exporter.publish({
+      id: 'turn-end-1',
+      traceId,
+      type: 'chat_turn_completed',
+      sessionId: 'parent',
+      conversationId: 'parent',
+      createdAt: '2026-05-02T00:00:01.100Z',
+      durationMs: 1100,
+      details: { output: 'partial' },
+    });
+
+    await exporter.publish({
+      id: 'subagent-2-start',
+      traceId,
+      type: 'subagent_started',
+      sessionId: 'parent:subagent:2',
+      conversationId: 'parent:subagent:2',
+      parentSessionId: 'parent',
+      childSessionId: 'parent:subagent:2',
+      runId: 'run-2',
+      taskRunId: 'run-2',
+      spawnBatchId: 'trace:11111111111111111111111111111111',
+      parentToolCallId: 'spawn-call-2',
+      createdAt: '2026-05-02T00:00:01.200Z',
+      details: { input: 'task-2' },
+    });
+    await exporter.publish({
+      id: 'subagent-2-done',
+      traceId,
+      type: 'subagent_completed',
+      sessionId: 'parent:subagent:2',
+      conversationId: 'parent:subagent:2',
+      parentSessionId: 'parent',
+      childSessionId: 'parent:subagent:2',
+      runId: 'run-2',
+      taskRunId: 'run-2',
+      spawnBatchId: 'trace:11111111111111111111111111111111',
+      parentToolCallId: 'spawn-call-2',
+      createdAt: '2026-05-02T00:00:02.000Z',
+      details: { output: 'result-2' },
+    });
+
+    const trace = client.traces.find((candidate) => candidate.body.sessionId === 'parent');
+    const rootSpan = trace?.spans[0];
+    const batchSpan = rootSpan?.spans.find((span) => span.body.name === 'subagent fan-out');
+
+    expect(batchSpan).toBeDefined();
+    expect(batchSpan?.spans).toHaveLength(2);
+    expect(batchSpan?.spans[0]?.body).toMatchObject({ name: 'subagent' });
+    expect(batchSpan?.spans[1]?.body).toMatchObject({ name: 'subagent' });
+    const sub0Updates = batchSpan?.spans[0]?.updates ?? [];
+    const sub1Updates = batchSpan?.spans[1]?.updates ?? [];
+    expect(sub0Updates[sub0Updates.length - 1]).toMatchObject({ output: 'result-1' });
+    expect(sub1Updates[sub1Updates.length - 1]).toMatchObject({ output: 'result-2' });
   });
 });
 

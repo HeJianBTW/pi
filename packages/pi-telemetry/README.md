@@ -8,7 +8,7 @@ The root package exposes stable exporter contracts plus no-op and composite expo
 
 - `@amaster.ai/pi-telemetry`: stable contracts, `NoopRuntimeEventExporter`, and `CompositeRuntimeEventExporter`.
 - `@amaster.ai/pi-telemetry/config`: `TelemetryConfig` type, `resolveConfig`, and `loadConfigFromFile`.
-- `@amaster.ai/pi-telemetry/langfuse`: Langfuse SDK and ingestion API exporters.
+- `@amaster.ai/pi-telemetry/langfuse`: Langfuse SDK exporter.
 - `@amaster.ai/pi-telemetry/otel`: generic OTLP/HTTP traces exporter.
 
 ## Events
@@ -49,7 +49,6 @@ Configuration is read from `.pi/settings.json` under the `"pi-telemetry"` key. P
       "publicKey": "pk-lf-...",
       "secretKey": "sk-lf-...",
       "baseUrl": "https://cloud.langfuse.com",
-      "transport": "sdk",
       "flushAt": 20,
       "flushIntervalMs": 5000
     },
@@ -80,7 +79,6 @@ Configuration is read from `.pi/settings.json` under the `"pi-telemetry"` key. P
 | `publicKey` | `string` | — | Langfuse public API key |
 | `secretKey` | `string` | — | Langfuse secret API key |
 | `baseUrl` | `string` | `"https://cloud.langfuse.com"` | Langfuse server URL |
-| `transport` | `"sdk" \| "ingestion"` | `"sdk"` | Transport mode |
 | `flushAt` | `number` | `20` | Batch size before flush |
 | `flushIntervalMs` | `number` | `5000` | Flush interval in ms |
 
