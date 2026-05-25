@@ -36,7 +36,7 @@ export type RuntimeTelemetryOptions = {
 };
 
 export class NoopRuntimeEventExporter implements RuntimeEventExporter {
-  async publish(): Promise<void> {}
+  async publish(_event: RuntimeTelemetryEvent): Promise<void> {}
   async flush(): Promise<void> {}
   async close(): Promise<void> {}
 }

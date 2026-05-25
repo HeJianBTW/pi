@@ -65,6 +65,18 @@ export default function computerUseExtension(pi: ExtensionAPI): void {
           await ensureConnected();
           const result = await client!.callTool(originalName, params);
 
+          if (result.isError) {
+            const errorText = result.content?.map((c) => c.text ?? '').join('') ?? '';
+            const friendlyError = formatToolError(originalName, errorText, params);
+            if (friendlyError) {
+              return {
+                content: [{ type: 'text' as const, text: friendlyError }],
+                details: undefined,
+                isError: true,
+              };
+            }
+          }
+
           if (originalName === 'screenshot' && config?.visionModel) {
             const imageContent = result.content?.find((c) => c.type === 'image' && c.data);
             if (imageContent?.data) {
@@ -162,6 +174,29 @@ export default function computerUseExtension(pi: ExtensionAPI): void {
     connected = false;
     await registerUpstreamTools();
     await registerVisionTool();
+
+    try {
+      const permResult = await client!.callTool('check_permissions', {});
+      const structured = (permResult as Record<string, unknown>).structuredContent as
+        | { accessibility?: boolean; screen_recording?: boolean }
+        | undefined;
+      if (structured) {
+        if (!structured.accessibility) {
+          ctx.ui.notify(
+            'pi-computer-use: Accessibility not granted. Go to System Settings → Privacy & Security → Accessibility to enable.',
+            'warning',
+          );
+        }
+        if (!structured.screen_recording) {
+          ctx.ui.notify(
+            'pi-computer-use: Screen Recording not granted. Go to System Settings → Privacy & Security → Screen & System Audio Recording to enable.',
+            'warning',
+          );
+        }
+      }
+    } catch {
+      // permission check is best-effort — do not block session start
+    }
   });
 
   pi.on('session_shutdown', async () => {
@@ -170,4 +205,41 @@ export default function computerUseExtension(pi: ExtensionAPI): void {
       connected = false;
     }
   });
+}
+
+function formatToolError(
+  toolName: string,
+  errorText: string,
+  params: Record<string, unknown>,
+): string | undefined {
+  if (errorText.includes('ax_not_granted')) {
+    return 'Accessibility permission not granted. The user needs to enable it in System Settings → Privacy & Security → Accessibility, then restart the app.';
+  }
+  if (errorText.includes('sc_not_granted')) {
+    return 'Screen Recording permission not granted. The user needs to enable it in System Settings → Privacy & Security → Screen & System Audio Recording, then restart the app.';
+  }
+
+  if (toolName === 'screenshot' || errorText.includes('screencapture failed')) {
+    const windowId = params.window_id;
+    if (windowId !== undefined) {
+      if (errorText.includes('screencapture failed')) {
+        return [
+          `Screenshot failed for window ${windowId}. Possible causes:`,
+          '1. Screen Recording permission not granted — enable in System Settings → Privacy & Security → Screen & System Audio Recording, then restart the app.',
+          '2. The window_id is stale — the window may have been closed or recreated (e.g. after navigation in Electron apps). Re-fetch window list to get current IDs.',
+          '3. The window is minimized or not yet rendered.',
+          `Try capturing without window_id (full screen) as a fallback, or verify the window still exists.`,
+        ].join('\n');
+      }
+      if (errorText.includes('empty output')) {
+        return `Screenshot captured an empty image for window ${windowId}. The window may be minimized, fully transparent, or off-screen. Try restoring the window first.`;
+      }
+    } else {
+      if (errorText.includes('screencapture failed')) {
+        return 'Screenshot failed for the main display. Screen Recording permission may not be granted — enable in System Settings → Privacy & Security → Screen & System Audio Recording, then restart the app.';
+      }
+    }
+  }
+
+  return undefined;
 }

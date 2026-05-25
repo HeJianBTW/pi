@@ -6,7 +6,6 @@ export interface LangfuseConfig {
   publicKey?: string;
   secretKey?: string;
   baseUrl?: string;
-  transport?: 'sdk' | 'ingestion';
   flushAt?: number;
   flushIntervalMs?: number;
 }

@@ -1,6 +1,8 @@
 {
-  "name": "@amaster.ai/pi-turns",
+  "name": "@amaster.ai/pi-teamwork",
   "version": "0.1.2-beta.3",
+  "description": "Pi extension for team collaboration and issue management via Multica",
+  "keywords": ["pi-package", "pi", "extension", "teamwork", "issues", "project-management", "multica"],
   "license": "Apache-2.0",
   "type": "module",
   "sideEffects": false,
@@ -15,6 +17,11 @@
       "default": "./package.json"
     }
   },
+  "pi": {
+    "extensions": [
+      "./dist/index.js"
+    ]
+  },
   "files": [
     "dist",
     "README.md"
@@ -25,7 +32,7 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/TGYD-helige/pi.git",
-    "directory": "packages/turns"
+    "directory": "packages/pi-teamwork"
   },
   "scripts": {
     "build": "tsc -b",
@@ -33,10 +40,23 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@amaster.ai/pi-shared": "workspace:*",
-    "@earendil-works/pi-ai": "0.74.0"
+    "@amaster.ai/pi-shared": "workspace:*"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=0.74.0",
+    "typebox": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    },
+    "typebox": {
+      "optional": true
+    }
   },
   "devDependencies": {
+    "@earendil-works/pi-coding-agent": "0.74.0",
+    "typebox": "*",
     "vitest": "^4.0.0"
   }
 }

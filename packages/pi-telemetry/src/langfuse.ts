@@ -20,7 +20,6 @@ import {
 
 export type LangfuseExporterConfig = {
   enabled: boolean;
-  transport: 'sdk' | 'ingestion';
   publicKey: string;
   secretKey: string;
   baseUrl: string;
@@ -36,13 +35,6 @@ export type OtelExporterConfig = {
   flushIntervalMs: number;
   errorLabel?: string;
 } & RuntimeTelemetryOptions;
-
-export type LangfuseIngestionEvent = {
-  id: string;
-  timestamp: string;
-  type: string;
-  body: JsonObject;
-};
 
 export type LangfuseFetch = TelemetryFetch;
 
@@ -191,7 +183,6 @@ export class LangfuseSdkRuntimeEventExporter implements RuntimeEventExporter {
           ...(event.error ? { statusMessage: event.error } : {}),
           metadata: lifecycleMetadata(event),
         });
-        this.spans.delete(rootKey);
         break;
       }
       case 'chat_turn_steered':
@@ -256,7 +247,6 @@ export class LangfuseSdkRuntimeEventExporter implements RuntimeEventExporter {
           ...(event.error ? { statusMessage: event.error } : {}),
           metadata: lifecycleMetadata(event),
         });
-        this.spans.delete(key);
         break;
       }
       default:
@@ -453,7 +443,6 @@ export class LangfuseSdkRuntimeEventExporter implements RuntimeEventExporter {
         ...(event.error ? { statusMessage: event.error } : {}),
         metadata: lifecycleMetadata(event),
       });
-      this.spans.delete(key);
     }
   }
 
@@ -479,107 +468,6 @@ export class LangfuseSdkRuntimeEventExporter implements RuntimeEventExporter {
     });
     this.spans.set(rootKey, span);
     return span;
-  }
-}
-
-export class LangfuseHttpRuntimeEventExporter implements RuntimeEventExporter {
-  private readonly endpoint: string;
-  private readonly authHeader: string;
-  private readonly fetchImpl: LangfuseFetch;
-  private readonly queue: LangfuseIngestionEvent[] = [];
-  private flushTimer: NodeJS.Timeout | undefined;
-  private flushing: Promise<void> | undefined;
-
-  constructor(
-    private readonly config: LangfuseExporterConfig,
-    fetchImpl?: LangfuseFetch,
-  ) {
-    this.endpoint = `${config.baseUrl.replace(/\/+$/, '')}/api/public/ingestion`;
-    this.authHeader = `Basic ${Buffer.from(`${config.publicKey}:${config.secretKey}`).toString('base64')}`;
-    this.fetchImpl =
-      fetchImpl ??
-      (async (input, init) => {
-        const response = await fetch(input, init);
-        return {
-          ok: response.ok,
-          status: response.status,
-          text: () => response.text(),
-        };
-      });
-  }
-
-  async publish(event: RuntimeTelemetryEvent): Promise<void> {
-    const redactedEvent = applyTelemetryRedaction(this.config, event);
-    if (!redactedEvent) {
-      return;
-    }
-    const mapped = mapRuntimeEventToLangfuse(redactedEvent);
-    if (mapped.length === 0) {
-      return;
-    }
-    this.queue.push(...mapped);
-    if (this.queue.length >= this.config.flushAt) {
-      await this.flush();
-      return;
-    }
-    this.scheduleFlush();
-  }
-
-  async flush(): Promise<void> {
-    if (this.flushing) {
-      await this.flushing;
-      return;
-    }
-    if (this.flushTimer) {
-      clearTimeout(this.flushTimer);
-      this.flushTimer = undefined;
-    }
-    const batch = this.queue.splice(0, this.queue.length);
-    if (batch.length === 0) {
-      return;
-    }
-    this.flushing = this.sendBatch(batch)
-      .catch((error) => {
-        this.queue.unshift(...batch);
-        throw error;
-      })
-      .finally(() => {
-        this.flushing = undefined;
-      });
-    await this.flushing;
-  }
-
-  async close(): Promise<void> {
-    await this.flush();
-  }
-
-  private scheduleFlush(): void {
-    if (this.flushTimer) {
-      return;
-    }
-    this.flushTimer = setTimeout(() => {
-      this.flushTimer = undefined;
-      void this.flush().catch(() => undefined);
-    }, this.config.flushIntervalMs);
-    this.flushTimer.unref();
-  }
-
-  private async sendBatch(batch: LangfuseIngestionEvent[]): Promise<void> {
-    const response = await this.fetchImpl(this.endpoint, {
-      method: 'POST',
-      headers: {
-        authorization: this.authHeader,
-        'content-type': 'application/json',
-        'x-langfuse-ingestion-version': '4',
-      },
-      body: JSON.stringify({ batch }),
-    });
-    if (!response.ok) {
-      const text = await response.text().catch(() => '');
-      throw new Error(
-        `Langfuse ingestion failed with ${response.status}${text ? `: ${text}` : ''}`,
-      );
-    }
   }
 }
 
@@ -688,10 +576,7 @@ export function createRuntimeEventExporterFromEnv(env: TelemetryEnvironment): Ru
   if (!config.enabled) {
     return new NoopRuntimeEventExporter();
   }
-  if (config.transport === 'sdk') {
-    return new LangfuseSdkRuntimeEventExporter(config);
-  }
-  return new LangfuseHttpRuntimeEventExporter(config);
+  return new LangfuseSdkRuntimeEventExporter(config);
 }
 
 export function createLangfuseExporter(telemetryConfig: TelemetryConfig): RuntimeEventExporter {
@@ -699,10 +584,7 @@ export function createLangfuseExporter(telemetryConfig: TelemetryConfig): Runtim
   if (!config.enabled) {
     return new NoopRuntimeEventExporter();
   }
-  if (config.transport === 'sdk') {
-    return new LangfuseSdkRuntimeEventExporter(config);
-  }
-  return new LangfuseHttpRuntimeEventExporter(config);
+  return new LangfuseSdkRuntimeEventExporter(config);
 }
 
 export function resolveLangfuseExporterConfig(
@@ -712,11 +594,8 @@ export function resolveLangfuseExporterConfig(
   const publicKey = lf?.publicKey ?? '';
   const secretKey = lf?.secretKey ?? '';
   const credentialsPresent = Boolean(publicKey && secretKey);
-  const requestedTransport = lf?.transport;
-  const transport = requestedTransport ?? (credentialsPresent ? 'sdk' : 'ingestion');
   return {
     enabled: Boolean(lf?.enabled && credentialsPresent),
-    transport,
     publicKey,
     secretKey,
     baseUrl: lf?.baseUrl ?? DEFAULT_LANGFUSE_BASE_URL,
@@ -733,13 +612,10 @@ export function resolveLangfuseConfig(env: TelemetryEnvironment): LangfuseExport
   const publicKey = trim(env.LANGFUSE_PUBLIC_KEY);
   const secretKey = trim(env.LANGFUSE_SECRET_KEY);
   const baseUrl = trim(env.LANGFUSE_BASE_URL) ?? DEFAULT_LANGFUSE_BASE_URL;
-  const requestedTransport = parseLangfuseTransport(env.LANGFUSE_TRANSPORT);
-  const transport = requestedTransport ?? (publicKey && secretKey ? 'sdk' : 'ingestion');
   const credentialsPresent = Boolean(publicKey && secretKey);
   const serviceVersion = trim(env.TELEMETRY_SERVICE_VERSION);
   return {
     enabled: Boolean(enabled && credentialsPresent),
-    transport,
     publicKey: publicKey ?? '',
     secretKey: secretKey ?? '',
     baseUrl,
@@ -755,181 +631,6 @@ export function resolveLangfuseConfig(env: TelemetryEnvironment): LangfuseExport
       true,
     ),
   };
-}
-
-export function mapRuntimeEventToLangfuse(event: RuntimeTelemetryEvent): LangfuseIngestionEvent[] {
-  if (!event.traceId) {
-    return [];
-  }
-  if (isLlmGenerationEvent(event)) {
-    return [mapLlmGenerationEventToLangfuse(event)];
-  }
-  if (isToolEvent(event)) {
-    return [mapToolEventToLangfuse(event)];
-  }
-  return mapLifecycleEventToLangfuse(event);
-}
-
-function mapLifecycleEventToLangfuse(event: RuntimeLifecycleEvent): LangfuseIngestionEvent[] {
-  const traceId = requireTraceId(event.traceId);
-  switch (event.type) {
-    case 'chat_turn_started':
-      return [
-        ingestionEvent('trace-create', event.createdAt, {
-          id: langfuseTraceId(traceId),
-          sessionId: event.sessionId,
-          name: 'copilot-chat-turn',
-          timestamp: event.createdAt,
-          input: event.details?.input,
-          metadata: lifecycleMetadata(event),
-        }),
-      ];
-    case 'chat_turn_completed':
-    case 'chat_turn_failed': {
-      const output = event.details?.output ?? (event.error ? { error: event.error } : undefined);
-      return [
-        ingestionEvent('trace-update', event.createdAt, {
-          id: langfuseTraceId(traceId),
-          ...(output !== undefined ? { output } : {}),
-          metadata: lifecycleMetadata(event),
-        }),
-      ];
-    }
-    case 'chat_turn_steered':
-    case 'chat_turn_steer_delivered':
-    case 'chat_turn_followup_queued':
-    case 'chat_turn_followup_delivered': {
-      const spanId = langfuseSpanId(traceId, chatInputSpanKey(event));
-      return [
-        ingestionEvent('span-create', event.createdAt, {
-          id: spanId,
-          traceId: langfuseTraceId(traceId),
-          parentObservationId: langfuseSpanId(traceId, chatSpanKey(event)),
-          name: chatInputObservationName(event),
-          startTime: event.createdAt,
-          input: event.details?.input,
-          metadata: lifecycleMetadata(event),
-        }),
-        ingestionEvent('span-update', event.createdAt, {
-          id: spanId,
-          traceId: langfuseTraceId(traceId),
-          endTime: event.createdAt,
-          output: event.details?.output ?? chatInputLifecycleOutput(event),
-          metadata: lifecycleMetadata(event),
-        }),
-      ];
-    }
-    case 'subagent_spawned':
-    case 'subagent_started': {
-      const batchKey = subagentBatchSpanKey(event);
-      return [
-        ...(batchKey
-          ? [
-              ingestionEvent('span-create', event.createdAt, {
-                id: langfuseSpanId(traceId, batchKey),
-                traceId: langfuseTraceId(traceId),
-                parentObservationId: langfuseSpanId(traceId, chatSpanKey(event)),
-                name: 'subagent fan-out',
-                startTime: event.createdAt,
-                input: event.details?.input,
-                metadata: lifecycleMetadata(event),
-              }),
-            ]
-          : []),
-        ingestionEvent('span-create', event.createdAt, {
-          id: langfuseSpanId(traceId, subagentSpanKey(event)),
-          traceId: langfuseTraceId(traceId),
-          parentObservationId: langfuseSpanId(
-            traceId,
-            batchKey ?? subagentSpawnToolSpanKey(event) ?? chatSpanKey(event),
-          ),
-          name: 'subagent',
-          startTime: event.createdAt,
-          metadata: lifecycleMetadata(event),
-        }),
-      ];
-    }
-    case 'subagent_completed':
-    case 'subagent_failed':
-    case 'subagent_cancelled':
-      return [
-        ingestionEvent('span-update', event.createdAt, {
-          id: langfuseSpanId(traceId, subagentSpanKey(event)),
-          traceId: langfuseTraceId(traceId),
-          endTime: event.createdAt,
-          metadata: lifecycleMetadata(event),
-          ...(event.error ? { output: { error: event.error } } : {}),
-        }),
-      ];
-    default:
-      return assertNever(event.type);
-  }
-}
-
-function mapToolEventToLangfuse(event: RuntimeToolEvent): LangfuseIngestionEvent {
-  const traceId = requireTraceId(event.traceId);
-  const spanId = langfuseSpanId(
-    traceId,
-    `tool:${event.sessionId}:${event.toolCallId}:${event.toolName}`,
-  );
-  const parentObservationId = langfuseParentObservationId(traceId, event);
-  if (event.status === 'started') {
-    return ingestionEvent('span-create', event.createdAt, {
-      id: spanId,
-      traceId: langfuseTraceId(traceId),
-      parentObservationId,
-      name: toolObservationName(event),
-      startTime: event.createdAt,
-      input: event.args ?? {},
-      metadata: toolMetadata(event),
-    });
-  }
-  return ingestionEvent('span-update', event.createdAt, {
-    id: spanId,
-    traceId: langfuseTraceId(traceId),
-    endTime: event.createdAt,
-    metadata: toolMetadata(event),
-    ...(event.error ? { output: { error: event.error } } : { output: event.details ?? {} }),
-  });
-}
-
-function mapLlmGenerationEventToLangfuse(event: RuntimeLlmGenerationEvent): LangfuseIngestionEvent {
-  const traceId = requireTraceId(event.traceId);
-  const id = langfuseSpanId(traceId, llmGenerationKey(event));
-  const parentObservationId = langfuseParentObservationId(traceId, event);
-  if (event.status === 'started') {
-    return ingestionEvent('generation-create', event.createdAt, {
-      id,
-      traceId: langfuseTraceId(traceId),
-      parentObservationId,
-      name: llmGenerationObservationName(event),
-      startTime: event.createdAt,
-      model: event.model.model,
-      modelParameters: {
-        provider: event.model.provider,
-        ...(event.model.thinkingLevel ? { thinkingLevel: event.model.thinkingLevel } : {}),
-      },
-      input: event.input,
-      metadata: llmGenerationMetadata(event),
-    });
-  }
-  return ingestionEvent('generation-update', event.createdAt, {
-    id,
-    traceId: langfuseTraceId(traceId),
-    endTime: event.createdAt,
-    output: event.output ?? (event.error ? { error: event.error } : undefined),
-    level: event.error ? 'ERROR' : 'DEFAULT',
-    ...(event.error ? { statusMessage: event.error } : {}),
-    ...(event.usage
-      ? { usage: toLangfuseUsage(event.usage), usageDetails: toLangfuseUsageDetails(event.usage) }
-      : {}),
-    model: event.model.model,
-    modelParameters: {
-      provider: event.model.provider,
-      ...(event.model.thinkingLevel ? { thinkingLevel: event.model.thinkingLevel } : {}),
-    },
-    metadata: llmGenerationMetadata(event),
-  });
 }
 
 function mapRuntimeEventToOtelSpans(
@@ -1569,15 +1270,6 @@ function flattenUsageAttributes(usage: RuntimeLlmUsage): JsonObject {
   };
 }
 
-function ingestionEvent(type: string, timestamp: string, body: JsonObject): LangfuseIngestionEvent {
-  return {
-    id: randomUUID(),
-    timestamp,
-    type,
-    body,
-  };
-}
-
 function langfuseTraceId(traceId: string): string {
   return stableHex(`trace:${traceId}`, 32);
 }
@@ -1649,13 +1341,6 @@ function parseBooleanWithDefault(value: string | undefined, fallback: boolean): 
     return fallback;
   }
   return parseBoolean(value);
-}
-
-function parseLangfuseTransport(
-  value: string | undefined,
-): LangfuseExporterConfig['transport'] | undefined {
-  const normalized = value?.trim().toLowerCase();
-  return normalized === 'sdk' || normalized === 'ingestion' ? normalized : undefined;
 }
 
 function parsePositiveInteger(value: string | undefined, fallback: number): number {

@@ -1,8 +1,8 @@
 {
-  "name": "@amaster.ai/pi-telemetry",
+  "name": "@amaster.ai/pi-task-scheduler",
   "version": "0.1.2-beta.3",
-  "description": "Pi extension for runtime telemetry with Langfuse and OpenTelemetry exporters",
-  "keywords": ["pi-package", "pi", "extension", "telemetry", "observability", "langfuse", "opentelemetry", "tracing"],
+  "description": "Pi extension for cron-based scheduled task management with LLM-callable tools",
+  "keywords": ["pi-package", "pi", "extension", "scheduler", "cron", "tasks"],
   "license": "Apache-2.0",
   "type": "module",
   "sideEffects": false,
@@ -13,18 +13,6 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
-    "./config": {
-      "types": "./dist/config.d.ts",
-      "default": "./dist/config.js"
-    },
-    "./langfuse": {
-      "types": "./dist/langfuse.d.ts",
-      "default": "./dist/langfuse.js"
-    },
-    "./otel": {
-      "types": "./dist/otel.d.ts",
-      "default": "./dist/otel.js"
-    },
     "./extension": {
       "types": "./dist/extension.d.ts",
       "default": "./dist/extension.js"
@@ -33,42 +21,52 @@
       "default": "./package.json"
     }
   },
-  "files": [
-    "dist",
-    "README.md"
-  ],
   "pi": {
     "extensions": [
       "./dist/index.js"
     ]
   },
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "publishConfig": {
     "access": "public"
   },
   "repository": {
     "type": "git",
     "url": "https://github.com/TGYD-helige/pi.git",
-    "directory": "packages/pi-telemetry"
+    "directory": "packages/pi-task-scheduler"
   },
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc -b --pretty false",
-    "test": "vitest run src"
+    "test": "vitest run"
   },
   "dependencies": {
     "@amaster.ai/pi-shared": "workspace:*",
-    "langfuse": "^3.38.20"
+    "croner": "^10.0.1"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": ">=0.74.0"
+    "@earendil-works/pi-coding-agent": ">=0.74.0",
+    "@amaster.ai/pi-storage": "workspace:*",
+    "typebox": "*"
   },
   "peerDependenciesMeta": {
     "@earendil-works/pi-coding-agent": {
+      "optional": true
+    },
+    "@amaster.ai/pi-storage": {
+      "optional": true
+    },
+    "typebox": {
       "optional": true
     }
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "0.74.0",
+    "@amaster.ai/pi-storage": "workspace:*",
+    "typebox": "*",
     "vitest": "^4.0.0"
   }
 }

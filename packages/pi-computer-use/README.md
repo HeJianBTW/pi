@@ -9,6 +9,7 @@ pi-coding-agent extension that wraps [cua-driver-rs](https://github.com/trycua/c
 - **Dynamic tool discovery** — auto-discovers upstream MCP tools and registers with `computer_use_` prefix
 - **Smart tool filtering** — excludes non-essential tools (agent cursor, recording, config), exposes 18 core tools
 - **Optional visual analysis** — `computer_use_analyze_screenshot` via configurable vision model
+- **Permission detection** — checks Accessibility & Screen Recording on startup, warns if not granted, and returns friendly guidance on permission errors
 - **Cross-platform** — darwin-arm64/x64, linux-x64, win32-x64/arm64
 
 ## Install
@@ -97,6 +98,12 @@ The extension resolves API key, base URL, and headers from the model registry au
 ## Excluded Tools (15)
 
 Agent cursor styling, recording/replay, config management, and redundant operations (covered by other tools) are filtered out.
+
+## Permissions
+
+On `session_start`, the extension checks macOS Accessibility and Screen Recording permissions via cua-driver's `check_permissions`. If not granted, a non-blocking warning is shown to the user.
+
+When a tool call fails due to missing permissions (`ax_not_granted` / `sc_not_granted`), the extension returns a friendly message guiding the user to System Settings instead of a raw error.
 
 ## Supported Platforms
 

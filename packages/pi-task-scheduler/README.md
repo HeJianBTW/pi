@@ -1,11 +1,10 @@
 # @amaster.ai/pi-task-scheduler
 
-Scheduled task domain types and execution scheduler for pi.
+Scheduled task domain types, execution scheduler, and pi agent extension.
 
 The package owns schedule parsing, task lifecycle state, process-local timers,
-runner callbacks, and scheduler hooks. Persistence and locking are injected so
-applications can use local JSON files, remote databases, or another backend
-without coupling the scheduler to storage details.
+runner callbacks, scheduler hooks, and LLM-callable tools for autonomous task
+management.
 
 ## Scope
 
@@ -17,6 +16,27 @@ pi chat turn. Applications provide both:
 - a `ScheduledTaskRunner` callback for the actual work
 
 Storage adapters live in `@amaster.ai/pi-storage/scheduler`.
+
+## Extension
+
+The package exports a pi extension that integrates with the agent runtime:
+
+- **Lifecycle**: creates a `PersistentTaskScheduler` on `session_start`, stops on `session_shutdown`
+- **Commands**: `/pi-scheduler-status`, `/pi-scheduler-list`, `/pi-scheduler-run-now`
+- **LLM Tools**: `scheduler_create`, `scheduler_list`, `scheduler_get`, `scheduler_update`, `scheduler_delete`, `scheduler_run_now`
+
+Configuration via settings key `pi-scheduler`:
+
+```json
+{
+  "pi-scheduler": {
+    "enabled": true,
+    "dataDir": "/custom/path"
+  }
+}
+```
+
+Data is stored in `<agentDir>/pi-scheduler/` by default.
 
 ## Example
 
