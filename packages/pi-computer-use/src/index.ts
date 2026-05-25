@@ -172,8 +172,15 @@ export default function computerUseExtension(pi: ExtensionAPI): void {
     config = resolveConfig(loadConfigFromFile({ cwd: ctx.cwd }));
     client = new CuaDriverClient(config);
     connected = false;
-    await registerUpstreamTools();
-    await registerVisionTool();
+
+    try {
+      await registerUpstreamTools();
+      await registerVisionTool();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      ctx.ui.notify(`pi-computer-use: failed to initialize — ${msg}`, 'warning');
+      return;
+    }
 
     try {
       const permResult = await client!.callTool('check_permissions', {});

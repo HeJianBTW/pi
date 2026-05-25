@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { accessSync, chmodSync, constants, existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -93,6 +93,20 @@ export class CuaDriverClient {
         `[pi-computer-use] cua-driver binary not found at ${binPath}. ` +
           `Platform "${platform}" may not be supported, or set mode: "path" with binaryPath in config.`,
       );
+    }
+
+    try {
+      accessSync(binPath, constants.X_OK);
+    } catch {
+      try {
+        chmodSync(binPath, 0o755);
+      } catch (chmodErr) {
+        throw new Error(
+          `[pi-computer-use] cua-driver binary at ${binPath} is not executable. ` +
+            `Auto-fix failed (${chmodErr instanceof Error ? chmodErr.message : String(chmodErr)}). ` +
+            `Run: sudo chmod +x "${binPath}"`,
+        );
+      }
     }
 
     return binPath;

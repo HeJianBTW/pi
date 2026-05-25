@@ -48,6 +48,8 @@ vi.mock('node:fs', async (importOriginal) => {
   return {
     ...actual,
     existsSync: vi.fn().mockReturnValue(true),
+    accessSync: vi.fn(),
+    chmodSync: vi.fn(),
     readFileSync: vi.fn((..._args: unknown[]) => {
       if (mockConfigContent !== null) return mockConfigContent;
       throw new Error('ENOENT');
@@ -355,5 +357,76 @@ describe('permissions', () => {
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toBe('element_not_found: ref is stale');
+  });
+});
+
+describe('binary permissions', () => {
+  beforeEach(() => {
+    registeredTools.clear();
+    for (const k of Object.keys(eventHandlers)) delete eventHandlers[k];
+    mockNotify.mockClear();
+  });
+
+  test('auto-fixes binary without execute permission via chmod', async () => {
+    const { accessSync, chmodSync } = await import('node:fs');
+    const mockAccessSync = vi.mocked(accessSync);
+    const mockChmodSync = vi.mocked(chmodSync);
+
+    mockAccessSync.mockImplementation((_path, mode) => {
+      if (mode === 1) throw new Error('EACCES');
+    });
+    mockChmodSync.mockImplementation(() => {});
+
+    await initExtension();
+
+    expect(mockChmodSync).toHaveBeenCalled();
+    expect(registeredTools.has('computer_use_screenshot')).toBe(true);
+
+    mockAccessSync.mockReset();
+    mockChmodSync.mockReset();
+  });
+
+  test('notifies warning when chmod fails (e.g. root-owned binary)', async () => {
+    const { accessSync, chmodSync } = await import('node:fs');
+    const mockAccessSync = vi.mocked(accessSync);
+    const mockChmodSync = vi.mocked(chmodSync);
+
+    mockAccessSync.mockImplementation((_path, mode) => {
+      if (mode === 1) throw new Error('EACCES');
+    });
+    mockChmodSync.mockImplementation(() => {
+      throw new Error('EPERM: operation not permitted');
+    });
+
+    await initExtension();
+
+    expect(mockNotify).toHaveBeenCalledWith(
+      expect.stringContaining('failed to initialize'),
+      'warning',
+    );
+
+    mockAccessSync.mockReset();
+    mockChmodSync.mockReset();
+  });
+
+  test('session_start does not crash when binary is not executable', async () => {
+    const { accessSync, chmodSync } = await import('node:fs');
+    const mockAccessSync = vi.mocked(accessSync);
+    const mockChmodSync = vi.mocked(chmodSync);
+
+    mockAccessSync.mockImplementation((_path, mode) => {
+      if (mode === 1) throw new Error('EACCES');
+    });
+    mockChmodSync.mockImplementation(() => {
+      throw new Error('EPERM');
+    });
+
+    await initExtension();
+
+    expect(mockNotify).toHaveBeenCalled();
+    expect(registeredTools.has('computer_use_screenshot')).toBe(false);
+
+    mockAccessSync.mockReset();
+    mockChmodSync.mockReset();
   });
 });
