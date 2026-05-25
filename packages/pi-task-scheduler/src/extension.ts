@@ -1,7 +1,6 @@
 import path from 'node:path';
-import { loadPiSettings } from '@amaster.ai/pi-shared/settings';
-import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
-import { getAgentDir } from '@earendil-works/pi-coding-agent';
+import { loadPiSettings, resolveAgentDir } from '@amaster.ai/pi-shared/settings';
+import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
 import {
   PersistentTaskScheduler,
@@ -29,7 +28,7 @@ type ResolvedConfig = {
 function resolveConfig(raw?: PiSchedulerExtensionConfig): ResolvedConfig {
   return {
     enabled: raw?.enabled !== false,
-    dataDir: raw?.dataDir?.trim() || path.join(getAgentDir(), 'pi-scheduler'),
+    dataDir: raw?.dataDir?.trim() || path.join(resolveAgentDir(), 'data'),
   };
 }
 
@@ -37,7 +36,7 @@ function loadSettings(cwd: string): PiSchedulerExtensionConfig | undefined {
   try {
     const config = loadPiSettings<Partial<PiSchedulerExtensionConfig>>(SETTINGS_KEY, {
       cwd,
-      agentDir: getAgentDir(),
+      agentDir: resolveAgentDir(),
     });
     return Object.keys(config).length > 0 ? (config as PiSchedulerExtensionConfig) : undefined;
   } catch {
