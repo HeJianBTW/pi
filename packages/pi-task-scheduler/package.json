@@ -13,6 +13,10 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./stores": {
+      "types": "./dist/stores.d.ts",
+      "default": "./dist/stores.js"
+    },
     "./extension": {
       "types": "./dist/extension.d.ts",
       "default": "./dist/extension.js"
@@ -49,14 +53,10 @@
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": ">=0.74.0",
-    "@amaster.ai/pi-storage": "workspace:*",
     "typebox": "*"
   },
   "peerDependenciesMeta": {
     "@earendil-works/pi-coding-agent": {
-      "optional": true
-    },
-    "@amaster.ai/pi-storage": {
       "optional": true
     },
     "typebox": {
@@ -65,7 +65,6 @@
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "0.74.0",
-    "@amaster.ai/pi-storage": "workspace:*",
     "typebox": "*",
     "vitest": "^4.0.0"
   }

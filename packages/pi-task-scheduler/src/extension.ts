@@ -8,28 +8,38 @@ import {
   type ScheduledTask,
   type ScheduledTaskCreateInput,
   type ScheduledTaskRunner,
+  type ScheduledTaskStore,
   type ScheduledTaskType,
+  type SchedulerLock,
   type TaskScheduler,
 } from './index.js';
+import { FileSchedulerLock, JsonScheduledTaskStore } from './stores.js';
 
 const SETTINGS_KEY = 'pi-scheduler';
 const STATUS_KEY = 'pi-scheduler';
 
 export type PiSchedulerExtensionConfig = {
-  enabled?: boolean;
   dataDir?: string;
+  store?: ScheduledTaskStore;
+  lock?: SchedulerLock;
+  scheduler?: TaskScheduler;
 };
 
 type ResolvedConfig = {
-  enabled: boolean;
   dataDir: string;
+  store?: ScheduledTaskStore;
+  lock?: SchedulerLock;
+  scheduler?: TaskScheduler;
 };
 
 function resolveConfig(raw?: PiSchedulerExtensionConfig): ResolvedConfig {
-  return {
-    enabled: raw?.enabled !== false,
+  const resolved: ResolvedConfig = {
     dataDir: raw?.dataDir?.trim() || path.join(resolveAgentDir(), 'data'),
   };
+  if (raw?.store) resolved.store = raw.store;
+  if (raw?.lock) resolved.lock = raw.lock;
+  if (raw?.scheduler) resolved.scheduler = raw.scheduler;
+  return resolved;
 }
 
 function loadSettings(cwd: string): PiSchedulerExtensionConfig | undefined {
@@ -44,44 +54,51 @@ function loadSettings(cwd: string): PiSchedulerExtensionConfig | undefined {
   }
 }
 
-export default function taskSchedulerExtension(pi: ExtensionAPI): void {
+export default function taskSchedulerExtension(
+  pi: ExtensionAPI,
+  injectedConfig?: PiSchedulerExtensionConfig,
+): void {
   let scheduler: TaskScheduler | undefined;
+  let ownsScheduler = false;
 
   pi.on('session_start', async (_event, ctx) => {
-    const config = resolveConfig(loadSettings(ctx.cwd));
-    if (!config.enabled) {
-      ctx.ui.setStatus(STATUS_KEY, 'scheduler: disabled');
-      return;
-    }
+    const fileConfig = loadSettings(ctx.cwd);
+    const config = resolveConfig({ ...fileConfig, ...injectedConfig });
 
     try {
-      const storageMod = '@amaster.ai/pi-storage/scheduler';
-      // @ts-ignore - circular dependency: storage imports types from this package
-      const storageScheduler = await import(/* webpackIgnore: true */ storageMod);
-      const store = new storageScheduler.JsonScheduledTaskStore(
-        path.join(config.dataDir, 'tasks.json'),
-      );
-      const lock = new storageScheduler.FileSchedulerLock(
-        path.join(config.dataDir, 'scheduler.lock'),
-      );
+      if (config.scheduler) {
+        scheduler = config.scheduler;
+        ownsScheduler = false;
+      } else {
+        const store = config.store ?? new JsonScheduledTaskStore(
+          path.join(config.dataDir, 'tasks.json'),
+        );
+        const lock = config.lock ?? new FileSchedulerLock(
+          path.join(config.dataDir, 'scheduler.lock'),
+        );
 
-      const runner: ScheduledTaskRunner = async (task) => {
-        pi.sendUserMessage(task.prompt);
-      };
+        const runner: ScheduledTaskRunner = async (task) => {
+          pi.sendUserMessage(task.prompt);
+        };
 
-      const instance = new PersistentTaskScheduler({ store, lock, runner });
-      await instance.start();
-      scheduler = instance;
+        const instance = new PersistentTaskScheduler({ store, lock, runner });
+        await instance.start();
+        scheduler = instance;
+        ownsScheduler = true;
+      }
 
-      ctx.ui.setStatus(STATUS_KEY, instance.isActive() ? 'scheduler: active' : 'scheduler: idle');
+      ctx.ui.setStatus(STATUS_KEY, scheduler.isActive() ? 'scheduler: active' : 'scheduler: idle');
     } catch {
       ctx.ui.setStatus(STATUS_KEY, 'scheduler: unavailable');
     }
   });
 
   pi.on('session_shutdown', async () => {
-    await scheduler?.stop();
+    if (ownsScheduler) {
+      await scheduler?.stop();
+    }
     scheduler = undefined;
+    ownsScheduler = false;
   });
 
   pi.registerCommand('pi-scheduler-status', {
