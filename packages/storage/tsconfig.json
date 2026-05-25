@@ -7,7 +7,7 @@
   },
   "references": [
     { "path": "../shared" },
-    { "path": "../task-scheduler" }
+    { "path": "../pi-task-scheduler" }
   ],
   "include": ["src/**/*.ts"],
   "exclude": ["src/**/*.test.ts"]
