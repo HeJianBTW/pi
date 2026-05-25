@@ -56,11 +56,15 @@ export default function taskSchedulerExtension(pi: ExtensionAPI): void {
     }
 
     try {
-      const { JsonScheduledTaskStore, FileSchedulerLock } = await import(
-        '@amaster.ai/pi-storage/scheduler'
+      const storageMod = '@amaster.ai/pi-storage/scheduler';
+      // @ts-ignore - circular dependency: storage imports types from this package
+      const storageScheduler = await import(/* webpackIgnore: true */ storageMod);
+      const store = new storageScheduler.JsonScheduledTaskStore(
+        path.join(config.dataDir, 'tasks.json'),
       );
-      const store = new JsonScheduledTaskStore(path.join(config.dataDir, 'tasks.json'));
-      const lock = new FileSchedulerLock(path.join(config.dataDir, 'scheduler.lock'));
+      const lock = new storageScheduler.FileSchedulerLock(
+        path.join(config.dataDir, 'scheduler.lock'),
+      );
 
       const runner: ScheduledTaskRunner = async (task) => {
         pi.sendUserMessage(task.prompt);
