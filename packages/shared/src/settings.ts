@@ -44,7 +44,7 @@ function readSettingsSection<T>(filePath: string, key: string): Partial<T> {
 }
 
 export function resolveAgentDir(override?: string): string {
-  return resolve(override ?? join(homedir(), '.pi', 'agent'));
+  return resolve(override ?? process.env.PI_AGENT_HOME ?? join(homedir(), '.pi', 'agent'));
 }
 
 /**

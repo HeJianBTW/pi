@@ -36,7 +36,7 @@ Configuration via settings key `pi-scheduler`:
 }
 ```
 
-Data is stored in `<agentDir>/pi-scheduler/` by default.
+Data is stored in `<agentDir>/data/` by default (`~/.pi/agent/data/`).
 
 ## Example
 
