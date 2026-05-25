@@ -889,5 +889,5 @@ function rruleDayToCron(value: string | undefined): string {
     .join(',');
 }
 
-export { JsonScheduledTaskStore, FileSchedulerLock } from './stores.js';
 export { default } from './extension.js';
+export { FileSchedulerLock, JsonScheduledTaskStore } from './stores.js';

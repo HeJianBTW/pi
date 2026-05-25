@@ -1,6 +1,5 @@
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { readJsonFile, writeJsonFile } from './json-file.js';
 import {
   normalizeScheduledTask,
   type ScheduledTask,
@@ -8,6 +7,7 @@ import {
   type SchedulerLock,
   type TaskSchedulerScope,
 } from './index.js';
+import { readJsonFile, writeJsonFile } from './json-file.js';
 
 export class JsonScheduledTaskStore implements ScheduledTaskStore {
   private loaded = false;

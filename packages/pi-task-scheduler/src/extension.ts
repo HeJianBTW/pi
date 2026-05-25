@@ -70,12 +70,10 @@ export default function taskSchedulerExtension(
         scheduler = config.scheduler;
         ownsScheduler = false;
       } else {
-        const store = config.store ?? new JsonScheduledTaskStore(
-          path.join(config.dataDir, 'tasks.json'),
-        );
-        const lock = config.lock ?? new FileSchedulerLock(
-          path.join(config.dataDir, 'scheduler.lock'),
-        );
+        const store =
+          config.store ?? new JsonScheduledTaskStore(path.join(config.dataDir, 'tasks.json'));
+        const lock =
+          config.lock ?? new FileSchedulerLock(path.join(config.dataDir, 'scheduler.lock'));
 
         const runner: ScheduledTaskRunner = async (task) => {
           pi.sendUserMessage(task.prompt);
@@ -341,7 +339,7 @@ function formatTaskSummary(task: ScheduledTask) {
     lastStatus: task.lastStatus ?? 'pending',
     nextRunAt: task.nextRunAt,
     runCount: task.runCount,
-    prompt: task.prompt.length > 100 ? task.prompt.slice(0, 100) + '…' : task.prompt,
+    prompt: task.prompt.length > 100 ? `${task.prompt.slice(0, 100)}…` : task.prompt,
   };
 }
 

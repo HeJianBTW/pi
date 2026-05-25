@@ -264,13 +264,7 @@ describe('extension — tool operations with injected scheduler', () => {
     )) as any;
     const taskId = JSON.parse(createResult.content[0].text).id;
 
-    const getResult = (await getTool.execute(
-      'id',
-      { taskId },
-      undefined,
-      undefined,
-      ctx,
-    )) as any;
+    const getResult = (await getTool.execute('id', { taskId }, undefined, undefined, ctx)) as any;
     const task = JSON.parse(getResult.content[0].text);
     expect(task.id).toBe(taskId);
     expect(task.prompt).toBe('check health');
@@ -373,13 +367,7 @@ describe('extension — tool operations with injected scheduler', () => {
     )) as any;
     const taskId = JSON.parse(createResult.content[0].text).id;
 
-    const runResult = (await runTool.execute(
-      'id',
-      { taskId },
-      undefined,
-      undefined,
-      ctx,
-    )) as any;
+    const runResult = (await runTool.execute('id', { taskId }, undefined, undefined, ctx)) as any;
     expect(runResult.content[0].text).toBe('Triggered: runner');
   });
 
