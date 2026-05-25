@@ -149,11 +149,15 @@ export default function taskSchedulerExtension(pi: ExtensionAPI): void {
       prompt: Type.String({ description: 'The prompt to execute when triggered.' }),
       name: Type.Optional(Type.String({ description: 'Human-readable task name.' })),
       description: Type.Optional(Type.String({ description: 'Task description.' })),
-      enabled: Type.Optional(Type.Boolean({ description: 'Whether the task is enabled. Default true.' })),
+      enabled: Type.Optional(
+        Type.Boolean({ description: 'Whether the task is enabled. Default true.' }),
+      ),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       if (!scheduler) {
-        return textResult('Task scheduler is not running. The extension may be disabled or failed to initialize.');
+        return textResult(
+          'Task scheduler is not running. The extension may be disabled or failed to initialize.',
+        );
       }
       try {
         const definition = resolveScheduledTaskDefinition({
@@ -176,7 +180,9 @@ export default function taskSchedulerExtension(pi: ExtensionAPI): void {
         const task = await scheduler.create(input);
         return textResult(JSON.stringify(formatTaskSummary(task), null, 2));
       } catch (error) {
-        return textResult(`Failed to create task: ${error instanceof Error ? error.message : String(error)}`);
+        return textResult(
+          `Failed to create task: ${error instanceof Error ? error.message : String(error)}`,
+        );
       }
     },
   });
@@ -250,7 +256,9 @@ export default function taskSchedulerExtension(pi: ExtensionAPI): void {
           });
           Object.assign(update, definition);
         } catch (error) {
-          return textResult(`Invalid schedule: ${error instanceof Error ? error.message : String(error)}`);
+          return textResult(
+            `Invalid schedule: ${error instanceof Error ? error.message : String(error)}`,
+          );
         }
       }
       const task = await scheduler.update(taskId, update);
@@ -273,7 +281,9 @@ export default function taskSchedulerExtension(pi: ExtensionAPI): void {
         return textResult('Task scheduler is not running.');
       }
       const deleted = await scheduler.delete(params.taskId);
-      return textResult(deleted ? `Deleted task: ${params.taskId}` : `Task not found: ${params.taskId}`);
+      return textResult(
+        deleted ? `Deleted task: ${params.taskId}` : `Task not found: ${params.taskId}`,
+      );
     },
   });
 
@@ -335,7 +345,7 @@ function formatTaskList(tasks: ScheduledTask[]): string {
   return tasks
     .map((t) => {
       const name = t.name ?? t.id.slice(0, 8);
-      const status = t.enabled ? t.lastStatus ?? 'pending' : 'disabled';
+      const status = t.enabled ? (t.lastStatus ?? 'pending') : 'disabled';
       const next = t.nextRunAt ? ` next: ${t.nextRunAt}` : '';
       return `${name} [${t.type}] ${status}${next}`;
     })

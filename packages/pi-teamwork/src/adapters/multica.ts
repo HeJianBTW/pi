@@ -114,7 +114,13 @@ export class MulticaAdapter implements TeamworkProvider {
 
   async listComments(issueId: string): Promise<Comment[]> {
     const result = await this.run([
-      'issue', 'comment', 'list', issueId, '--output', 'json', ...this.workspaceArgs,
+      'issue',
+      'comment',
+      'list',
+      issueId,
+      '--output',
+      'json',
+      ...this.workspaceArgs,
     ]);
     const data = parseJson(result);
     if (!Array.isArray(data)) return [];

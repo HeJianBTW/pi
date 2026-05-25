@@ -57,10 +57,13 @@ export default function piTeamworkExtension(pi: ExtensionAPI): void {
   pi.registerTool({
     name: 'issue_list',
     label: 'Teamwork',
-    description: 'List issues from the project management system. Supports filtering by status, assignee, and project.',
+    description:
+      'List issues from the project management system. Supports filtering by status, assignee, and project.',
     promptSnippet: 'List issues from the team project tracker with optional filters.',
     parameters: Type.Object({
-      status: Type.Optional(Type.String({ description: 'Filter by status (e.g. todo, in_progress, done, blocked).' })),
+      status: Type.Optional(
+        Type.String({ description: 'Filter by status (e.g. todo, in_progress, done, blocked).' }),
+      ),
       assignee: Type.Optional(Type.String({ description: 'Filter by assignee name.' })),
       project: Type.Optional(Type.String({ description: 'Filter by project ID.' })),
       limit: Type.Optional(Type.Number({ description: 'Max number of results.' })),
@@ -104,7 +107,9 @@ export default function piTeamworkExtension(pi: ExtensionAPI): void {
     parameters: Type.Object({
       title: Type.String({ description: 'Issue title.' }),
       description: Type.Optional(Type.String({ description: 'Issue description.' })),
-      priority: Type.Optional(Type.String({ description: 'Priority (e.g. low, medium, high, urgent).' })),
+      priority: Type.Optional(
+        Type.String({ description: 'Priority (e.g. low, medium, high, urgent).' }),
+      ),
       assignee: Type.Optional(Type.String({ description: 'Assignee name.' })),
       project: Type.Optional(Type.String({ description: 'Project ID to associate with.' })),
     }),
@@ -122,12 +127,17 @@ export default function piTeamworkExtension(pi: ExtensionAPI): void {
   pi.registerTool({
     name: 'issue_update',
     label: 'Teamwork',
-    description: 'Update an existing issue. Can change title, description, status, priority, or assignee.',
+    description:
+      'Update an existing issue. Can change title, description, status, priority, or assignee.',
     parameters: Type.Object({
       id: Type.String({ description: 'The issue ID to update.' }),
       title: Type.Optional(Type.String({ description: 'New title.' })),
       description: Type.Optional(Type.String({ description: 'New description.' })),
-      status: Type.Optional(Type.String({ description: 'New status (e.g. todo, in_progress, in_review, done, blocked, cancelled).' })),
+      status: Type.Optional(
+        Type.String({
+          description: 'New status (e.g. todo, in_progress, in_review, done, blocked, cancelled).',
+        }),
+      ),
       priority: Type.Optional(Type.String({ description: 'New priority.' })),
       assignee: Type.Optional(Type.String({ description: 'New assignee name.' })),
     }),
@@ -151,7 +161,9 @@ export default function piTeamworkExtension(pi: ExtensionAPI): void {
     parameters: Type.Object({
       issueId: Type.String({ description: 'The issue ID to comment on.' }),
       content: Type.String({ description: 'Comment content.' }),
-      parentId: Type.Optional(Type.String({ description: 'Parent comment ID for threaded replies.' })),
+      parentId: Type.Optional(
+        Type.String({ description: 'Parent comment ID for threaded replies.' }),
+      ),
     }),
     async execute(_toolCallId, params) {
       if (!provider) return textResult('Teamwork provider is not initialized.');
@@ -184,7 +196,8 @@ export default function piTeamworkExtension(pi: ExtensionAPI): void {
   pi.registerTool({
     name: 'teamwork_status',
     label: 'Teamwork',
-    description: 'Check the status of the teamwork provider (daemon status, connected agents, etc.).',
+    description:
+      'Check the status of the teamwork provider (daemon status, connected agents, etc.).',
     parameters: Type.Object({}),
     async execute() {
       if (!provider) return textResult('Teamwork provider is not initialized.');
