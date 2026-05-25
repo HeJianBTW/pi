@@ -393,7 +393,7 @@ describe('telemetry', () => {
     expect(client.closed).toBe(1);
     expect(client.traces[0]?.body).toMatchObject({
       sessionId: 'session-1',
-      name: 'copilot-chat-turn',
+      name: 'chat-turn',
       input: 'hello',
     });
     const traceUpdates = client.traces[0]?.updates ?? [];
@@ -404,7 +404,7 @@ describe('telemetry', () => {
     const rootSpan = client.traces[0]?.spans[0];
     const toolSpan = rootSpan?.spans[0];
     expect(rootSpan?.body).toMatchObject({
-      name: 'copilot-chat-turn',
+      name: 'chat-turn',
       input: 'hello',
       level: 'DEFAULT',
     });
@@ -618,7 +618,7 @@ describe('telemetry', () => {
     const batchSpan = rootSpan?.spans.find((span) => span.body.name === 'subagent fan-out');
     const subagentSpan = batchSpan?.spans[0];
     expect(trace?.body).toMatchObject({ sessionId: 'parent' });
-    expect(rootSpan?.body).toMatchObject({ name: 'copilot-chat-turn' });
+    expect(rootSpan?.body).toMatchObject({ name: 'chat-turn' });
     expect(spawnToolSpan?.body).toMatchObject({ name: 'sessions_spawn [child task]' });
     expect(batchSpan?.body).toMatchObject({
       name: 'subagent fan-out',
@@ -747,7 +747,7 @@ describe('telemetry', () => {
     });
 
     const rootSpan = client.traces[0]?.spans[0];
-    expect(rootSpan?.body).toMatchObject({ name: 'copilot-chat-turn' });
+    expect(rootSpan?.body).toMatchObject({ name: 'chat-turn' });
     expect(rootSpan?.generations).toHaveLength(2);
     expect(rootSpan?.generations[0]?.body).toMatchObject({ name: 'llm-generation [main] [hello]' });
     expect(rootSpan?.generations[1]?.body).toMatchObject({

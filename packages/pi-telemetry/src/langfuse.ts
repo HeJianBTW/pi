@@ -140,7 +140,7 @@ export class LangfuseSdkRuntimeEventExporter implements RuntimeEventExporter {
       case 'chat_turn_started': {
         const body = {
           id: rootSpanId,
-          name: 'copilot-chat-turn',
+          name: 'chat-turn',
           startTime: event.createdAt,
           input: event.details?.input,
           level: 'DEFAULT',
@@ -164,7 +164,7 @@ export class LangfuseSdkRuntimeEventExporter implements RuntimeEventExporter {
         this.closeSdkSubagentBatchSpans(traceId, event);
         trace.update({
           sessionId: event.sessionId,
-          name: 'copilot-chat-turn',
+          name: 'chat-turn',
           output,
           metadata: lifecycleMetadata(event),
         });
@@ -172,7 +172,7 @@ export class LangfuseSdkRuntimeEventExporter implements RuntimeEventExporter {
           this.spans.get(rootKey) ??
           trace.span({
             id: rootSpanId,
-            name: 'copilot-chat-turn',
+            name: 'chat-turn',
             startTime: event.createdAt,
             metadata: lifecycleMetadata(event),
           });
@@ -372,7 +372,7 @@ export class LangfuseSdkRuntimeEventExporter implements RuntimeEventExporter {
     const trace = this.client.trace({
       id: langfuseTraceId(traceId),
       sessionId: event.sessionId,
-      name: 'copilot-chat-turn',
+      name: 'chat-turn',
       timestamp: event.createdAt,
       input: !isToolEvent(event) && !isLlmGenerationEvent(event) ? event.details?.input : undefined,
       metadata: isToolEvent(event)
@@ -458,7 +458,7 @@ export class LangfuseSdkRuntimeEventExporter implements RuntimeEventExporter {
     const traceId = requireTraceId(event.traceId);
     const span = trace.span({
       id: langfuseSpanId(traceId, rootKey),
-      name: 'copilot-chat-turn',
+      name: 'chat-turn',
       startTime: event.createdAt,
       metadata: isToolEvent(event)
         ? toolMetadata(event)
@@ -660,7 +660,7 @@ function mapLifecycleEventToOtelSpans(
       pendingStarts.set(rootKey, {
         traceId: langfuseTraceId(traceId),
         spanId: rootSpanId,
-        name: 'copilot-chat-turn',
+        name: 'chat-turn',
         startTime: event.createdAt,
         attributes: {
           ...lifecycleMetadata(event),
@@ -678,7 +678,7 @@ function mapLifecycleEventToOtelSpans(
           {
             traceId: langfuseTraceId(traceId),
             spanId: rootSpanId,
-            name: 'copilot-chat-turn',
+            name: 'chat-turn',
             startTime: event.createdAt,
             attributes: {
               ...lifecycleMetadata(event),
