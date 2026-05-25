@@ -282,7 +282,7 @@ class InMemoryStore implements ScheduledTaskStore {
   readonly tasks = new Map<string, ScheduledTask>();
 
   async list(_scope: TaskSchedulerScope = {}): Promise<ScheduledTask[]> {
-    return [...this.tasks.values()];
+    return Array.from(this.tasks.values());
   }
 
   async get(taskId: string): Promise<ScheduledTask | undefined> {
