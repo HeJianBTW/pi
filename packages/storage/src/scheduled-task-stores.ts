@@ -19,15 +19,14 @@ export class JsonScheduledTaskStore implements ScheduledTaskStore {
 
   constructor(private readonly filePath: string) {}
 
-  async list(scope: TaskSchedulerScope = {}): Promise<ScheduledTask[]> {
+  async list(_scope: TaskSchedulerScope = {}): Promise<ScheduledTask[]> {
     await this.load();
-    return [...this.tasks.values()].filter((task) => taskMatchesScope(task, scope));
+    return [...this.tasks.values()];
   }
 
-  async get(taskId: string, scope: TaskSchedulerScope = {}): Promise<ScheduledTask | undefined> {
+  async get(taskId: string, _scope: TaskSchedulerScope = {}): Promise<ScheduledTask | undefined> {
     await this.load();
-    const task = this.tasks.get(taskId);
-    return task && taskMatchesScope(task, scope) ? task : undefined;
+    return this.tasks.get(taskId);
   }
 
   async create(task: ScheduledTask): Promise<ScheduledTask> {
@@ -41,11 +40,10 @@ export class JsonScheduledTaskStore implements ScheduledTaskStore {
   async update(
     taskId: string,
     task: ScheduledTask,
-    scope: TaskSchedulerScope = {},
+    _scope: TaskSchedulerScope = {},
   ): Promise<ScheduledTask | undefined> {
     await this.load();
-    const existing = await this.get(taskId, scope);
-    if (!existing) {
+    if (!this.tasks.has(taskId)) {
       return undefined;
     }
     const normalized = normalizeScheduledTask(task);
@@ -54,10 +52,9 @@ export class JsonScheduledTaskStore implements ScheduledTaskStore {
     return normalized;
   }
 
-  async delete(taskId: string, scope: TaskSchedulerScope = {}): Promise<boolean> {
+  async delete(taskId: string, _scope: TaskSchedulerScope = {}): Promise<boolean> {
     await this.load();
-    const existing = await this.get(taskId, scope);
-    if (!existing) {
+    if (!this.tasks.has(taskId)) {
       return false;
     }
     const deleted = this.tasks.delete(taskId);
@@ -294,13 +291,6 @@ export class DbScheduledTaskStore implements ScheduledTaskStore {
 
 // biome-ignore lint/suspicious/noExplicitAny: Prisma record shape is dynamic
 type PrismaRecord = Record<string, any>;
-
-function taskMatchesScope(task: ScheduledTask, scope: TaskSchedulerScope): boolean {
-  return (
-    (!scope.tenantId || task.tenantId === scope.tenantId) &&
-    (!scope.userId || task.userId === scope.userId)
-  );
-}
 
 function isProcessAlive(pid: number): boolean {
   try {
