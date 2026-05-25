@@ -888,3 +888,5 @@ function rruleDayToCron(value: string | undefined): string {
     .map((day) => days[day] ?? day)
     .join(',');
 }
+
+export { default } from './extension.js';
