@@ -20,6 +20,7 @@
   "files": [
     "dist",
     "bin",
+    "scripts",
     "README.md"
   ],
   "pi": {
@@ -38,7 +39,8 @@
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc -b --pretty false",
-    "test": "vitest run src"
+    "test": "vitest run src",
+    "postinstall": "node scripts/postinstall.js"
   },
   "dependencies": {
     "@amaster.ai/pi-shared": "workspace:*",
