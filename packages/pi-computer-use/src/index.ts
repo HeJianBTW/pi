@@ -488,12 +488,27 @@ export default function computerUseExtension(pi: ExtensionAPI): void {
       name: `${TOOL_PREFIX}analyze_screenshot`,
       label: `${TOOL_PREFIX}analyze_screenshot`,
       description:
-        'Take a screenshot and analyze it visually using a vision model. Use when you need to identify elements by visual attributes (color, layout, position) or need precise pixel coordinates.',
+        'Capture a screenshot using ScreenCaptureKit and analyze it visually using a vision model. Returns analysis for a single window in the requested format (default png).\n\n`window_id` is required. Get window ids from `list_windows`.\n\nRequires the Screen Recording TCC grant — call `check_permissions` first if unsure.',
       parameters: Type.Object({
+        window_id: Type.Number({
+          description: 'Required CGWindowID / kCGWindowNumber to capture.',
+        }),
         instruction: Type.Optional(
           Type.String({
             description:
               'What to identify or analyze visually (e.g., "Find the coordinates of the blue submit button").',
+          }),
+        ),
+        format: Type.Optional(
+          Type.Union([Type.Literal('png'), Type.Literal('jpeg')], {
+            description: 'Image format. Default: png.',
+          }),
+        ),
+        quality: Type.Optional(
+          Type.Number({
+            description: 'JPEG quality 1-95; ignored for png.',
+            minimum: 1,
+            maximum: 95,
           }),
         ),
       }),
@@ -521,12 +536,22 @@ export default function computerUseExtension(pi: ExtensionAPI): void {
           };
         }
 
-        const screenshotResult = await client!.callTool('screenshot', {});
+        const screenshotArgs: Record<string, unknown> = { window_id: params.window_id };
+        if (params.format) screenshotArgs.format = params.format;
+        if (params.quality) screenshotArgs.quality = params.quality;
+
+        const screenshotResult = await client!.callTool('screenshot', screenshotArgs);
         const imageContent = screenshotResult.content?.find((c) => c.type === 'image' && c.data);
 
         if (!imageContent?.data) {
+          const errorText =
+            screenshotResult.content
+              ?.filter((c) => c.type === 'text' && c.text)
+              .map((c) => c.text)
+              .join('\n') || 'Failed to capture screenshot.';
+          const formatted = formatToolError('screenshot', errorText, params);
           return {
-            content: [{ type: 'text' as const, text: 'Failed to capture screenshot.' }],
+            content: [{ type: 'text' as const, text: formatted ?? errorText }],
             details: undefined,
             isError: true,
           };
