@@ -99,6 +99,7 @@ export type ConversationHistoryStore = {
     scope: RuntimeScope,
     sessions: RuntimeSession[],
   ): Promise<RuntimeSessionSummary[]>;
+  updateSessionTitle?(scope: RuntimeScope, sessionId: string, title: string): Promise<void>;
 };
 
 export type RuntimeSessionStore = Omit<ConversationStore, 'getRuntimeSession'> & {
