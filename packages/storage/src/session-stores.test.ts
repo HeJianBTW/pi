@@ -74,6 +74,48 @@ describe('JsonFileTranscriptStore', () => {
     ]);
   });
 
+  it('updateSessionTitle overwrites the title on an existing summary', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'pi-history-'));
+    tmpDirs.push(dir);
+    const filePath = path.join(dir, 'transcripts.json');
+    const store = new JsonFileTranscriptStore(filePath);
+
+    await store.appendTurn(turn('turn-1', 'session-1', 'first question', 'first answer'));
+    await store.updateSessionTitle({ tenantId: 'tenant-1' }, 'session-1', 'AI generated title');
+
+    const persisted = JSON.parse(await readFile(filePath, 'utf8'));
+    expect(persisted.sessionSummaries['session-1']).toMatchObject({
+      title: 'AI generated title',
+      turnCount: 1,
+      firstUserMessage: 'first question',
+    });
+  });
+
+  it('updateSessionTitle upserts when summary does not yet exist and is preserved by a later appendTurn', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'pi-history-'));
+    tmpDirs.push(dir);
+    const filePath = path.join(dir, 'transcripts.json');
+    const store = new JsonFileTranscriptStore(filePath);
+
+    await store.updateSessionTitle({ tenantId: 'tenant-1' }, 'session-1', 'AI generated title');
+
+    let persisted = JSON.parse(await readFile(filePath, 'utf8'));
+    expect(persisted.sessionSummaries['session-1']).toEqual({
+      turnCount: 0,
+      title: 'AI generated title',
+    });
+
+    await store.appendTurn(turn('turn-1', 'session-1', 'first question', 'first answer'));
+
+    persisted = JSON.parse(await readFile(filePath, 'utf8'));
+    expect(persisted.sessionSummaries['session-1']).toMatchObject({
+      title: 'AI generated title',
+      turnCount: 1,
+      firstUserMessage: 'first question',
+      lastAssistantMessage: 'first answer',
+    });
+  });
+
   it('treats legacy JSON sessions without tenantId as default tenant sessions', async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'pi-history-'));
     tmpDirs.push(dir);

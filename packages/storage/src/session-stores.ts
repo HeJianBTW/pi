@@ -131,10 +131,12 @@ export class JsonFileTranscriptStore implements TranscriptStore {
   async updateSessionTitle(scope: RuntimeScope, sessionId: string, title: string): Promise<void> {
     void scope;
     await this.update((state) => {
-      const summary = state.sessionSummaries[sessionId];
-      if (summary) {
-        summary.title = title;
+      let summary = state.sessionSummaries[sessionId];
+      if (!summary) {
+        summary = { turnCount: 0 };
+        state.sessionSummaries[sessionId] = summary;
       }
+      summary.title = title;
     });
   }
 
