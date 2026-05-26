@@ -361,6 +361,13 @@ class DbTranscriptStore implements TranscriptStore {
       summaryFromPrismaSession(session, bySessionId.get(session.sessionId)),
     );
   }
+
+  async updateSessionTitle(scope: RuntimeScope, sessionId: string, title: string): Promise<void> {
+    await this.db.prisma.piAgentSession.updateMany({
+      where: { sessionId, deletedAt: null, ...sessionScopeWhere(scope) },
+      data: { title, updatedAt: new Date() },
+    });
+  }
 }
 
 class DbRuntimeTimelineEventStore implements RuntimeTimelineEventStore {

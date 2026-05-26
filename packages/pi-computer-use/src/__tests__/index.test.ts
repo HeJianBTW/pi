@@ -449,6 +449,171 @@ describe('binary permissions', () => {
   });
 });
 
+describe('analyze_screenshot', () => {
+  beforeEach(() => {
+    registeredTools.clear();
+    for (const k of Object.keys(eventHandlers)) delete eventHandlers[k];
+    mockNotify.mockClear();
+  });
+
+  test('passes window_id to underlying screenshot tool', async () => {
+    let capturedArgs: Record<string, unknown> = {};
+    await initExtension(
+      { visionModel: { provider: 'openai', model: 'gpt-4o' } },
+      (name: string, args: Record<string, unknown>) => {
+        if (name === 'check_permissions') {
+          return {
+            content: [{ type: 'text', text: 'All granted.' }],
+            structuredContent: { accessibility: true, screen_recording: true },
+          };
+        }
+        if (name === 'screenshot') {
+          capturedArgs = args;
+          return {
+            content: [{ type: 'image', data: 'fakebase64', mimeType: 'image/png' }],
+          };
+        }
+        return { content: [{ type: 'text', text: 'ok' }] };
+      },
+    );
+
+    const tool = registeredTools.get('computer_use_analyze_screenshot')!;
+    // execute will fail at vision model call, but we can verify screenshot args were passed
+    try {
+      await tool.execute('id', { window_id: 12345 }, undefined, undefined, mockCtx);
+    } catch {
+      // vision model not available in test, that's fine
+    }
+    expect(capturedArgs.window_id).toBe(12345);
+  });
+
+  test('passes format and quality to underlying screenshot tool', async () => {
+    let capturedArgs: Record<string, unknown> = {};
+    await initExtension(
+      { visionModel: { provider: 'openai', model: 'gpt-4o' } },
+      (name: string, args: Record<string, unknown>) => {
+        if (name === 'check_permissions') {
+          return {
+            content: [{ type: 'text', text: 'All granted.' }],
+            structuredContent: { accessibility: true, screen_recording: true },
+          };
+        }
+        if (name === 'screenshot') {
+          capturedArgs = args;
+          return {
+            content: [{ type: 'image', data: 'fakebase64', mimeType: 'image/jpeg' }],
+          };
+        }
+        return { content: [{ type: 'text', text: 'ok' }] };
+      },
+    );
+
+    const tool = registeredTools.get('computer_use_analyze_screenshot')!;
+    try {
+      await tool.execute(
+        'id',
+        { window_id: 99, format: 'jpeg', quality: 80 },
+        undefined,
+        undefined,
+        mockCtx,
+      );
+    } catch {
+      // vision model not available in test
+    }
+    expect(capturedArgs).toEqual({ window_id: 99, format: 'jpeg', quality: 80 });
+  });
+
+  test('returns error text from cua-driver when screenshot fails', async () => {
+    await initExtension(
+      { visionModel: { provider: 'openai', model: 'gpt-4o' } },
+      (name: string) => {
+        if (name === 'check_permissions') {
+          return {
+            content: [{ type: 'text', text: 'All granted.' }],
+            structuredContent: { accessibility: true, screen_recording: true },
+          };
+        }
+        if (name === 'screenshot') {
+          return {
+            content: [{ type: 'text', text: 'screencapture failed: window not found' }],
+            isError: true,
+          };
+        }
+        return { content: [{ type: 'text', text: 'ok' }] };
+      },
+    );
+
+    const tool = registeredTools.get('computer_use_analyze_screenshot')!;
+    const result = (await tool.execute(
+      'id',
+      { window_id: 999 },
+      undefined,
+      undefined,
+      mockCtx,
+    )) as any;
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Screenshot failed for window 999');
+  });
+
+  test('returns sc_not_granted hint when screen recording denied', async () => {
+    await initExtension(
+      { visionModel: { provider: 'openai', model: 'gpt-4o' } },
+      (name: string) => {
+        if (name === 'check_permissions') {
+          return {
+            content: [{ type: 'text', text: 'All granted.' }],
+            structuredContent: { accessibility: true, screen_recording: true },
+          };
+        }
+        if (name === 'screenshot') {
+          return {
+            content: [{ type: 'text', text: 'sc_not_granted' }],
+            isError: true,
+          };
+        }
+        return { content: [{ type: 'text', text: 'ok' }] };
+      },
+    );
+
+    const tool = registeredTools.get('computer_use_analyze_screenshot')!;
+    const result = (await tool.execute(
+      'id',
+      { window_id: 1 },
+      undefined,
+      undefined,
+      mockCtx,
+    )) as any;
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Screen Recording permission not granted');
+  });
+
+  test('returns connect error when cua-driver is not running', async () => {
+    const connectFail = async () => {
+      throw new Error('Connection refused');
+    };
+
+    await initExtension(
+      { visionModel: { provider: 'openai', model: 'gpt-4o' } },
+      undefined,
+      connectFail,
+    );
+
+    const tool = registeredTools.get('computer_use_analyze_screenshot')!;
+    const result = (await tool.execute(
+      'id',
+      { window_id: 1 },
+      undefined,
+      undefined,
+      mockCtx,
+    )) as any;
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Failed to connect to cua-driver');
+  });
+});
+
 describe('connect failure resilience', () => {
   beforeEach(() => {
     registeredTools.clear();

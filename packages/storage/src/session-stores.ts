@@ -128,6 +128,16 @@ export class JsonFileTranscriptStore implements TranscriptStore {
       }));
   }
 
+  async updateSessionTitle(scope: RuntimeScope, sessionId: string, title: string): Promise<void> {
+    void scope;
+    await this.update((state) => {
+      const summary = state.sessionSummaries[sessionId];
+      if (summary) {
+        summary.title = title;
+      }
+    });
+  }
+
   private async update(mutator: (state: JsonConversationHistoryState) => void): Promise<void> {
     const pending = this.writeTail.then(async () => {
       await this.load();
