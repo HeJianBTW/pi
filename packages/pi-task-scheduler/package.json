@@ -21,6 +21,10 @@
       "types": "./dist/extension.d.ts",
       "default": "./dist/extension.js"
     },
+    "./tools": {
+      "types": "./dist/tools.d.ts",
+      "default": "./dist/tools.js"
+    },
     "./package.json": {
       "default": "./package.json"
     }

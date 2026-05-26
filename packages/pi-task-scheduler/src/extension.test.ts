@@ -203,10 +203,10 @@ describe('extension — injected scheduler', () => {
       await handler({}, createMockCtx());
     }
 
-    // Tools should return "not running" after shutdown
+    // After shutdown, tools still work (scheduler instance persists) but scheduler is stopped
     const tool = pi.tools.get('scheduler_list')!;
     const result = (await tool.execute('id', {}, undefined, undefined, createMockCtx())) as any;
-    expect(result.content[0].text).toBe('Task scheduler is not running.');
+    expect(result.content[0].text).toBe('No scheduled tasks.');
   });
 });
 

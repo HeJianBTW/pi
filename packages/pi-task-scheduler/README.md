@@ -38,18 +38,17 @@ const scheduler = new PersistentTaskScheduler({
 await scheduler.start();
 ```
 
-### Database storage (pi-agent server)
+### Custom storage
+
+Implement `ScheduledTaskStore` and `SchedulerLock` interfaces for any backend
+(database, Redis, etc.):
 
 ```ts
 import { PersistentTaskScheduler } from "@amaster.ai/pi-task-scheduler";
-import {
-  DbScheduledTaskStore,
-  RedisSchedulerLock,
-} from "@amaster.ai/pi-storage/scheduler";
 
 const scheduler = new PersistentTaskScheduler({
-  store: new DbScheduledTaskStore(databaseUrl),
-  lock: new RedisSchedulerLock(redisUrl),
+  store: myCustomStore,   // implements ScheduledTaskStore
+  lock: myCustomLock,     // implements SchedulerLock
   runner: async (task, run) => {
     await runPrompt(task.prompt, { sessionId: run.sessionId });
   },
@@ -58,11 +57,25 @@ const scheduler = new PersistentTaskScheduler({
 await scheduler.start();
 ```
 
-## Extension
+## Integration Modes
 
-The package exports a pi extension that integrates with the agent runtime:
+The package provides two integration paths depending on who controls the
+scheduler lifecycle.
 
-- **Lifecycle**: creates a `PersistentTaskScheduler` on `session_start`, stops on `session_shutdown`
+### Mode 1: Extension auto-discovery (standalone / CLI)
+
+When installed as an npm dependency with the `pi.extensions` field in
+`package.json`, the runtime auto-discovers and loads the extension. The
+extension creates its own `PersistentTaskScheduler` with file-based storage
+(`JsonScheduledTaskStore` + `FileSchedulerLock`) — fully self-contained, no
+external infrastructure needed.
+
+```
+pi.extensions → session_start → creates file-based scheduler → registers tools + commands
+```
+
+- **Storage**: `<agentDir>/data/tasks.json` (configurable via `dataDir`)
+- **Lifecycle**: scheduler starts on `session_start`, stops on `session_shutdown`
 - **Commands**: `/pi-scheduler-status`, `/pi-scheduler-list`, `/pi-scheduler-run-now`
 - **LLM Tools**: `scheduler_create`, `scheduler_list`, `scheduler_get`, `scheduler_update`, `scheduler_delete`, `scheduler_run_now`
 
@@ -76,40 +89,44 @@ Configuration via settings key `pi-scheduler`:
 }
 ```
 
-Data is stored in `<agentDir>/data/` by default (`~/.pi/agent/data/`).
+### Mode 2: Dependency import (host-controlled)
 
-### Standalone mode (default)
-
-When installed as an npm extension package, the extension creates its own
-scheduler with `JsonScheduledTaskStore` and `FileSchedulerLock`. No additional
-dependencies required.
-
-### Injected mode (pi-agent server)
-
-When the host already owns a scheduler instance (e.g. pi-agent server with DB
-storage), pass it directly to avoid creating a second scheduler:
+When the host process owns the scheduler instance (e.g. backed by a database),
+it bypasses the extension and registers tools directly using
+`createSchedulerTools`:
 
 ```ts
-import taskSchedulerExtension from "@amaster.ai/pi-task-scheduler";
+import { createSchedulerTools } from "@amaster.ai/pi-task-scheduler/tools";
 import { PersistentTaskScheduler } from "@amaster.ai/pi-task-scheduler";
-import {
-  DbScheduledTaskStore,
-  RedisSchedulerLock,
-} from "@amaster.ai/pi-storage/scheduler";
 
 const scheduler = new PersistentTaskScheduler({
-  store: new DbScheduledTaskStore(databaseUrl),
-  lock: new RedisSchedulerLock(redisUrl),
+  store: myStore,
+  lock: myLock,
   runner,
 });
 await scheduler.start();
 
-// Extension only registers tools, does not create/stop the scheduler
-taskSchedulerExtension(pi, { scheduler });
+// Returns ToolDefinition[] — register via your tool injection mechanism
+const tools = createSchedulerTools(scheduler);
 ```
 
-In injected mode, `session_shutdown` does **not** stop the scheduler — the host
-manages its lifecycle.
+In this mode the auto-discovered extension should be filtered out to prevent
+double tool registration. The host manages scheduler start/stop independently.
+
+```
+host creates scheduler → createSchedulerTools(scheduler) → tools injected into runtime
+                       → extension filtered from auto-discovery
+```
+
+### Choosing a mode
+
+| | Extension (Mode 1) | Dependency (Mode 2) |
+|---|---|---|
+| Storage | File-based (JSON) | Host-controlled |
+| Scheduler lifecycle | Extension manages | Host manages |
+| Tool registration | Extension registers | Host registers |
+| Multi-tenant | No | Yes |
+| Use case | CLI / standalone agent | Server / custom host |
 
 ## Scheduling
 
