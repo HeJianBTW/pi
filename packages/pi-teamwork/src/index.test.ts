@@ -1,8 +1,8 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { initMulticaProvider, MulticaAdapter } from './adapters/multica.js';
 import type { ExecFn } from './types.js';
 
-function mockExec(
+function _mockExec(
   responses: Record<string, { stdout: string; stderr: string; code: number }>,
 ): ExecFn {
   return async (_cmd, args) => {

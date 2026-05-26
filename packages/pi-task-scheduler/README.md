@@ -6,16 +6,57 @@ The package owns schedule parsing, task lifecycle state, process-local timers,
 runner callbacks, scheduler hooks, and LLM-callable tools for autonomous task
 management.
 
-## Scope
+## Storage
 
-This package does not persist data by itself and does not know how to execute a
-pi chat turn. Applications provide both:
+The package ships with a built-in file-based storage (default, zero external
+dependencies):
 
-- a `ScheduledTaskStore` for persistence
-- a `SchedulerLock` for single-owner execution
-- a `ScheduledTaskRunner` callback for the actual work
+- `JsonScheduledTaskStore` — persists tasks to a JSON file with atomic writes
+- `FileSchedulerLock` — PID-based file lock for single-owner execution
 
-Storage adapters live in `@amaster.ai/pi-storage/scheduler`.
+For database-backed storage (multi-tenant, Prisma), use
+`@amaster.ai/pi-storage/scheduler` which implements the same interfaces with
+`DbScheduledTaskStore` and `RedisSchedulerLock`.
+
+### Default (file storage)
+
+```ts
+import {
+  PersistentTaskScheduler,
+  JsonScheduledTaskStore,
+  FileSchedulerLock,
+} from "@amaster.ai/pi-task-scheduler";
+
+const scheduler = new PersistentTaskScheduler({
+  store: new JsonScheduledTaskStore("/var/lib/pi/tasks.json"),
+  lock: new FileSchedulerLock("/var/lib/pi/tasks.lock"),
+  runner: async (task, run) => {
+    await runPrompt(task.prompt, { sessionId: run.sessionId });
+  },
+});
+
+await scheduler.start();
+```
+
+### Database storage (pi-agent server)
+
+```ts
+import { PersistentTaskScheduler } from "@amaster.ai/pi-task-scheduler";
+import {
+  DbScheduledTaskStore,
+  RedisSchedulerLock,
+} from "@amaster.ai/pi-storage/scheduler";
+
+const scheduler = new PersistentTaskScheduler({
+  store: new DbScheduledTaskStore(databaseUrl),
+  lock: new RedisSchedulerLock(redisUrl),
+  runner: async (task, run) => {
+    await runPrompt(task.prompt, { sessionId: run.sessionId });
+  },
+});
+
+await scheduler.start();
+```
 
 ## Extension
 
@@ -30,7 +71,6 @@ Configuration via settings key `pi-scheduler`:
 ```json
 {
   "pi-scheduler": {
-    "enabled": true,
     "dataDir": "/custom/path"
   }
 }
@@ -38,30 +78,38 @@ Configuration via settings key `pi-scheduler`:
 
 Data is stored in `<agentDir>/data/` by default (`~/.pi/agent/data/`).
 
-## Example
+### Standalone mode (default)
+
+When installed as an npm extension package, the extension creates its own
+scheduler with `JsonScheduledTaskStore` and `FileSchedulerLock`. No additional
+dependencies required.
+
+### Injected mode (pi-agent server)
+
+When the host already owns a scheduler instance (e.g. pi-agent server with DB
+storage), pass it directly to avoid creating a second scheduler:
 
 ```ts
+import taskSchedulerExtension from "@amaster.ai/pi-task-scheduler";
 import { PersistentTaskScheduler } from "@amaster.ai/pi-task-scheduler";
 import {
-  FileSchedulerLock,
-  JsonScheduledTaskStore,
+  DbScheduledTaskStore,
+  RedisSchedulerLock,
 } from "@amaster.ai/pi-storage/scheduler";
 
 const scheduler = new PersistentTaskScheduler({
-  store: new JsonScheduledTaskStore("/var/lib/pi/tasks.json"),
-  lock: new FileSchedulerLock("/var/lib/pi/tasks.lock"),
-  runner: async (task, run) => {
-    await runPrompt(task.prompt, { sessionId: run.sessionId });
-  },
-  hooks: {
-    onTaskFailed: ({ task, error }) => {
-      console.warn("scheduled task failed", task.id, error);
-    },
-  },
+  store: new DbScheduledTaskStore(databaseUrl),
+  lock: new RedisSchedulerLock(redisUrl),
+  runner,
 });
-
 await scheduler.start();
+
+// Extension only registers tools, does not create/stop the scheduler
+taskSchedulerExtension(pi, { scheduler });
 ```
+
+In injected mode, `session_shutdown` does **not** stop the scheduler — the host
+manages its lifecycle.
 
 ## Scheduling
 
