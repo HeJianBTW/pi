@@ -1,6 +1,6 @@
 {
   "name": "@amaster.ai/pi-shared",
-  "version": "0.1.2-beta.6",
+  "version": "0.1.2-beta.7",
   "license": "Apache-2.0",
   "type": "module",
   "sideEffects": false,
