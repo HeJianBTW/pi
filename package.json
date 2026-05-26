@@ -14,11 +14,13 @@
     "typecheck": "pnpm --filter @amaster.ai/pi-storage prisma:generate && tsc -b packages/* --pretty false",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "prepare": "husky"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.15",
     "@types/node": "^24.0.0",
+    "husky": "^9.1.7",
     "jiti": "^2.7.0",
     "typescript": "^5.9.3",
     "vitest": "^4.0.0"
