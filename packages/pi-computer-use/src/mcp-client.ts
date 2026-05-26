@@ -85,8 +85,15 @@ export class CuaDriverClient {
 
     const platform =
       process.platform === 'win32' ? 'win32-x64' : `${process.platform}-${process.arch}`;
-    const ext = process.platform === 'win32' ? '.exe' : '';
-    const binPath = path.resolve(__dirname, '..', 'bin', platform, `cua-driver${ext}`);
+    const binDir = path.resolve(__dirname, '..', 'bin', platform);
+
+    let binPath: string;
+    if (process.platform === 'darwin') {
+      binPath = path.join(binDir, 'CuaDriver.app', 'Contents', 'MacOS', 'cua-driver');
+    } else {
+      const ext = process.platform === 'win32' ? '.exe' : '';
+      binPath = path.join(binDir, `cua-driver${ext}`);
+    }
 
     if (!existsSync(binPath)) {
       throw new Error(
