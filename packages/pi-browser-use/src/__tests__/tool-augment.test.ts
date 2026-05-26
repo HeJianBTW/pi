@@ -152,7 +152,7 @@ describe('extractTextContent', () => {
       { type: 'image', text: undefined },
       { type: 'text', text: 'Only text' },
     ];
-    expect(extractTextContent(content)).toBe('Only text');
+    expect(extractTextContent(content as { type: string; text?: string }[])).toBe('Only text');
   });
 
   test('returns empty string for undefined', () => {

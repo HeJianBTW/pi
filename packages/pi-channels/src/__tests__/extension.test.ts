@@ -118,8 +118,8 @@ describe('piChannelsExtension', () => {
         method: 'POST',
       }),
     );
-    const [, request] = fetchMock.mock.calls[0]!;
-    expect(JSON.parse(String((request as RequestInit).body))).toEqual({
+    const [, request] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(JSON.parse(String(request.body))).toEqual({
       text: 'hello',
       source: 'unit',
       timestamp: expect.any(String),
