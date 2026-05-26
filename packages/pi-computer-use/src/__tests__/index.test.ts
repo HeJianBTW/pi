@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
+// Force darwin platform so permission-message assertions match macOS strings
+Object.defineProperty(process, 'platform', { value: 'darwin' });
+
 let mockCallToolFn: (name: string, args: Record<string, unknown>) => unknown = () => ({
   content: [{ type: 'text', text: 'Action executed.' }],
 });
