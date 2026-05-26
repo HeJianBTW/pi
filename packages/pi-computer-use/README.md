@@ -6,11 +6,11 @@ pi-coding-agent extension that wraps [cua-driver-rs](https://github.com/trycua/c
 
 - **Zero external dependencies** — pre-compiled cua-driver-rs binaries bundled for all platforms
 - **MCP stdio communication** — spawns `cua-driver mcp` via `StdioClientTransport`, JSON-RPC over stdio
-- **Dynamic tool discovery** — auto-discovers upstream MCP tools and registers with `computer_use_` prefix
-- **Smart tool filtering** — excludes non-essential tools (agent cursor, recording, config), exposes 18 core tools
+- **Dynamic tool discovery** — auto-discovers upstream MCP tools and registers with `computer_use_` prefix; falls back to a built-in tool list when cua-driver fails to start
+- **Smart tool filtering** — excludes non-essential tools (agent cursor, recording, config, raw screenshot), exposes 17 action tools + 1 vision tool
 - **Optional visual analysis** — `computer_use_analyze_screenshot` via configurable vision model
-- **Permission detection** — checks Accessibility & Screen Recording on startup, warns if not granted, and returns friendly guidance on permission errors
-- **Cross-platform** — darwin-arm64/x64, linux-x64, win32-x64/arm64
+- **Cross-platform permission handling** — detects platform-specific permission issues (macOS TCC, Windows UAC, Linux display server access) and returns actionable guidance
+- **Graceful degradation** — tools are always registered even when cua-driver cannot connect; lazy reconnect is attempted on each tool call
 
 ## Install
 
@@ -60,50 +60,64 @@ Enable `computer_use_analyze_screenshot` by referencing a model already configur
 
 The extension resolves API key, base URL, and headers from the model registry automatically — no need to duplicate credentials here.
 
-## Exposed Tools (18)
+## Exposed Tools (17 + 1 vision)
 
-### Core
-
-| Tool | Description |
-|------|-------------|
-| `computer_use_screenshot` | Capture screen |
-| `computer_use_click` | Click at coordinates |
-| `computer_use_type_text` | Type text |
-| `computer_use_press_key` | Press a keyboard key |
-| `computer_use_scroll` | Scroll in a direction |
-| `computer_use_hotkey` | Press key combination |
-
-### Common
+### Input
 
 | Tool | Description |
 |------|-------------|
-| `computer_use_double_click` | Double-click |
+| `computer_use_click` | Left-click via element_index or x/y coordinates |
+| `computer_use_double_click` | Double-click at x/y or on an AX element |
 | `computer_use_right_click` | Right-click (context menu) |
-| `computer_use_drag` | Drag from one point to another |
-| `computer_use_get_screen_size` | Get screen dimensions |
-| `computer_use_get_accessibility_tree` | Get accessibility tree for element discovery |
-| `computer_use_set_value` | Set form field value directly |
-| `computer_use_get_cursor_position` | Get current cursor position |
+| `computer_use_type_text` | Insert text via AX or CGEvent fallback |
+| `computer_use_press_key` | Press and release a single key |
+| `computer_use_hotkey` | Press a key combination (e.g. Cmd+C) |
+| `computer_use_scroll` | Scroll by line or page in a direction |
+| `computer_use_drag` | Press-drag-release gesture between two points |
+| `computer_use_set_value` | Set value on UI elements (popups, sliders, steppers) |
 
-### Situational
+### Query
 
 | Tool | Description |
 |------|-------------|
-| `computer_use_list_apps` | List running applications |
-| `computer_use_list_windows` | List open windows |
-| `computer_use_get_window_state` | Get window state/position |
-| `computer_use_launch_app` | Launch an application |
-| `computer_use_kill_app` | Kill an application |
+| `computer_use_get_screen_size` | Get display dimensions and scale factor |
+| `computer_use_get_cursor_position` | Get current mouse cursor position |
+| `computer_use_get_accessibility_tree` | Lightweight desktop snapshot (apps, windows, bounds) |
+| `computer_use_get_window_state` | Full AX tree of a window with actionable element indices |
+| `computer_use_list_windows` | List all top-level windows with bounds and z-order |
+| `computer_use_list_apps` | List running and installed apps with state flags |
 
-## Excluded Tools (15)
+### App Lifecycle
 
-Agent cursor styling, recording/replay, config management, and redundant operations (covered by other tools) are filtered out.
+| Tool | Description |
+|------|-------------|
+| `computer_use_launch_app` | Launch an app in the background without focus steal |
+| `computer_use_kill_app` | Force-terminate a process by pid |
+
+### Vision (requires `visionModel` config)
+
+| Tool | Description |
+|------|-------------|
+| `computer_use_analyze_screenshot` | Take a screenshot and analyze it with a vision model |
+
+## Excluded Tools (16)
+
+Agent cursor styling, recording/replay, config management, zoom, raw screenshot (use `analyze_screenshot` instead), and browser-specific operations are filtered out.
 
 ## Permissions
 
-On `session_start`, the extension checks macOS Accessibility and Screen Recording permissions via cua-driver's `check_permissions`. If not granted, a non-blocking warning is shown to the user.
+On `session_start`, the extension checks permissions via cua-driver's `check_permissions` tool. Platform-specific guidance is provided:
 
-When a tool call fails due to missing permissions (`ax_not_granted` / `sc_not_granted`), the extension returns a friendly message guiding the user to System Settings instead of a raw error.
+| Platform | Accessibility | Screen Capture |
+|----------|--------------|----------------|
+| macOS | System Settings → Privacy & Security → Accessibility | System Settings → Privacy & Security → Screen & System Audio Recording |
+| Windows | Run as Administrator / UI Automation access | Check DRM or security policy |
+| Linux | AT-SPI accessibility service | PipeWire portal or X11 access |
+
+When cua-driver fails to connect (missing permissions, binary not found, etc.):
+1. User is notified with a platform-appropriate warning
+2. Tools are still registered using a built-in fallback schema
+3. On each tool call, lazy reconnect is attempted; if it still fails, a friendly error with permission instructions is returned
 
 ## Supported Platforms
 

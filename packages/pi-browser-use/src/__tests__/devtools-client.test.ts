@@ -75,8 +75,8 @@ describe('DevToolsClient', () => {
       const tools = await client.listAllTools();
 
       expect(tools).toHaveLength(2);
-      expect(tools[0].name).toBe('click');
-      expect(tools[1].name).toBe('fill');
+      expect(tools[0]!.name).toBe('click');
+      expect(tools[1]!.name).toBe('fill');
       expect(mockListTools).toHaveBeenCalledTimes(2);
     });
 

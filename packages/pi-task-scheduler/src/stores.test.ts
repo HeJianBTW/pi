@@ -53,7 +53,7 @@ describe('JsonScheduledTaskStore', () => {
 
     const all = await store.list();
     expect(all).toHaveLength(1);
-    expect(all[0].id).toBe('task-1');
+    expect(all[0]!.id).toBe('task-1');
   });
 
   it('gets a task by id', async () => {
@@ -95,7 +95,7 @@ describe('JsonScheduledTaskStore', () => {
     const store2 = new JsonScheduledTaskStore(filePath);
     const tasks = await store2.list();
     expect(tasks).toHaveLength(1);
-    expect(tasks[0].prompt).toBe('hello');
+    expect(tasks[0]!.prompt).toBe('hello');
   });
 
   it('recovers from corrupted JSON via backup', async () => {
@@ -110,7 +110,7 @@ describe('JsonScheduledTaskStore', () => {
     const tasks = await store2.list();
     // backup contains state after first create (before second write)
     expect(tasks).toHaveLength(1);
-    expect(tasks[0].id).toBe('backup-test');
+    expect(tasks[0]!.id).toBe('backup-test');
   });
 
   it('returns empty list when file does not exist', async () => {
@@ -268,7 +268,7 @@ describe('custom storage injection', () => {
 
     const tasks = await scheduler.list();
     expect(tasks).toHaveLength(1);
-    expect(tasks[0].id).toBe('pre-existing');
+    expect(tasks[0]!.id).toBe('pre-existing');
 
     const task = await scheduler.get('pre-existing');
     expect(task?.prompt).toBe('seeded task');

@@ -1,6 +1,6 @@
 {
   "name": "pi",
-  "version": "0.1.2-beta.5",
+  "version": "0.1.2-beta.6",
   "private": true,
   "license": "Apache-2.0",
   "type": "module",
@@ -11,7 +11,7 @@
   "scripts": {
     "build": "pnpm --filter @amaster.ai/pi-storage prisma:generate && tsc -b packages/*",
     "pr-check": "pnpm build && pnpm test && pnpm typecheck",
-    "typecheck": "pnpm --filter @amaster.ai/pi-storage prisma:generate && tsc -b packages/* --pretty false",
+    "typecheck": "pnpm --filter @amaster.ai/pi-storage prisma:generate && tsc -b packages/* --pretty false && tsc -p tsconfig.check.json --pretty false",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "test": "vitest run",

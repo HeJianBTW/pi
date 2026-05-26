@@ -66,7 +66,7 @@ describe('handleAnalyzeScreenshot', () => {
     });
 
     expect(result.isError).toBeUndefined();
-    expect(result.content[0].text).toContain('Blue button at (150, 300)');
+    expect(result.content[0]!.text).toContain('Blue button at (150, 300)');
     expect(client.callTool).toHaveBeenCalledWith('take_screenshot', {});
     expect(caller).toHaveBeenCalledWith('Find the blue button', 'aW1hZ2VkYXRh', 'image/png');
   });
@@ -79,7 +79,7 @@ describe('handleAnalyzeScreenshot', () => {
     });
 
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('Failed to capture screenshot');
+    expect(result.content[0]!.text).toContain('Failed to capture screenshot');
     expect(caller).not.toHaveBeenCalled();
   });
 
@@ -91,7 +91,7 @@ describe('handleAnalyzeScreenshot', () => {
     });
 
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('Failed to capture screenshot');
+    expect(result.content[0]!.text).toContain('Failed to capture screenshot');
     expect(caller).not.toHaveBeenCalled();
   });
 
@@ -103,7 +103,7 @@ describe('handleAnalyzeScreenshot', () => {
     });
 
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('not available');
+    expect(result.content[0]!.text).toContain('not available');
   });
 
   test('vision model generic error returns error message', async () => {
@@ -114,7 +114,7 @@ describe('handleAnalyzeScreenshot', () => {
     });
 
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('Visual analysis failed');
+    expect(result.content[0]!.text).toContain('Visual analysis failed');
   });
 
   test('empty analysis returns error', async () => {
@@ -125,7 +125,7 @@ describe('handleAnalyzeScreenshot', () => {
     });
 
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('no analysis');
+    expect(result.content[0]!.text).toContain('no analysis');
   });
 
   test('defaults instruction to empty string', async () => {
@@ -153,7 +153,7 @@ describe('handleAnalyzeScreenshot', () => {
     });
 
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('not available');
+    expect(result.content[0]!.text).toContain('not available');
   });
 
   test('prefixes success result with Visual Analysis Result', async () => {
@@ -163,8 +163,8 @@ describe('handleAnalyzeScreenshot', () => {
       instruction: 'Find the button',
     });
 
-    expect(result.content[0].text).toMatch(/^Visual Analysis Result:/);
-    expect(result.content[0].text).toContain('Found button at (100, 200)');
+    expect(result.content[0]!.text).toMatch(/^Visual Analysis Result:/);
+    expect(result.content[0]!.text).toContain('Found button at (100, 200)');
   });
 });
 

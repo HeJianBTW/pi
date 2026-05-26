@@ -80,7 +80,7 @@ interface RegisteredTool {
 }
 
 const registeredTools = new Map<string, RegisteredTool>();
-const sessionStartHandlers: Array<() => Promise<void>> = [];
+const sessionStartHandlers: Array<(...args: any[]) => Promise<void>> = [];
 const sessionShutdownHandlers: Array<() => Promise<void>> = [];
 
 const mockPi = {
@@ -272,7 +272,7 @@ describe('browserUseExtension', () => {
       mockCallTool.mockResolvedValueOnce({
         content: [{ type: 'text', text: 'Error: element not found' }],
         isError: true,
-      });
+      } as any);
 
       await startExtension();
       const clickTool = registeredTools.get('browser_click')!;
@@ -359,7 +359,7 @@ describe('browserUseExtension', () => {
     test('handles upstream result with no text content (only images)', async () => {
       mockCallTool.mockResolvedValueOnce({
         content: [{ type: 'image', data: 'base64data', mimeType: 'image/png' }],
-      });
+      } as any);
 
       await startExtension();
       const clickTool = registeredTools.get('browser_click')!;
