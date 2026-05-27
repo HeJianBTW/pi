@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, test, vi } from 'vitest';
 
 const mockCreateMessage = vi.fn();
 const mockReplyMessage = vi.fn();
+const mockChatGet = vi.fn();
 const mockChannelOn = vi.fn();
 const mockChannelConnect = vi.fn();
 const mockChannelDisconnect = vi.fn();
@@ -29,6 +30,9 @@ vi.mock('@larksuiteoapi/node-sdk', () => ({
         create: mockCreateMessage,
         reply: mockReplyMessage,
       },
+      chat: {
+        get: mockChatGet,
+      },
     };
   },
   EventDispatcher: class MockEventDispatcher {
@@ -53,12 +57,14 @@ describe('Feishu adapter', () => {
   beforeEach(() => {
     mockCreateMessage.mockReset();
     mockReplyMessage.mockReset();
+    mockChatGet.mockReset();
     mockChannelOn.mockReset();
     mockChannelConnect.mockReset();
     mockChannelDisconnect.mockReset();
     channelHandlers = new Map();
     mockCreateMessage.mockResolvedValue({ code: 0, data: { message_id: 'om_sent' } });
     mockReplyMessage.mockResolvedValue({ code: 0, data: { message_id: 'om_reply' } });
+    mockChatGet.mockResolvedValue({ code: 0, data: { chat: { name: '测试群' } } });
   });
 
   test('sends a text message with official SDK Client.im.message.create', async () => {
@@ -179,16 +185,60 @@ describe('Feishu adapter', () => {
       createTime: 1,
     });
 
-    expect(onMessage).toHaveBeenCalledWith({
-      adapter: 'feishu',
-      sender: 'oc_allowed',
-      text: 'ping',
-      metadata: expect.objectContaining({
-        messageId: 'om_1',
-        chatId: 'oc_allowed',
-        chatType: 'group',
-        senderId: 'ou_user',
-      }),
+    await vi.waitFor(() => {
+      expect(onMessage).toHaveBeenCalledWith({
+        adapter: 'feishu',
+        sender: 'oc_allowed',
+        text: 'ping',
+        metadata: expect.objectContaining({
+          messageId: 'om_1',
+          chatId: 'oc_allowed',
+          chatName: '测试群',
+          chatType: 'group',
+          senderId: 'ou_user',
+        }),
+      });
+    });
+  });
+
+  test('strips a leading bot mention before forwarding websocket messages', async () => {
+    const adapter = createFeishuAdapter({
+      type: 'feishu',
+      appId: 'cli_xxx',
+      appSecret: 'secret',
+      eventMode: 'websocket',
+      respondToMentionsOnly: true,
+    });
+    const onMessage = vi.fn();
+
+    await adapter.start?.(onMessage);
+    channelHandlers.get('message')?.({
+      messageId: 'om_1',
+      chatId: 'oc_group',
+      chatType: 'group',
+      senderId: 'ou_user',
+      senderName: 'Ada',
+      content: '@AAA建材猫总 你是什么模型',
+      rawContentType: 'text',
+      resources: [],
+      mentions: [
+        {
+          key: '@_user_1',
+          name: 'AAA建材猫总',
+          isBot: true,
+        },
+      ],
+      mentionAll: false,
+      mentionedBot: true,
+      createTime: 1,
+    });
+
+    await vi.waitFor(() => {
+      expect(onMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          text: '你是什么模型',
+        }),
+      );
     });
   });
 

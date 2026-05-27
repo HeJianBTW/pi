@@ -10,6 +10,18 @@ vi.mock('../config.js', () => ({
     },
     bridge: { enabled: false },
   })),
+  updateLocalChannelConfig: vi.fn((_cwd: string, update: (config: unknown) => unknown) => {
+    update({
+      adapters: {
+        feishu: { type: 'feishu' },
+      },
+      routes: {
+        ops: { adapter: 'feishu', recipient: '' },
+      },
+      bridge: { enabled: true },
+    });
+    return true;
+  }),
 }));
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
@@ -46,6 +58,7 @@ const mockPi = {
 };
 
 const { default: piChannelsExtension } = await import('../index.js');
+const configModule = await import('../config.js');
 
 function mockCtx() {
   return {
@@ -97,6 +110,25 @@ describe('piChannelsExtension', () => {
     expect(ctx.ui.setStatus).toHaveBeenCalledWith('pi-channels', 'channels: 1');
   });
 
+  test('notify supports route and adapter list action aliases', async () => {
+    piChannelsExtension(mockPi as never);
+    await handlers.get('session_start')?.({}, mockCtx());
+
+    const routeResult = (await tools.get('notify')?.execute('call-1', {
+      action: 'list-routes',
+    })) as { content: Array<{ text: string }> };
+    const adapterResult = (await tools.get('notify')?.execute('call-2', {
+      action: 'list-adapters',
+    })) as { content: Array<{ text: string }> };
+
+    expect(routeResult.content[0]!.text).toContain(
+      'ops route -> webhook -> https://example.test/hook',
+    );
+    expect(routeResult.content[0]!.text).not.toContain('webhook adapter');
+    expect(adapterResult.content[0]!.text).toContain('webhook adapter');
+    expect(adapterResult.content[0]!.text).not.toContain('ops route');
+  });
+
   test('notify send routes through webhook aliases', async () => {
     const fetchMock = vi.fn(async () => new Response('', { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
@@ -126,6 +158,50 @@ describe('piChannelsExtension', () => {
     });
   });
 
+  test('notify maps local channels plugin selector to the only configured route', async () => {
+    const fetchMock = vi.fn(async () => new Response('', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    piChannelsExtension(mockPi as never);
+    await handlers.get('session_start')?.({}, mockCtx());
+
+    const result = (await tools.get('notify')?.execute('call-1', {
+      action: 'send',
+      adapter: '@local:channels',
+      text: 'hello',
+    })) as { content: Array<{ text: string }> };
+
+    expect(result.content[0]!.text).toBe('Sent via "ops".');
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://example.test/hook',
+      expect.objectContaining({
+        method: 'POST',
+      }),
+    );
+  });
+
+  test('notify maps local channel route mentions to route aliases', async () => {
+    const fetchMock = vi.fn(async () => new Response('', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    piChannelsExtension(mockPi as never);
+    await handlers.get('session_start')?.({}, mockCtx());
+
+    const result = (await tools.get('notify')?.execute('call-1', {
+      action: 'send',
+      adapter: '@local:channels:ops',
+      text: 'hello',
+    })) as { content: Array<{ text: string }> };
+
+    expect(result.content[0]!.text).toBe('Sent via "ops".');
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://example.test/hook',
+      expect.objectContaining({
+        method: 'POST',
+      }),
+    );
+  });
+
   test('channel:register can add runtime adapters and channel:send can use them', async () => {
     const send = vi.fn(() => Promise.resolve());
     const callback = vi.fn();
@@ -150,6 +226,97 @@ describe('piChannelsExtension', () => {
       adapter: 'custom',
       recipient: 'room',
       text: 'hello',
+    });
+  });
+
+  test('incoming messages fill the only empty route recipient for that adapter', async () => {
+    const updateLocalChannelConfig = vi.mocked(configModule.updateLocalChannelConfig);
+
+    piChannelsExtension(mockPi as never);
+    await handlers.get('session_start')?.({}, mockCtx());
+    events.get('channel:register')?.({
+      name: 'feishu',
+      adapter: {
+        direction: 'bidirectional',
+        start: (onMessage: (message: unknown) => void) => {
+          onMessage({
+            adapter: 'feishu',
+            sender: 'oc_group',
+            text: 'hello',
+            metadata: {
+              chatId: 'oc_group',
+            },
+          });
+          return Promise.resolve();
+        },
+      },
+    });
+
+    expect(updateLocalChannelConfig).toHaveBeenCalled();
+    const update = updateLocalChannelConfig.mock.calls.at(-1)?.[1];
+    expect(
+      update?.({
+        adapters: {
+          feishu: { type: 'feishu' },
+        },
+        routes: {
+          ops: { adapter: 'feishu', recipient: '' },
+        },
+        bridge: { enabled: true },
+      }),
+    ).toMatchObject({
+      routes: {
+        ops: { adapter: 'feishu', recipient: 'oc_group', capture: false },
+      },
+    });
+  });
+
+  test('incoming messages fill the pending capture route when multiple routes are empty', async () => {
+    const updateLocalChannelConfig = vi.mocked(configModule.updateLocalChannelConfig);
+
+    piChannelsExtension(mockPi as never);
+    await handlers.get('session_start')?.({}, mockCtx());
+    events.get('channel:register')?.({
+      name: 'feishu',
+      adapter: {
+        direction: 'bidirectional',
+        start: (onMessage: (message: unknown) => void) => {
+          onMessage({
+            adapter: 'feishu',
+            sender: 'oc_group_2',
+            text: 'hello',
+            metadata: {
+              chatId: 'oc_group_2',
+              chatName: '二号群',
+            },
+          });
+          return Promise.resolve();
+        },
+      },
+    });
+
+    const update = updateLocalChannelConfig.mock.calls.at(-1)?.[1];
+    expect(
+      update?.({
+        adapters: {
+          feishu: { type: 'feishu' },
+        },
+        routes: {
+          ops: { adapter: 'feishu', recipient: '' },
+          ops2: { adapter: 'feishu', recipient: '', capture: true },
+        },
+        bridge: { enabled: true },
+      }),
+    ).toMatchObject({
+      routes: {
+        ops: { adapter: 'feishu', recipient: '' },
+        ops2: {
+          adapter: 'feishu',
+          recipient: 'oc_group_2',
+          name: '二号群',
+          capture: false,
+        },
+      },
     });
   });
 });

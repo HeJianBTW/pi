@@ -1,4 +1,7 @@
 import { type ChildProcess, spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { ChannelRegistry } from './registry.js';
 import type { BridgeConfig, IncomingMessage } from './types.js';
 
@@ -25,7 +28,11 @@ const DEFAULTS: Required<BridgeConfig> = {
   maxQueuePerSender: 5,
   maxConcurrent: 2,
   model: null as string | null,
+  provider: null as string | null,
+  piBin: '',
   commands: true,
+  persistSessions: true,
+  apiBase: '',
 };
 
 let idCounter = 0;
@@ -161,17 +168,30 @@ export class ChatBridge {
     const adapter = this.registry.getAdapter(queued.message.adapter);
     adapter?.sendTyping?.(queued.message.sender).catch(() => undefined);
 
+    const bridgeModel = this.config.model ?? resolveDefaultBridgeModel();
+    const bridgeProvider = this.config.provider ?? resolveDefaultBridgeProvider(bridgeModel);
     const result = await runPrompt({
       cwd: this.cwd,
       prompt: queued.message.text,
       timeoutMs: this.config.timeoutMs,
-      model: this.config.model,
+      model: bridgeModel,
+      provider: bridgeProvider,
+      piBin: this.config.piBin,
       signal: ac.signal,
     });
 
     const reply = result.ok
       ? result.response
       : result.response || `Error: ${result.error ?? 'unknown'}`;
+    await persistChannelTurn({
+      apiBase: this.config.apiBase,
+      enabled: this.config.persistSessions,
+      cwd: this.cwd,
+      message: queued.message,
+      reply,
+      model: bridgeModel,
+      provider: bridgeProvider,
+    });
     await this.registry.send({
       adapter: queued.message.adapter,
       recipient: queued.message.sender,
@@ -197,21 +217,145 @@ export class ChatBridge {
   }
 }
 
+async function persistChannelTurn(input: {
+  apiBase: string;
+  enabled: boolean;
+  cwd: string;
+  message: IncomingMessage;
+  reply: string;
+  model: string | null;
+  provider: string | null;
+}): Promise<void> {
+  if (!input.enabled) return;
+  const apiBase = resolvePiAgentApiBase(input.apiBase);
+  if (!apiBase) return;
+  const sessionId = channelSessionId(input.message);
+  if (!sessionId) return;
+  const title = channelSessionTitle(input.message, sessionId);
+  const body = {
+    sessionId,
+    conversationId: sessionId,
+    title,
+    adapter: input.message.adapter,
+    recipient: sessionId,
+    userMessage: input.message.text,
+    assistantMessage: input.reply,
+    workspaceDir: process.env.PI_AGENT_WORKSPACE || input.cwd,
+    model: modelPayload(input.provider, input.model),
+  };
+  try {
+    const response = await fetch(`${apiBase}/internal/channel-sessions/turn`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-pi-agent-internal': 'channel-bridge',
+      },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) {
+      console.warn('[pi-channels] channel_session_persist_failed', {
+        status: response.status,
+        sessionId,
+      });
+    }
+  } catch (error) {
+    console.warn('[pi-channels] channel_session_persist_failed', {
+      sessionId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+function channelSessionId(message: IncomingMessage): string | undefined {
+  const metadata = message.metadata ?? {};
+  if (message.adapter === 'feishu') {
+    return (
+      trimToNull(typeof metadata.chatId === 'string' ? metadata.chatId : undefined) ??
+      trimToNull(message.sender.split(':')[0]) ??
+      undefined
+    );
+  }
+  return trimToNull(message.sender.split(':')[0]) ?? undefined;
+}
+
+function channelSessionTitle(message: IncomingMessage, sessionId: string): string {
+  const metadata = message.metadata ?? {};
+  const name =
+    trimToNull(
+      typeof metadata.chatName === 'string'
+        ? metadata.chatName
+        : typeof metadata.groupName === 'string'
+          ? metadata.groupName
+          : undefined,
+    ) ?? sessionId;
+  return `${adapterDisplayName(message.adapter)} / ${name}`;
+}
+
+function adapterDisplayName(adapter: string): string {
+  if (adapter === 'feishu') return '飞书';
+  if (adapter === 'wecom') return '企微';
+  return adapter;
+}
+
+function modelPayload(
+  provider: string | null,
+  model: string | null,
+): { provider?: string; model?: string } | undefined {
+  const cleanProvider = trimToNull(provider ?? undefined);
+  const cleanModel = trimToNull(model ?? undefined);
+  if (!cleanProvider && !cleanModel) return undefined;
+  return {
+    ...(cleanProvider ? { provider: cleanProvider } : {}),
+    ...(cleanModel ? { model: cleanModel } : {}),
+  };
+}
+
+function resolvePiAgentApiBase(configured: string): string | undefined {
+  const explicit =
+    trimToNull(configured) ??
+    trimToNull(process.env.PI_AGENT_API_BASE) ??
+    trimToNull(process.env.DESKTOP_API_BASE);
+  if (explicit) return explicit.replace(/\/+$/, '');
+  const port = trimToNull(process.env.DESKTOP_PORT) ?? trimToNull(process.env.PORT);
+  return port ? `http://127.0.0.1:${port}` : undefined;
+}
+
 function runPrompt(options: {
   cwd: string;
   prompt: string;
   timeoutMs: number;
   model: string | null;
+  provider: string | null;
+  piBin: string;
   signal?: AbortSignal;
 }): Promise<BridgeRunResult> {
   return new Promise((resolve) => {
-    const args = ['-p', '--no-session', '--no-extensions'];
-    if (options.model) args.push('--model', options.model);
+    const args = ['-p', '--offline', '--no-session', '--no-extensions'];
+    const model = options.model ?? resolveDefaultBridgeModel();
+    const provider = options.provider ?? resolveDefaultBridgeProvider(model);
+    if (shouldAttachBridgeProvider(provider)) {
+      args.push('-e', resolveBridgeProviderExtensionPath());
+    }
+    if (provider) args.push('--provider', provider);
+    if (model) args.push('--model', model);
     args.push(options.prompt);
+    const command = resolvePiCommand(options.cwd, options.piBin);
+
+    console.debug('[pi-channels] bridge_run_prompt', {
+      cwd: options.cwd,
+      command,
+      provider,
+      model,
+      hasAnthropicBaseUrl: Boolean(process.env.ANTHROPIC_BASE_URL),
+      hasAnthropicApiKey: Boolean(process.env.ANTHROPIC_API_KEY),
+      providerExtension: shouldAttachBridgeProvider(provider)
+        ? resolveBridgeProviderExtensionPath()
+        : undefined,
+    });
 
     let child: ChildProcess;
     try {
-      child = spawn('pi', args, {
+      child = spawn(command, args, {
         cwd: options.cwd,
         stdio: ['ignore', 'pipe', 'pipe'],
         env: { ...process.env },
@@ -255,4 +399,56 @@ function runPrompt(options: {
       resolve({ ok: false, response: '', error: error.message });
     });
   });
+}
+
+function resolveDefaultBridgeModel(): string | null {
+  return trimToNull(process.env.ANTHROPIC_MODEL) ?? trimToNull(process.env.MODEL) ?? null;
+}
+
+function resolveDefaultBridgeProvider(model: string | null): string | null {
+  if (!model || model.includes('/')) return null;
+  if (process.env.ANTHROPIC_BASE_URL && process.env.ANTHROPIC_API_KEY) {
+    return 'anthropic-compatible';
+  }
+  return null;
+}
+
+function shouldAttachBridgeProvider(provider: string | null): boolean {
+  return provider === 'anthropic-compatible';
+}
+
+function resolveBridgeProviderExtensionPath(): string {
+  return join(dirname(fileURLToPath(import.meta.url)), 'bridge-provider.js');
+}
+
+function resolvePiCommand(cwd: string, configured: string): string {
+  const explicit = trimToNull(configured) ?? trimToNull(process.env.PI_CHANNELS_PI_BIN);
+  if (explicit) return explicit;
+
+  for (const candidate of discoverPiBins(cwd)) {
+    if (existsSync(candidate)) return candidate;
+  }
+  return 'pi';
+}
+
+function discoverPiBins(cwd: string): string[] {
+  const bins: string[] = [];
+  let current = resolve(cwd);
+  while (true) {
+    bins.push(join(current, 'node_modules', '.bin', piBinName()));
+    bins.push(join(current, '.pi', 'npm', 'node_modules', '.bin', piBinName()));
+    const parent = dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  return bins;
+}
+
+function piBinName(): string {
+  return process.platform === 'win32' ? 'pi.cmd' : 'pi';
+}
+
+function trimToNull(value: string | undefined): string | null {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
 }
