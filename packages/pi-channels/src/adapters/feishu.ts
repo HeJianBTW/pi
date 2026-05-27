@@ -50,6 +50,19 @@ type ParsedTextContent = {
   text: string;
 };
 
+type IncomingMention = {
+  key?: string;
+  name?: string;
+  isBot?: boolean;
+  openId?: string;
+  userId?: string;
+  id?: {
+    union_id?: string;
+    user_id?: string;
+    open_id?: string;
+  };
+};
+
 function asConfig(config: AdapterConfig): FeishuAdapterConfig {
   return config as FeishuAdapterConfig;
 }
@@ -70,6 +83,70 @@ function parseTextContent(content: string): ParsedTextContent {
   } catch {
     return { text: content };
   }
+}
+
+function normalizeFeishuIncomingText(
+  text: string,
+  mentions: IncomingMention[] | undefined,
+  cfg: FeishuAdapterConfig,
+  mentionedBot: boolean,
+): string {
+  let cleaned = text.replace(/\u00a0/g, ' ').trim();
+  cleaned = cleaned.replace(/^回复\s+[^:：]{1,80}[:：]\s*/u, '').trim();
+
+  if (mentions?.length) {
+    const botMentions = mentions.filter((mention) => isBotMention(mention, cfg));
+    const leadingMentions = botMentions.length > 0 ? botMentions : mentionedBot ? mentions : [];
+    cleaned = stripLeadingMentionTokens(cleaned, mentionTokens(leadingMentions));
+  }
+
+  if (mentionedBot) {
+    cleaned = cleaned.replace(/^@[\p{L}\p{N}_\-.·]+(?:\s+|$)/u, '').trim();
+  }
+
+  return cleaned;
+}
+
+function isBotMention(mention: IncomingMention, cfg: FeishuAdapterConfig): boolean {
+  if (mention.isBot) return true;
+  const botOpenId = optionalNonEmptyString(cfg.botOpenId);
+  if (!botOpenId) return false;
+  return (
+    mention.openId === botOpenId ||
+    mention.userId === botOpenId ||
+    mention.id?.open_id === botOpenId ||
+    mention.id?.user_id === botOpenId ||
+    mention.id?.union_id === botOpenId
+  );
+}
+
+function mentionTokens(mentions: IncomingMention[]): string[] {
+  const tokens = new Set<string>();
+  for (const mention of mentions) {
+    if (mention.key?.trim()) tokens.add(mention.key.trim());
+    if (mention.name?.trim()) tokens.add(`@${mention.name.trim()}`);
+  }
+  return [...tokens].sort((a, b) => b.length - a.length);
+}
+
+function stripLeadingMentionTokens(text: string, tokens: string[]): string {
+  let cleaned = text.trimStart();
+  for (let i = 0; i < 8; i++) {
+    const next = stripOneLeadingMentionToken(cleaned, tokens);
+    if (next === cleaned) break;
+    cleaned = next.trimStart();
+  }
+  return cleaned.trim();
+}
+
+function stripOneLeadingMentionToken(text: string, tokens: string[]): string {
+  for (const token of tokens) {
+    if (text === token) return '';
+    if (text.startsWith(token) && /\s/u.test(text[token.length] ?? '')) {
+      return text.slice(token.length);
+    }
+  }
+  return text;
 }
 
 function resolveReceiveId(
@@ -161,6 +238,12 @@ function senderForMessage(chatId: string, threadId: string | undefined): string 
   return threadId ? `${chatId}:${threadId}` : chatId;
 }
 
+function objectStringField(value: unknown, key: string): string | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const field = (value as Record<string, unknown>)[key];
+  return typeof field === 'string' && field.trim() ? field : undefined;
+}
+
 export function createFeishuAdapter(
   config: AdapterConfig,
   context: {
@@ -189,6 +272,35 @@ export function createFeishuAdapter(
 
   let channel: lark.LarkChannel | null = null;
   let server: Server | null = null;
+
+  async function resolveChatName(chatId: string): Promise<string | undefined> {
+    const chatApi = (client.im as unknown as {
+      chat?: {
+        get?: (args: { path: { chat_id: string } }) => Promise<unknown>;
+      };
+    }).chat;
+    if (!chatApi?.get) return undefined;
+    try {
+      const response = await chatApi.get({ path: { chat_id: chatId } });
+      const code = (response as { code?: unknown }).code;
+      if (code !== undefined && code !== 0) return undefined;
+      const data = (response as { data?: unknown }).data;
+      const chat = data && typeof data === 'object' ? (data as Record<string, unknown>).chat : undefined;
+      return (
+        objectStringField(data, 'name') ??
+        objectStringField(chat, 'name') ??
+        objectStringField(data, 'chat_name') ??
+        objectStringField(chat, 'chat_name')
+      );
+    } catch (error) {
+      context.log?.(
+        'feishu-chat-name-fetch-failed',
+        { chatId, error: error instanceof Error ? error.message : String(error) },
+        'WARN',
+      );
+      return undefined;
+    }
+  }
 
   async function sendText(message: ChannelMessage): Promise<void> {
     if (!message.text) throw new Error('Feishu adapter requires text');
@@ -229,10 +341,10 @@ export function createFeishuAdapter(
     }
   }
 
-  function handleNormalizedMessage(
+  async function handleNormalizedMessage(
     msg: lark.NormalizedMessage,
     onMessage: OnIncomingMessage,
-  ): void {
+  ): Promise<void> {
     if (
       !shouldAcceptMessage(
         {
@@ -248,15 +360,18 @@ export function createFeishuAdapter(
     }
 
     if (msg.rawContentType !== 'text' && msg.rawContentType !== 'post') return;
-    if (!msg.content.trim()) return;
+    const text = normalizeFeishuIncomingText(msg.content, msg.mentions, cfg, msg.mentionedBot);
+    if (!text) return;
+    const chatName = await resolveChatName(msg.chatId);
 
     void onMessage({
       adapter: 'feishu',
       sender: senderForMessage(msg.chatId, msg.threadId),
-      text: msg.content,
+      text,
       metadata: {
         messageId: msg.messageId,
         chatId: msg.chatId,
+        ...(chatName ? { chatName } : {}),
         chatType: msg.chatType,
         senderId: msg.senderId,
         senderName: msg.senderName,
@@ -300,7 +415,12 @@ export function createFeishuAdapter(
       return;
     }
 
-    const text = parsed.text.trim();
+    const text = normalizeFeishuIncomingText(
+      parsed.text,
+      data.message.mentions,
+      cfg,
+      mentionedBot,
+    );
     if (!text) return;
 
     void onMessage({
@@ -351,7 +471,9 @@ export function createFeishuAdapter(
           ? { wsConfig: { pingTimeout: cfg.wsPingTimeoutSeconds } }
           : {}),
       });
-      channel.on('message', (msg) => handleNormalizedMessage(msg, onMessage));
+      channel.on('message', (msg) => {
+        void handleNormalizedMessage(msg, onMessage);
+      });
       channel.on('error', (error) => {
         context.log?.('feishu-channel-error', { error: error.message, code: error.code }, 'ERROR');
       });

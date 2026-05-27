@@ -1,3 +1,5 @@
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import { getAgentDir, SettingsManager } from '@earendil-works/pi-coding-agent';
 import type { ChannelConfig } from './types.js';
 
@@ -30,28 +32,103 @@ function section(settings: Record<string, unknown>): ChannelConfig {
   return isRecord(value) ? (resolveEnvVars(value) as ChannelConfig) : {};
 }
 
+function readSettingsFile(path: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(readFileSync(path, 'utf-8'));
+    return isRecord(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeSettingsFile(path: string, settings: Record<string, unknown>): void {
+  writeFileSync(path, `${JSON.stringify(settings, null, 2)}\n`);
+}
+
+function discoverLocalSettingsFiles(cwd: string): string[] {
+  const found: string[] = [];
+  const seen = new Set<string>();
+
+  const add = (path: string) => {
+    const resolved = resolve(path);
+    if (seen.has(resolved) || !existsSync(resolved)) return;
+    seen.add(resolved);
+    found.push(resolved);
+  };
+
+  if (process.env.PI_AGENT_HOME) {
+    add(join(process.env.PI_AGENT_HOME, 'settings.json'));
+  }
+
+  let current = resolve(cwd);
+  const upwards: string[] = [];
+  while (true) {
+    upwards.push(join(current, '.pi', 'settings.json'));
+    const parent = dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+
+  for (const path of upwards.reverse()) add(path);
+  return found;
+}
+
+function mergeChannelConfig(base: ChannelConfig, override: ChannelConfig): ChannelConfig {
+  return {
+    adapters: {
+      ...(base.adapters ?? {}),
+      ...(override.adapters ?? {}),
+    },
+    routes: {
+      ...(base.routes ?? {}),
+      ...(override.routes ?? {}),
+    },
+    bridge: {
+      ...(base.bridge ?? {}),
+      ...(override.bridge ?? {}),
+    },
+  };
+}
+
 export function loadChannelConfig(cwd: string): ChannelConfig {
-  const sm = SettingsManager.create(cwd, getAgentDir());
+  const agentDir = getAgentDir();
+  const sm = SettingsManager.create(cwd, agentDir);
   const global = section(sm.getGlobalSettings() as Record<string, unknown>);
   const project = section(sm.getProjectSettings() as Record<string, unknown>);
 
-  const config: ChannelConfig = {
-    adapters: {
-      ...(global.adapters ?? {}),
-      ...(project.adapters ?? {}),
-    },
-    routes: {
-      ...(global.routes ?? {}),
-      ...(project.routes ?? {}),
-    },
-    bridge: {
-      ...(global.bridge ?? {}),
-      ...(project.bridge ?? {}),
-    },
-  };
+  const settingsFiles = discoverLocalSettingsFiles(cwd);
+  const local = settingsFiles.reduce(
+    (merged, path) => mergeChannelConfig(merged, section(readSettingsFile(path))),
+    {} as ChannelConfig,
+  );
+
+  const config = mergeChannelConfig(mergeChannelConfig(global, project), local);
 
   applyEnvOverrides(config);
+  console.debug('[pi-channels] config', {
+    cwd,
+    agentDir,
+    settingsFiles,
+    adapters: Object.keys(config.adapters ?? {}),
+    routes: Object.keys(config.routes ?? {}),
+    bridgeEnabled: Boolean(config.bridge?.enabled),
+  });
   return config;
+}
+
+export function updateLocalChannelConfig(
+  cwd: string,
+  update: (config: ChannelConfig) => ChannelConfig,
+): boolean {
+  const settingsFile = discoverLocalSettingsFiles(cwd).at(-1);
+  if (!settingsFile) return false;
+
+  const settings = readSettingsFile(settingsFile);
+  const current = section(settings);
+  const next = update(current);
+  settings[SETTINGS_KEY] = next;
+  writeSettingsFile(settingsFile, settings);
+  return true;
 }
 
 function applyEnvOverrides(config: ChannelConfig): void {

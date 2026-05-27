@@ -10,6 +10,7 @@ import type {
   IncomingMessage,
   OnIncomingMessage,
   SendResult,
+  ChannelRouteConfig,
 } from './types.js';
 
 export type AdapterFactoryContext = {
@@ -30,7 +31,7 @@ const adapterFactories: Record<string, AdapterFactory> = {
 
 export class ChannelRegistry {
   private adapters = new Map<string, ChannelAdapter>();
-  private routes = new Map<string, { adapter: string; recipient: string }>();
+  private routes = new Map<string, ChannelRouteConfig>();
   private errors: Array<{ adapter: string; error: string }> = [];
   private onIncoming: OnIncomingMessage = () => undefined;
   private log?: (event: string, data?: Record<string, unknown>, level?: string) => void;
@@ -147,12 +148,14 @@ export class ChannelRegistry {
     type: 'adapter' | 'route';
     direction?: AdapterDirection;
     target?: string;
+    label?: string;
   }> {
     const result: Array<{
       name: string;
       type: 'adapter' | 'route';
       direction?: AdapterDirection;
       target?: string;
+      label?: string;
     }> = [];
     for (const [name, adapter] of this.adapters) {
       result.push({ name, type: 'adapter', direction: adapter.direction });
@@ -162,6 +165,7 @@ export class ChannelRegistry {
         name,
         type: 'route',
         target: `${route.adapter} -> ${route.recipient}`,
+        ...(route.name ? { label: route.name } : {}),
       });
     }
     return result;

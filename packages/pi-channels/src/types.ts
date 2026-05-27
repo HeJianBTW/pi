@@ -111,12 +111,23 @@ export type BridgeConfig = {
   maxQueuePerSender?: number;
   maxConcurrent?: number;
   model?: string | null;
+  provider?: string | null;
+  piBin?: string;
   commands?: boolean;
+  persistSessions?: boolean;
+  apiBase?: string;
+};
+
+export type ChannelRouteConfig = {
+  adapter: string;
+  recipient: string;
+  name?: string;
+  capture?: boolean;
 };
 
 export type ChannelConfig = {
   adapters?: Record<string, AdapterConfig>;
-  routes?: Record<string, { adapter: string; recipient: string }>;
+  routes?: Record<string, ChannelRouteConfig>;
   bridge?: BridgeConfig;
 };
 

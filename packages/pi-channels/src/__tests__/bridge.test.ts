@@ -28,6 +28,8 @@ function createChild(stdoutText: string, exitCode = 0) {
 describe('ChatBridge', () => {
   beforeEach(() => {
     mockSpawn.mockReset();
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
   });
 
   test('runs pi prompt and sends reply with original metadata', async () => {
@@ -49,7 +51,7 @@ describe('ChatBridge', () => {
 
     expect(mockSpawn).toHaveBeenCalledWith(
       'pi',
-      ['-p', '--no-session', '--no-extensions', 'ping'],
+      ['-p', '--offline', '--no-session', '--no-extensions', 'ping'],
       expect.objectContaining({ cwd: '/workspace' }),
     );
     expect(registry.send).toHaveBeenCalledWith({
@@ -57,6 +59,95 @@ describe('ChatBridge', () => {
       recipient: 'oc_chat',
       text: 'pong',
       metadata: { messageId: 'om_1', threadId: 'omt_1' },
+    });
+  });
+
+  test('registers the bridge provider when anthropic-compatible env is configured', async () => {
+    vi.stubEnv('ANTHROPIC_BASE_URL', 'https://credits.amaster.ai');
+    vi.stubEnv('ANTHROPIC_API_KEY', 'test-key');
+    vi.stubEnv('ANTHROPIC_MODEL', 'kimi-k2.5');
+    mockSpawn.mockReturnValue(createChild('pong'));
+    const registry = {
+      getAdapter: vi.fn(() => ({ sendTyping: vi.fn(() => Promise.resolve()) })),
+      send: vi.fn(() => Promise.resolve({ ok: true })),
+    };
+    const bridge = new ChatBridge({ enabled: true }, '/workspace', registry as never);
+    bridge.start();
+
+    await bridge.handleMessage({
+      adapter: 'feishu',
+      sender: 'oc_chat',
+      text: 'ping',
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(mockSpawn).toHaveBeenCalledWith(
+      'pi',
+      [
+        '-p',
+        '--offline',
+        '--no-session',
+        '--no-extensions',
+        '-e',
+        expect.stringContaining('bridge-provider.js'),
+        '--provider',
+        'anthropic-compatible',
+        '--model',
+        'kimi-k2.5',
+        'ping',
+      ],
+      expect.objectContaining({ cwd: '/workspace' }),
+    );
+  });
+
+  test('persists channel turns to the local pi-agent session endpoint when available', async () => {
+    vi.stubEnv('DESKTOP_PORT', '18146');
+    vi.stubEnv('PI_AGENT_WORKSPACE', '/workspace');
+    vi.stubEnv('ANTHROPIC_MODEL', 'kimi-k2.5');
+    vi.stubEnv('ANTHROPIC_BASE_URL', 'https://credits.amaster.ai');
+    vi.stubEnv('ANTHROPIC_API_KEY', 'test-key');
+    const fetchMock = vi.fn(async () => new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    mockSpawn.mockReturnValue(createChild('pong'));
+    const registry = {
+      getAdapter: vi.fn(() => ({ sendTyping: vi.fn(() => Promise.resolve()) })),
+      send: vi.fn(() => Promise.resolve({ ok: true })),
+    };
+    const bridge = new ChatBridge({ enabled: true }, '/workspace', registry as never);
+    bridge.start();
+
+    await bridge.handleMessage({
+      adapter: 'feishu',
+      sender: 'oc_chat:thread_1',
+      text: 'ping',
+      metadata: { chatId: 'oc_chat', chatName: '项目群' },
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:18146/internal/channel-sessions/turn',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          'x-pi-agent-internal': 'channel-bridge',
+        }),
+        body: expect.any(String),
+      }),
+    );
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    expect(body).toMatchObject({
+      sessionId: 'oc_chat',
+      conversationId: 'oc_chat',
+      title: '飞书 / 项目群',
+      adapter: 'feishu',
+      recipient: 'oc_chat',
+      userMessage: 'ping',
+      assistantMessage: 'pong',
+      workspaceDir: '/workspace',
+      model: {
+        provider: 'anthropic-compatible',
+        model: 'kimi-k2.5',
+      },
     });
   });
 
