@@ -18,7 +18,9 @@ export default function bridgeProvider(pi: ExtensionAPI): void {
     trimToUndefined(process.env.ANTHROPIC_MODEL),
     trimToUndefined(process.env.ANTHROPIC_FLASH_MODEL),
     trimToUndefined(process.env.MODEL),
-  ].filter((value, index, values): value is string => Boolean(value) && values.indexOf(value) === index);
+  ].filter(
+    (value, index, values): value is string => Boolean(value) && values.indexOf(value) === index,
+  );
 
   if (!anthropicBaseUrl || !anthropicApiKey || modelIds.length === 0) {
     return;

@@ -274,18 +274,21 @@ export function createFeishuAdapter(
   let server: Server | null = null;
 
   async function resolveChatName(chatId: string): Promise<string | undefined> {
-    const chatApi = (client.im as unknown as {
-      chat?: {
-        get?: (args: { path: { chat_id: string } }) => Promise<unknown>;
-      };
-    }).chat;
+    const chatApi = (
+      client.im as unknown as {
+        chat?: {
+          get?: (args: { path: { chat_id: string } }) => Promise<unknown>;
+        };
+      }
+    ).chat;
     if (!chatApi?.get) return undefined;
     try {
       const response = await chatApi.get({ path: { chat_id: chatId } });
       const code = (response as { code?: unknown }).code;
       if (code !== undefined && code !== 0) return undefined;
       const data = (response as { data?: unknown }).data;
-      const chat = data && typeof data === 'object' ? (data as Record<string, unknown>).chat : undefined;
+      const chat =
+        data && typeof data === 'object' ? (data as Record<string, unknown>).chat : undefined;
       return (
         objectStringField(data, 'name') ??
         objectStringField(chat, 'name') ??
@@ -415,12 +418,7 @@ export function createFeishuAdapter(
       return;
     }
 
-    const text = normalizeFeishuIncomingText(
-      parsed.text,
-      data.message.mentions,
-      cfg,
-      mentionedBot,
-    );
+    const text = normalizeFeishuIncomingText(parsed.text, data.message.mentions, cfg, mentionedBot);
     if (!text) return;
 
     void onMessage({

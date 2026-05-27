@@ -269,22 +269,25 @@ async function persistChannelTurn(input: {
 function channelSessionId(message: IncomingMessage): string | undefined {
   const metadata = message.metadata ?? {};
   if (message.adapter === 'feishu') {
-    return trimToNull(typeof metadata.chatId === 'string' ? metadata.chatId : undefined) ??
+    return (
+      trimToNull(typeof metadata.chatId === 'string' ? metadata.chatId : undefined) ??
       trimToNull(message.sender.split(':')[0]) ??
-      undefined;
+      undefined
+    );
   }
   return trimToNull(message.sender.split(':')[0]) ?? undefined;
 }
 
 function channelSessionTitle(message: IncomingMessage, sessionId: string): string {
   const metadata = message.metadata ?? {};
-  const name = trimToNull(
-    typeof metadata.chatName === 'string'
-      ? metadata.chatName
-      : typeof metadata.groupName === 'string'
-        ? metadata.groupName
-        : undefined,
-  ) ?? sessionId;
+  const name =
+    trimToNull(
+      typeof metadata.chatName === 'string'
+        ? metadata.chatName
+        : typeof metadata.groupName === 'string'
+          ? metadata.groupName
+          : undefined,
+    ) ?? sessionId;
   return `${adapterDisplayName(message.adapter)} / ${name}`;
 }
 
@@ -294,7 +297,10 @@ function adapterDisplayName(adapter: string): string {
   return adapter;
 }
 
-function modelPayload(provider: string | null, model: string | null): { provider?: string; model?: string } | undefined {
+function modelPayload(
+  provider: string | null,
+  model: string | null,
+): { provider?: string; model?: string } | undefined {
   const cleanProvider = trimToNull(provider ?? undefined);
   const cleanModel = trimToNull(model ?? undefined);
   if (!cleanProvider && !cleanModel) return undefined;
@@ -396,11 +402,7 @@ function runPrompt(options: {
 }
 
 function resolveDefaultBridgeModel(): string | null {
-  return (
-    trimToNull(process.env.ANTHROPIC_MODEL) ??
-    trimToNull(process.env.MODEL) ??
-    null
-  );
+  return trimToNull(process.env.ANTHROPIC_MODEL) ?? trimToNull(process.env.MODEL) ?? null;
 }
 
 function resolveDefaultBridgeProvider(model: string | null): string | null {

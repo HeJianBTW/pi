@@ -142,7 +142,11 @@ export default function piChannelsExtension(pi: ExtensionAPI): void {
     }) as never,
     async execute(_toolCallId: string, rawParams: unknown) {
       const params = rawParams as NotifyParams;
-      if (params.action === 'list' || params.action === 'list-adapters' || params.action === 'list-routes') {
+      if (
+        params.action === 'list' ||
+        params.action === 'list-adapters' ||
+        params.action === 'list-routes'
+      ) {
         const items = registry.list();
         const filteredItems = items.filter((item) => {
           if (params.action === 'list-adapters') return item.type === 'adapter';
@@ -297,7 +301,9 @@ function autoFillEmptyRouteRecipient(
   }
 }
 
-function displayNameFromIncoming(message: { metadata?: Record<string, unknown> }): string | undefined {
+function displayNameFromIncoming(message: {
+  metadata?: Record<string, unknown>;
+}): string | undefined {
   const metadata = message.metadata ?? {};
   return trimToUndefined(
     typeof metadata.chatName === 'string'
@@ -380,7 +386,8 @@ function normalizeAdapterName(
   }
   return {
     ok: false,
-    error: '@local:channels selects the plugin, not a send target. Run notify with action "list" and use an adapter name or route alias.',
+    error:
+      '@local:channels selects the plugin, not a send target. Run notify with action "list" and use an adapter name or route alias.',
   };
 }
 

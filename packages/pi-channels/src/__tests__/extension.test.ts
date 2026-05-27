@@ -121,7 +121,9 @@ describe('piChannelsExtension', () => {
       action: 'list-adapters',
     })) as { content: Array<{ text: string }> };
 
-    expect(routeResult.content[0]!.text).toContain('ops route -> webhook -> https://example.test/hook');
+    expect(routeResult.content[0]!.text).toContain(
+      'ops route -> webhook -> https://example.test/hook',
+    );
     expect(routeResult.content[0]!.text).not.toContain('webhook adapter');
     expect(adapterResult.content[0]!.text).toContain('webhook adapter');
     expect(adapterResult.content[0]!.text).not.toContain('ops route');
@@ -252,15 +254,17 @@ describe('piChannelsExtension', () => {
 
     expect(updateLocalChannelConfig).toHaveBeenCalled();
     const update = updateLocalChannelConfig.mock.calls.at(-1)?.[1];
-    expect(update?.({
-      adapters: {
-        feishu: { type: 'feishu' },
-      },
-      routes: {
-        ops: { adapter: 'feishu', recipient: '' },
-      },
-      bridge: { enabled: true },
-    })).toMatchObject({
+    expect(
+      update?.({
+        adapters: {
+          feishu: { type: 'feishu' },
+        },
+        routes: {
+          ops: { adapter: 'feishu', recipient: '' },
+        },
+        bridge: { enabled: true },
+      }),
+    ).toMatchObject({
       routes: {
         ops: { adapter: 'feishu', recipient: 'oc_group', capture: false },
       },
@@ -292,16 +296,18 @@ describe('piChannelsExtension', () => {
     });
 
     const update = updateLocalChannelConfig.mock.calls.at(-1)?.[1];
-    expect(update?.({
-      adapters: {
-        feishu: { type: 'feishu' },
-      },
-      routes: {
-        ops: { adapter: 'feishu', recipient: '' },
-        ops2: { adapter: 'feishu', recipient: '', capture: true },
-      },
-      bridge: { enabled: true },
-    })).toMatchObject({
+    expect(
+      update?.({
+        adapters: {
+          feishu: { type: 'feishu' },
+        },
+        routes: {
+          ops: { adapter: 'feishu', recipient: '' },
+          ops2: { adapter: 'feishu', recipient: '', capture: true },
+        },
+        bridge: { enabled: true },
+      }),
+    ).toMatchObject({
       routes: {
         ops: { adapter: 'feishu', recipient: '' },
         ops2: {

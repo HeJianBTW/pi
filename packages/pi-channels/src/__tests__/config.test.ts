@@ -9,7 +9,10 @@ describe('loadChannelConfig', () => {
   let originalEnv: NodeJS.ProcessEnv;
 
   beforeEach(() => {
-    base = join(tmpdir(), `pi-channels-config-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    base = join(
+      tmpdir(),
+      `pi-channels-config-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    );
     originalEnv = { ...process.env };
     process.env.PI_CODING_AGENT_DIR = join(base, 'agent');
     vi.spyOn(console, 'debug').mockImplementation(() => undefined);

@@ -7,10 +7,10 @@ import type {
   ChannelAdapter,
   ChannelConfig,
   ChannelMessage,
+  ChannelRouteConfig,
   IncomingMessage,
   OnIncomingMessage,
   SendResult,
-  ChannelRouteConfig,
 } from './types.js';
 
 export type AdapterFactoryContext = {

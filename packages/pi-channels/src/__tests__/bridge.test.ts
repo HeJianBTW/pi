@@ -106,7 +106,9 @@ describe('ChatBridge', () => {
     vi.stubEnv('ANTHROPIC_MODEL', 'kimi-k2.5');
     vi.stubEnv('ANTHROPIC_BASE_URL', 'https://credits.amaster.ai');
     vi.stubEnv('ANTHROPIC_API_KEY', 'test-key');
-    const fetchMock = vi.fn(async () => new Response('{}', { status: 200 }));
+    const fetchMock = vi.fn(async (_input: string | URL | Request, _init?: RequestInit) => {
+      return new Response('{}', { status: 200 });
+    });
     vi.stubGlobal('fetch', fetchMock);
     mockSpawn.mockReturnValue(createChild('pong'));
     const registry = {
