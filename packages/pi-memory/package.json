@@ -1,8 +1,8 @@
 {
-  "name": "@amaster.ai/pi-teamwork",
+  "name": "@amaster.ai/pi-memory",
   "version": "0.1.2-beta.11",
-  "description": "Pi extension for team collaboration and issue management via Multica",
-  "keywords": ["pi-package", "pi", "extension", "teamwork", "issues", "project-management", "multica"],
+  "description": "Pi extension providing persistent curated memory (MEMORY.md + USER.md) injected into the system prompt as a frozen snapshot.",
+  "keywords": ["pi-package", "pi", "extension", "memory", "persistence"],
   "license": "Apache-2.0",
   "type": "module",
   "sideEffects": false,
@@ -12,6 +12,22 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./store": {
+      "types": "./dist/store.d.ts",
+      "default": "./dist/store.js"
+    },
+    "./extension": {
+      "types": "./dist/extension.d.ts",
+      "default": "./dist/extension.js"
+    },
+    "./tools": {
+      "types": "./dist/tools.d.ts",
+      "default": "./dist/tools.js"
+    },
+    "./threat-patterns": {
+      "types": "./dist/threat-patterns.d.ts",
+      "default": "./dist/threat-patterns.js"
     },
     "./package.json": {
       "default": "./package.json"
@@ -32,7 +48,7 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/TGYD-helige/pi.git",
-    "directory": "packages/pi-teamwork"
+    "directory": "packages/pi-memory"
   },
   "scripts": {
     "build": "tsc -b",
@@ -40,7 +56,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@amaster.ai/pi-shared": "workspace:*"
+    "@amaster.ai/pi-shared": "workspace:*",
+    "proper-lockfile": "^4.1.2"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": ">=0.74.0",
@@ -56,6 +73,7 @@
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "0.74.0",
+    "@types/proper-lockfile": "^4.1.4",
     "typebox": "*",
     "vitest": "^4.0.0"
   }

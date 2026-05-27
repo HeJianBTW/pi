@@ -30,6 +30,16 @@ describe('ChatBridge', () => {
     mockSpawn.mockReset();
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
+    for (const key of [
+      'ANTHROPIC_BASE_URL',
+      'ANTHROPIC_API_KEY',
+      'ANTHROPIC_MODEL',
+      'MODEL',
+      'DESKTOP_PORT',
+      'PI_AGENT_WORKSPACE',
+    ]) {
+      vi.stubEnv(key, '');
+    }
   });
 
   test('runs pi prompt and sends reply with original metadata', async () => {

@@ -1,8 +1,8 @@
 {
-  "name": "@amaster.ai/pi-teamwork",
+  "name": "@amaster.ai/pi-attachments",
   "version": "0.1.2-beta.11",
-  "description": "Pi extension for team collaboration and issue management via Multica",
-  "keywords": ["pi-package", "pi", "extension", "teamwork", "issues", "project-management", "multica"],
+  "description": "Pi extension for attachment processing — classifies, parses, and renders file attachments into LLM-visible prompt context",
+  "keywords": ["pi-package", "pi", "extension", "attachments", "files", "documents"],
   "license": "Apache-2.0",
   "type": "module",
   "sideEffects": false,
@@ -17,46 +17,39 @@
       "default": "./package.json"
     }
   },
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "pi": {
     "extensions": [
       "./dist/index.js"
     ]
   },
-  "files": [
-    "dist",
-    "README.md"
-  ],
   "publishConfig": {
     "access": "public"
   },
   "repository": {
     "type": "git",
     "url": "https://github.com/TGYD-helige/pi.git",
-    "directory": "packages/pi-teamwork"
+    "directory": "packages/pi-attachments"
   },
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc -b --pretty false",
-    "test": "vitest run"
+    "test": "vitest run src"
   },
-  "dependencies": {
-    "@amaster.ai/pi-shared": "workspace:*"
-  },
+  "dependencies": {},
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": ">=0.74.0",
-    "typebox": "*"
+    "@earendil-works/pi-coding-agent": ">=0.74.0"
   },
   "peerDependenciesMeta": {
     "@earendil-works/pi-coding-agent": {
-      "optional": true
-    },
-    "typebox": {
       "optional": true
     }
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "0.74.0",
-    "typebox": "*",
     "vitest": "^4.0.0"
   }
 }
