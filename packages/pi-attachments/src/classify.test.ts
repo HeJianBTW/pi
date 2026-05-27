@@ -1,4 +1,4 @@
-import { mkdtemp, writeFile, mkdir } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -157,10 +157,7 @@ describe('renderAttachmentBlock', () => {
   });
 
   it('renders file without path using just name', async () => {
-    const result = await renderAttachmentBlock(
-      { id: '1', name: 'unknown.bin' },
-      100_000,
-    );
+    const result = await renderAttachmentBlock({ id: '1', name: 'unknown.bin' }, 100_000);
 
     expect(result).toBe('## unknown.bin');
   });
@@ -179,10 +176,7 @@ describe('renderAttachmentBlock', () => {
     const filePath = join(dir, 'long.txt');
     await writeFile(filePath, 'x'.repeat(1000));
 
-    const result = await renderAttachmentBlock(
-      { id: '1', name: 'long.txt', path: filePath },
-      50,
-    );
+    const result = await renderAttachmentBlock({ id: '1', name: 'long.txt', path: filePath }, 50);
 
     expect(result).toContain('[truncated after 50 characters]');
   });
@@ -194,9 +188,9 @@ describe('renderAttachmentContext', () => {
     const filePath = join(dir, 'code.ts');
     await writeFile(filePath, 'export const y = 2;\n');
 
-    const result = await renderAttachmentContext(
-      [{ id: '1', name: 'code.ts', path: filePath, mimeType: 'text/typescript' }],
-    );
+    const result = await renderAttachmentContext([
+      { id: '1', name: 'code.ts', path: filePath, mimeType: 'text/typescript' },
+    ]);
 
     expect(result).toContain('# Files mentioned by the user:');
     expect(result).toContain('## code.ts');
@@ -216,9 +210,9 @@ describe('renderAttachmentContext', () => {
   });
 
   it('skips image attachments in the file listing', async () => {
-    const result = await renderAttachmentContext(
-      [{ id: '1', name: 'photo.png', path: '/tmp/photo.png', mimeType: 'image/png' }],
-    );
+    const result = await renderAttachmentContext([
+      { id: '1', name: 'photo.png', path: '/tmp/photo.png', mimeType: 'image/png' },
+    ]);
 
     expect(result).toBeUndefined();
   });

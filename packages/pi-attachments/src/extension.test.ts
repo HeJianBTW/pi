@@ -12,11 +12,17 @@ function extractAtMentions(content: string): string[] {
   const seen = new Set<string>();
   for (const match of content.matchAll(QUOTED_AT_RE)) {
     const value = match[2]!;
-    if (!seen.has(value)) { seen.add(value); mentions.push(value); }
+    if (!seen.has(value)) {
+      seen.add(value);
+      mentions.push(value);
+    }
   }
   for (const match of content.matchAll(REGULAR_AT_RE)) {
     const value = match[2]!;
-    if (!seen.has(value) && !value.startsWith('http')) { seen.add(value); mentions.push(value); }
+    if (!seen.has(value) && !value.startsWith('http')) {
+      seen.add(value);
+      mentions.push(value);
+    }
   }
   return mentions;
 }
