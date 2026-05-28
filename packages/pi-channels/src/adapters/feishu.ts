@@ -50,6 +50,12 @@ type ParsedTextContent = {
   text: string;
 };
 
+type FeishuApiResponse = {
+  code?: number;
+  msg?: string;
+  data?: unknown;
+};
+
 type IncomingMention = {
   key?: string;
   name?: string;
@@ -244,6 +250,11 @@ function objectStringField(value: unknown, key: string): string | undefined {
   return typeof field === 'string' && field.trim() ? field : undefined;
 }
 
+function ackReactionEmoji(cfg: FeishuAdapterConfig): string | null {
+  if (cfg.ackReactionEmoji === false) return null;
+  return optionalNonEmptyString(cfg.ackReactionEmoji) ?? 'OK';
+}
+
 export function createFeishuAdapter(
   config: AdapterConfig,
   context: {
@@ -302,6 +313,36 @@ export function createFeishuAdapter(
         'WARN',
       );
       return undefined;
+    }
+  }
+
+  async function addAckReaction(messageId: string): Promise<void> {
+    const emojiType = ackReactionEmoji(cfg);
+    if (!emojiType) return;
+    try {
+      const response = (await client.request({
+        url: `/open-apis/im/v1/messages/${encodeURIComponent(messageId)}/reactions`,
+        method: 'POST',
+        data: {
+          reaction_type: {
+            emoji_type: emojiType,
+          },
+        },
+      })) as { data?: FeishuApiResponse };
+      const body = response.data;
+      if (body?.code !== undefined && body.code !== 0) {
+        context.log?.(
+          'feishu-ack-reaction-failed',
+          { messageId, emojiType, code: body.code, msg: body.msg },
+          'WARN',
+        );
+      }
+    } catch (error) {
+      context.log?.(
+        'feishu-ack-reaction-failed',
+        { messageId, emojiType, error: error instanceof Error ? error.message : String(error) },
+        'WARN',
+      );
     }
   }
 
@@ -365,6 +406,7 @@ export function createFeishuAdapter(
     if (msg.rawContentType !== 'text' && msg.rawContentType !== 'post') return;
     const text = normalizeFeishuIncomingText(msg.content, msg.mentions, cfg, msg.mentionedBot);
     if (!text) return;
+    void addAckReaction(msg.messageId);
     const chatName = await resolveChatName(msg.chatId);
 
     void onMessage({
@@ -420,6 +462,8 @@ export function createFeishuAdapter(
 
     const text = normalizeFeishuIncomingText(parsed.text, data.message.mentions, cfg, mentionedBot);
     if (!text) return;
+
+    void addAckReaction(data.message.message_id);
 
     void onMessage({
       adapter: 'feishu',

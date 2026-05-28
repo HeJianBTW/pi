@@ -33,6 +33,7 @@ const DEFAULTS: Required<BridgeConfig> = {
   commands: true,
   persistSessions: true,
   apiBase: '',
+  env: {},
 };
 
 let idCounter = 0;
@@ -178,11 +179,12 @@ export class ChatBridge {
       provider: bridgeProvider,
       piBin: this.config.piBin,
       signal: ac.signal,
+      env: this.config.env,
     });
 
     const reply = result.ok
       ? result.response
-      : result.response || `Error: ${result.error ?? 'unknown'}`;
+      : result.response || formatBridgeErrorReply(result.error);
     await persistChannelTurn({
       apiBase: this.config.apiBase,
       enabled: this.config.persistSessions,
@@ -327,6 +329,7 @@ function runPrompt(options: {
   model: string | null;
   provider: string | null;
   piBin: string;
+  env?: Record<string, string>;
   signal?: AbortSignal;
 }): Promise<BridgeRunResult> {
   return new Promise((resolve) => {
@@ -358,7 +361,7 @@ function runPrompt(options: {
       child = spawn(command, args, {
         cwd: options.cwd,
         stdio: ['ignore', 'pipe', 'pipe'],
-        env: { ...process.env },
+        env: { ...process.env, ...(options.env ?? {}) },
         timeout: options.timeoutMs,
       });
     } catch (error) {
@@ -399,6 +402,19 @@ function runPrompt(options: {
       resolve({ ok: false, response: '', error: error.message });
     });
   });
+}
+
+function formatBridgeErrorReply(error: string | undefined): string {
+  const message = error?.trim();
+  if (!message) return 'Error: unknown';
+  if (
+    /\b401\b/.test(message) ||
+    /invalid x-api-key/i.test(message) ||
+    /authentication_error/i.test(message)
+  ) {
+    return '模型服务认证失败，请检查 API Key 后点击“更新配置”或重启服务。';
+  }
+  return `Error: ${message}`;
 }
 
 function resolveDefaultBridgeModel(): string | null {

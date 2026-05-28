@@ -10,7 +10,7 @@
  * - @"/path with spaces/file.pdf" — quoted file reference
  * - @file.ts#L10-20 — line range (parsed but range applied by LLM tools)
  */
-import { readdir, readFile, stat } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import type { ExtensionAPI, InputEventResult } from '@earendil-works/pi-coding-agent';
 import { type AttachmentMeta, classifyAttachment, renderAttachmentContext } from './classify.js';
@@ -41,7 +41,6 @@ export default function piAttachmentsExtension(pi: ExtensionAPI): void {
       try {
         const stats = await stat(absolutePath);
         if (stats.isDirectory()) {
-          const entries = await readdir(absolutePath);
           attachments.push({
             id: absolutePath,
             name: path.basename(absolutePath),
