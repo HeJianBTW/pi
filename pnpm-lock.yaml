@@ -37,6 +37,10 @@ importers:
         version: 3.10.1
 
   packages/pi-attachments:
+    dependencies:
+      '@amaster.ai/pi-shared':
+        specifier: workspace:*
+        version: link:../shared
     devDependencies:
       '@earendil-works/pi-coding-agent':
         specifier: 0.74.0
