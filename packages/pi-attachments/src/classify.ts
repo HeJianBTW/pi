@@ -1,7 +1,9 @@
 /**
  * Attachment classification and prompt rendering utilities.
  */
-import { readFile } from 'node:fs/promises';
+import type { Dirent } from 'node:fs';
+import { readdir, readFile, stat } from 'node:fs/promises';
+import path from 'node:path';
 
 export type AttachmentKind = 'image' | 'text' | 'doc' | 'binary';
 
@@ -166,6 +168,10 @@ export async function renderAttachmentBlock(
     return `## ${name}${fsPath ? `: ${fsPath}` : ''}`;
   }
 
+  if (mimeType === 'inode/directory' && fsPath) {
+    return await renderDirectoryBlock(name, fsPath, maxTextChars);
+  }
+
   if (kind === 'text' && fsPath) {
     try {
       const buffer = await readFile(fsPath, 'utf8');
@@ -184,6 +190,77 @@ export async function renderAttachmentBlock(
   }
 
   return `## ${name}${fsPath ? `: ${fsPath}` : url ? `: ${url}` : ''}`;
+}
+
+const DIRECTORY_LISTING_LIMIT = 200;
+const DIRECTORY_IGNORE = new Set([
+  '.git',
+  'node_modules',
+  '.DS_Store',
+  '.next',
+  '.turbo',
+  'dist',
+  'build',
+  '.cache',
+]);
+
+async function renderDirectoryBlock(
+  name: string,
+  fsPath: string,
+  maxTextChars: number,
+): Promise<string> {
+  const heading = `## ${name}: ${fsPath} (directory)`;
+  let entries: Dirent[];
+  try {
+    entries = await readdir(fsPath, { withFileTypes: true });
+  } catch (error) {
+    return `${heading}\n[Failed to list directory: ${(error as Error).message}]`;
+  }
+
+  const filtered = entries
+    .filter((e) => !DIRECTORY_IGNORE.has(e.name))
+    .sort((a, b) => {
+      const ad = a.isDirectory() ? 0 : 1;
+      const bd = b.isDirectory() ? 0 : 1;
+      if (ad !== bd) return ad - bd;
+      return a.name.localeCompare(b.name);
+    });
+
+  const truncatedNote =
+    filtered.length > DIRECTORY_LISTING_LIMIT
+      ? `\n[Listing truncated: showing ${DIRECTORY_LISTING_LIMIT} of ${filtered.length} entries]`
+      : '';
+  const slice = filtered.slice(0, DIRECTORY_LISTING_LIMIT);
+
+  const lines: string[] = [];
+  for (const entry of slice) {
+    if (entry.isDirectory()) {
+      lines.push(`${entry.name}/`);
+      continue;
+    }
+    if (entry.isSymbolicLink()) {
+      lines.push(`${entry.name}@`);
+      continue;
+    }
+    let size: number | undefined;
+    try {
+      const s = await stat(path.join(fsPath, entry.name));
+      size = s.size;
+    } catch {
+      // ignore
+    }
+    lines.push(size !== undefined ? `${entry.name} (${formatBytes(size)})` : entry.name);
+  }
+
+  const body = truncateText(lines.join('\n'), maxTextChars);
+  return `${heading}\n\`\`\`\n${body}\n\`\`\`${truncatedNote}`;
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)}MB`;
+  return `${(bytes / 1024 / 1024 / 1024).toFixed(1)}GB`;
 }
 
 export async function renderAttachmentContext(
