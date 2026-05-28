@@ -125,17 +125,63 @@ export class ChannelRegistry {
   async send(message: ChannelMessage): Promise<SendResult> {
     const resolved = this.resolve(message.adapter, message.recipient);
     const adapter = this.adapters.get(resolved.adapter);
-    if (!adapter) return { ok: false, error: `No adapter "${resolved.adapter}"` };
-    if (adapter.direction === 'incoming') {
-      return { ok: false, error: `Adapter "${resolved.adapter}" is incoming-only` };
+    if (!adapter) {
+      const error = `No adapter "${resolved.adapter}"`;
+      this.log?.(
+        'message_send_failed',
+        { adapter: resolved.adapter, recipient: resolved.recipient, error },
+        'ERROR',
+      );
+      return { ok: false, error };
     }
-    if (!adapter.send) return { ok: false, error: `Adapter "${resolved.adapter}" cannot send` };
+    if (adapter.direction === 'incoming') {
+      const error = `Adapter "${resolved.adapter}" is incoming-only`;
+      this.log?.(
+        'message_send_failed',
+        { adapter: resolved.adapter, recipient: resolved.recipient, error },
+        'ERROR',
+      );
+      return { ok: false, error };
+    }
+    if (!adapter.send) {
+      const error = `Adapter "${resolved.adapter}" cannot send`;
+      this.log?.(
+        'message_send_failed',
+        { adapter: resolved.adapter, recipient: resolved.recipient, error },
+        'ERROR',
+      );
+      return { ok: false, error };
+    }
 
     try {
+      this.log?.('message_send_start', {
+        adapter: resolved.adapter,
+        recipient: resolved.recipient,
+        source: message.source,
+        text: message.text,
+      });
       await adapter.send({ ...message, adapter: resolved.adapter, recipient: resolved.recipient });
+      this.log?.('message_send_ok', {
+        adapter: resolved.adapter,
+        recipient: resolved.recipient,
+        source: message.source,
+        text: message.text,
+      });
       return { ok: true };
     } catch (error) {
-      return { ok: false, error: errorMessage(error) };
+      const messageError = errorMessage(error);
+      this.log?.(
+        'message_send_failed',
+        {
+          adapter: resolved.adapter,
+          recipient: resolved.recipient,
+          source: message.source,
+          text: message.text,
+          error: messageError,
+        },
+        'ERROR',
+      );
+      return { ok: false, error: messageError };
     }
   }
 

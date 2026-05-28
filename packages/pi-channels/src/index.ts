@@ -28,6 +28,9 @@ export default function piChannelsExtension(pi: ExtensionAPI): void {
   const registry = new ChannelRegistry();
   let bridge: ChatBridge | null = null;
   let sessionCwd = process.cwd();
+  let currentCtx: ExtensionContext | null = null;
+  let configFingerprint = '';
+  let configReloading = false;
 
   const log = (event: string, data?: Record<string, unknown>, level = 'INFO') => {
     if (level === 'ERROR') console.error('[pi-channels]', event, data ?? {});
@@ -41,32 +44,57 @@ export default function piChannelsExtension(pi: ExtensionAPI): void {
     if (bridge?.isActive()) await bridge.handleMessage(message);
   });
 
-  pi.on('session_start', async (_event: unknown, ctx: ExtensionContext) => {
-    sessionCwd = ctx.cwd;
-    const config = loadChannelConfig(ctx.cwd);
-    await registry.loadConfig(config, ctx.cwd);
-    log('session_start', {
-      cwd: ctx.cwd,
-      adapters: Object.keys(config.adapters ?? {}),
-      routes: Object.keys(config.routes ?? {}),
-      registry: registry.list(),
-    });
-    await registry.startListening();
+  async function applyChannelConfig(
+    ctx: ExtensionContext,
+    reason: string,
+    force = false,
+  ): Promise<Array<{ adapter: string; error: string }>> {
+    if (configReloading) return registry.getErrors();
+    configReloading = true;
+    try {
+      sessionCwd = ctx.cwd;
+      const config = loadChannelConfig(ctx.cwd);
+      const nextFingerprint = JSON.stringify(config);
+      if (!force && nextFingerprint === configFingerprint) return registry.getErrors();
+      configFingerprint = nextFingerprint;
 
-    bridge = new ChatBridge(config.bridge, ctx.cwd, registry);
-    if (config.bridge?.enabled) bridge.start();
+      bridge?.stop();
+      bridge = null;
+      await registry.loadConfig(config, ctx.cwd);
+      log(reason === 'session_start' ? 'session_start' : 'config_reload', {
+        reason,
+        cwd: ctx.cwd,
+        adapters: Object.keys(config.adapters ?? {}),
+        routes: Object.keys(config.routes ?? {}),
+        registry: registry.list(),
+      });
+      await registry.startListening();
 
-    const errors = registry.getErrors();
-    for (const error of errors) {
-      ctx.ui.notify(`pi-channels: ${error.adapter}: ${error.error}`, 'warning');
+      bridge = new ChatBridge(config.bridge, ctx.cwd, registry);
+      if (config.bridge?.enabled) bridge.start();
+
+      const errors = registry.getErrors();
+      for (const error of errors) {
+        ctx.ui.notify(`pi-channels: ${error.adapter}: ${error.error}`, 'warning');
+      }
+      ctx.ui.setStatus?.(
+        'pi-channels',
+        `channels: ${registry.list().filter((item) => item.type === 'adapter').length}`,
+      );
+      return errors;
+    } finally {
+      configReloading = false;
     }
-    ctx.ui.setStatus?.(
-      'pi-channels',
-      `channels: ${registry.list().filter((item) => item.type === 'adapter').length}`,
-    );
+  }
+
+  pi.on('session_start', async (_event: unknown, ctx: ExtensionContext) => {
+    currentCtx = ctx;
+    sessionCwd = ctx.cwd;
+    await applyChannelConfig(ctx, 'session_start', true);
   });
 
   pi.on('session_shutdown', async (_event: unknown, ctx: ExtensionContext) => {
+    currentCtx = null;
     bridge?.stop();
     bridge = null;
     await registry.stopAll();
@@ -74,9 +102,14 @@ export default function piChannelsExtension(pi: ExtensionAPI): void {
   });
 
   pi.registerCommand('channel', {
-    description: 'Manage pi channels: /channel [list|bridge on|bridge off|bridge status]',
+    description: 'Manage pi channels: /channel [list|reload|bridge on|bridge off|bridge status]',
     handler: async (args: string | undefined, ctx: ExtensionContext) => {
       const tokens = (args ?? '').trim().split(/\s+/).filter(Boolean);
+      if (tokens[0] === 'reload') {
+        await applyChannelConfig(ctx, 'command', true);
+        ctx.ui.notify('pi-channels config reloaded.', 'info');
+        return;
+      }
       if (tokens[0] === 'bridge') {
         if (!bridge) {
           ctx.ui.notify('pi-channels bridge is not initialized.', 'warning');
@@ -243,6 +276,36 @@ export default function piChannelsExtension(pi: ExtensionAPI): void {
   pi.events.on('channel:list', (raw: unknown) => {
     const data = raw as { callback?: (items: ReturnType<ChannelRegistry['list']>) => void };
     data.callback?.(registry.list());
+  });
+
+  pi.events.on('channel:reload', (raw: unknown) => {
+    const data = raw as {
+      reason?: string;
+      force?: boolean;
+      callback?: (result: { ok: boolean; error?: string }) => void;
+    };
+    const ctx = currentCtx;
+    if (!ctx) {
+      data.callback?.({ ok: false, error: 'pi-channels session is not active.' });
+      return;
+    }
+    void applyChannelConfig(ctx, data.reason ?? 'event', data.force !== false)
+      .then((errors) =>
+        data.callback?.(
+          errors.length > 0
+            ? {
+                ok: false,
+                error: errors.map((item) => `${item.adapter}: ${item.error}`).join('; '),
+              }
+            : { ok: true },
+        ),
+      )
+      .catch((error) => {
+        data.callback?.({
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
   });
 }
 
