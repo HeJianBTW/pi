@@ -72,6 +72,7 @@ export type FeishuAdapterConfig = AdapterConfig & {
   respondToMentionsOnly?: boolean;
   respondToMentionAll?: boolean;
   replyInThread?: boolean;
+  ackReactionEmoji?: string | false;
   allowedChatIds?: string[];
   allowedSenderIds?: string[];
   dmMode?: 'open' | 'allowlist' | 'pair' | 'disabled';
@@ -116,6 +117,7 @@ export type BridgeConfig = {
   commands?: boolean;
   persistSessions?: boolean;
   apiBase?: string;
+  env?: Record<string, string>;
 };
 
 export type ChannelRouteConfig = {

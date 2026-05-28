@@ -81,6 +81,8 @@ describe('piChannelsExtension', () => {
     mockPi.events.on.mockClear();
     mockPi.registerTool.mockClear();
     mockPi.registerCommand.mockClear();
+    vi.mocked(configModule.loadChannelConfig).mockClear();
+    vi.mocked(configModule.updateLocalChannelConfig).mockClear();
     vi.unstubAllGlobals();
   });
 
@@ -92,6 +94,7 @@ describe('piChannelsExtension', () => {
     expect(events.has('channel:send')).toBe(true);
     expect(events.has('channel:register')).toBe(true);
     expect(events.has('channel:list')).toBe(true);
+    expect(events.has('channel:reload')).toBe(true);
     expect(commands.has('channel')).toBe(true);
     expect(tools.has('notify')).toBe(true);
   });
@@ -127,6 +130,32 @@ describe('piChannelsExtension', () => {
     expect(routeResult.content[0]!.text).not.toContain('webhook adapter');
     expect(adapterResult.content[0]!.text).toContain('webhook adapter');
     expect(adapterResult.content[0]!.text).not.toContain('ops route');
+  });
+
+  test('channel:reload reloads config for the active session', async () => {
+    const loadChannelConfig = vi.mocked(configModule.loadChannelConfig);
+
+    piChannelsExtension(mockPi as never);
+    await handlers.get('session_start')?.({}, mockCtx());
+    const callback = vi.fn();
+    events.get('channel:reload')?.({ callback });
+
+    await vi.waitFor(() => {
+      expect(callback).toHaveBeenCalledWith({ ok: true });
+    });
+    expect(loadChannelConfig).toHaveBeenCalledTimes(2);
+  });
+
+  test('channel:reload reports when no session is active', async () => {
+    piChannelsExtension(mockPi as never);
+    const callback = vi.fn();
+
+    events.get('channel:reload')?.({ callback });
+
+    expect(callback).toHaveBeenCalledWith({
+      ok: false,
+      error: 'pi-channels session is not active.',
+    });
   });
 
   test('notify send routes through webhook aliases', async () => {

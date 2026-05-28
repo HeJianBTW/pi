@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, test, vi } from 'vitest';
 const mockCreateMessage = vi.fn();
 const mockReplyMessage = vi.fn();
 const mockChatGet = vi.fn();
+const mockRequest = vi.fn();
 const mockChannelOn = vi.fn();
 const mockChannelConnect = vi.fn();
 const mockChannelDisconnect = vi.fn();
@@ -34,6 +35,7 @@ vi.mock('@larksuiteoapi/node-sdk', () => ({
         get: mockChatGet,
       },
     };
+    request = mockRequest;
   },
   EventDispatcher: class MockEventDispatcher {
     register = vi.fn(() => this);
@@ -58,6 +60,7 @@ describe('Feishu adapter', () => {
     mockCreateMessage.mockReset();
     mockReplyMessage.mockReset();
     mockChatGet.mockReset();
+    mockRequest.mockReset();
     mockChannelOn.mockReset();
     mockChannelConnect.mockReset();
     mockChannelDisconnect.mockReset();
@@ -65,6 +68,7 @@ describe('Feishu adapter', () => {
     mockCreateMessage.mockResolvedValue({ code: 0, data: { message_id: 'om_sent' } });
     mockReplyMessage.mockResolvedValue({ code: 0, data: { message_id: 'om_reply' } });
     mockChatGet.mockResolvedValue({ code: 0, data: { chat: { name: '测试群' } } });
+    mockRequest.mockResolvedValue({ data: { code: 0 } });
   });
 
   test('sends a text message with official SDK Client.im.message.create', async () => {
@@ -199,6 +203,46 @@ describe('Feishu adapter', () => {
         }),
       });
     });
+    expect(mockRequest).toHaveBeenCalledWith({
+      url: '/open-apis/im/v1/messages/om_1/reactions',
+      method: 'POST',
+      data: {
+        reaction_type: {
+          emoji_type: 'OK',
+        },
+      },
+    });
+  });
+
+  test('supports disabling the websocket acknowledgement reaction', async () => {
+    const adapter = createFeishuAdapter({
+      type: 'feishu',
+      appId: 'cli_xxx',
+      appSecret: 'secret',
+      eventMode: 'websocket',
+      ackReactionEmoji: false,
+    });
+    const onMessage = vi.fn();
+
+    await adapter.start?.(onMessage);
+    channelHandlers.get('message')?.({
+      messageId: 'om_1',
+      chatId: 'oc_group',
+      chatType: 'group',
+      senderId: 'ou_user',
+      content: 'ping',
+      rawContentType: 'text',
+      resources: [],
+      mentions: [],
+      mentionAll: false,
+      mentionedBot: true,
+      createTime: 1,
+    });
+
+    await vi.waitFor(() => {
+      expect(onMessage).toHaveBeenCalled();
+    });
+    expect(mockRequest).not.toHaveBeenCalled();
   });
 
   test('strips a leading bot mention before forwarding websocket messages', async () => {
@@ -268,5 +312,6 @@ describe('Feishu adapter', () => {
     });
 
     expect(onMessage).not.toHaveBeenCalled();
+    expect(mockRequest).not.toHaveBeenCalled();
   });
 });
