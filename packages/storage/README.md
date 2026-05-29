@@ -53,4 +53,4 @@ const storage = createRuntimeStorage({
 
 ## Public API Policy
 
-Types and contracts live in `@amaster.ai/pi-types` and are re-exported from the root storage entry point. Concrete adapters are exposed through explicit subpath entry points so applications can depend on the smallest stable surface they need.
+Types and contracts live in `@amaster.ai/pi-shared` and are re-exported from the root storage entry point. Concrete adapters are exposed through explicit subpath entry points so applications can depend on the smallest stable surface they need.
