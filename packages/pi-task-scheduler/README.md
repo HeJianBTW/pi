@@ -1,5 +1,7 @@
 # @amaster.ai/pi-task-scheduler
 
+![pi-task-scheduler preview](https://raw.githubusercontent.com/TGYD-helige/pi/master/packages/pi-task-scheduler/preview.png)
+
 Scheduled task domain types, execution scheduler, and pi agent extension.
 
 The package owns schedule parsing, task lifecycle state, process-local timers,

@@ -24,9 +24,11 @@
   "files": [
     "dist",
     "examples",
+    "preview.png",
     "README.md"
   ],
   "pi": {
+    "image": "https://raw.githubusercontent.com/TGYD-helige/pi/master/packages/pi-security/preview.png",
     "extensions": [
       "./dist/index.js"
     ]

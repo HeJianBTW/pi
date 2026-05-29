@@ -21,9 +21,11 @@
     "dist",
     "bin",
     "scripts",
+    "preview.png",
     "README.md"
   ],
   "pi": {
+    "image": "https://raw.githubusercontent.com/TGYD-helige/pi/master/packages/pi-computer-use/preview.png",
     "extensions": [
       "./dist/index.js"
     ]

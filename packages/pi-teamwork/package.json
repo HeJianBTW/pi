@@ -18,12 +18,14 @@
     }
   },
   "pi": {
+    "image": "https://raw.githubusercontent.com/TGYD-helige/pi/master/packages/pi-teamwork/preview.png",
     "extensions": [
       "./dist/index.js"
     ]
   },
   "files": [
     "dist",
+    "preview.png",
     "README.md"
   ],
   "publishConfig": {

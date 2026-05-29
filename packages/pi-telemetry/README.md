@@ -1,5 +1,7 @@
 # @amaster.ai/pi-telemetry
 
+![pi-telemetry preview](https://raw.githubusercontent.com/TGYD-helige/pi/master/packages/pi-telemetry/preview.png)
+
 Runtime telemetry contracts and exporters for pi.
 
 The root package exposes stable exporter contracts plus no-op and composite exporters. Provider-specific implementations live behind explicit subpath entry points so applications can depend on the smallest public surface they need.

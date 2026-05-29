@@ -1,5 +1,7 @@
 # Pi
 
+![Pi packages preview](./preview.png)
+
 Shared TypeScript packages for Pi runtime applications.
 
 This repository contains the open-source runtime contracts, adapters, and
@@ -29,6 +31,26 @@ Extension packages each register Pi runtime extensions via their `./extension`
 subpath entry point and are loaded on demand.
 
 Every package is ESM-only and published under the `@amaster.ai` npm scope.
+
+## Extension Previews
+
+<table>
+  <tr>
+    <td><strong>@amaster.ai/pi-attachments</strong><br><img src="./packages/pi-attachments/preview.png" alt="pi-attachments preview" width="260"></td>
+    <td><strong>@amaster.ai/pi-telemetry</strong><br><img src="./packages/pi-telemetry/preview.png" alt="pi-telemetry preview" width="260"></td>
+    <td><strong>@amaster.ai/pi-task-scheduler</strong><br><img src="./packages/pi-task-scheduler/preview.png" alt="pi-task-scheduler preview" width="260"></td>
+  </tr>
+  <tr>
+    <td><strong>@amaster.ai/pi-browser-use</strong><br><img src="./packages/pi-browser-use/preview.png" alt="pi-browser-use preview" width="260"></td>
+    <td><strong>@amaster.ai/pi-computer-use</strong><br><img src="./packages/pi-computer-use/preview.png" alt="pi-computer-use preview" width="260"></td>
+    <td><strong>@amaster.ai/pi-channels</strong><br><img src="./packages/pi-channels/preview.png" alt="pi-channels preview" width="260"></td>
+  </tr>
+  <tr>
+    <td><strong>@amaster.ai/pi-memory</strong><br><img src="./packages/pi-memory/preview.png" alt="pi-memory preview" width="260"></td>
+    <td><strong>@amaster.ai/pi-security</strong><br><img src="./packages/pi-security/preview.png" alt="pi-security preview" width="260"></td>
+    <td><strong>@amaster.ai/pi-teamwork</strong><br><img src="./packages/pi-teamwork/preview.png" alt="pi-teamwork preview" width="260"></td>
+  </tr>
+</table>
 
 ## Requirements
 

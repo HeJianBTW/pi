@@ -1,5 +1,7 @@
 # @amaster.ai/pi-memory
 
+![pi-memory preview](https://raw.githubusercontent.com/TGYD-helige/pi/master/packages/pi-memory/preview.png)
+
 Persistent curated memory for pi agents — `MEMORY.md` (the agent's own notes) and `USER.md` (what the agent knows about the user). Both are loaded from disk at session start, **frozen**, and injected into the system prompt for the entire session. Mid-session writes are durable on disk but do **not** mutate the system prompt — this preserves prefix-cache stability.
 
 Modeled after hermes' default `MemoryStore` mechanism (no provider/manager abstraction).
