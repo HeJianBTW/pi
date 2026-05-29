@@ -1,5 +1,7 @@
 # @amaster.ai/pi-attachments
 
+![pi-attachments preview](https://raw.githubusercontent.com/TGYD-helige/pi/master/packages/pi-attachments/preview.png)
+
 Pi extension that intercepts user input, resolves `@`-references to local resources, and injects their content into the prompt before the model sees it.
 
 Hooks the `input` event of `@earendil-works/pi-coding-agent`. When a recognized mention appears in the user message, the original mention is stripped and replaced with structured context (skill block, attachment listing, or `<system-reminder>`). Image attachments are passed through as multimodal `ImageContent`.

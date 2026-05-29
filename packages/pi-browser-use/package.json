@@ -22,9 +22,11 @@
   },
   "files": [
     "dist",
+    "preview.png",
     "README.md"
   ],
   "pi": {
+    "image": "https://raw.githubusercontent.com/TGYD-helige/pi/master/packages/pi-browser-use/preview.png",
     "extensions": [
       "./dist/index.js"
     ]

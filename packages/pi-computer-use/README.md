@@ -1,5 +1,7 @@
 # @amaster.ai/pi-computer-use
 
+![pi-computer-use preview](https://raw.githubusercontent.com/TGYD-helige/pi/master/packages/pi-computer-use/preview.png)
+
 pi-coding-agent extension that wraps [cua-driver-rs](https://github.com/trycua/cua/), exposing desktop automation tools with a `computer_use_` prefix.
 
 ## Features

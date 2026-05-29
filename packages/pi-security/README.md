@@ -1,5 +1,7 @@
 # Pi Security
 
+![pi-security preview](https://raw.githubusercontent.com/TGYD-helige/pi/master/packages/pi-security/preview.png)
+
 `@amaster.ai/pi-security` provides a sandbox-aware security policy engine and a Pi extension entry point.
 
 The core engine classifies tool calls into resources (files, shell commands, network access), assesses risk, and applies profile rules to decide whether a call is allowed, denied, or requires human approval. Profiles are built from two orthogonal axes — **sandbox** (what tools are exposed) and **approval** (when to ask the user) — inspired by Codex.

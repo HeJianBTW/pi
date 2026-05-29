@@ -35,9 +35,11 @@
   },
   "files": [
     "dist",
+    "preview.png",
     "README.md"
   ],
   "pi": {
+    "image": "https://raw.githubusercontent.com/TGYD-helige/pi/master/packages/pi-telemetry/preview.png",
     "extensions": [
       "./dist/index.js"
     ]

@@ -1,5 +1,7 @@
 # @amaster.ai/pi-teamwork
 
+![pi-teamwork preview](https://raw.githubusercontent.com/TGYD-helige/pi/master/packages/pi-teamwork/preview.png)
+
 Pi extension for team collaboration and project management. Provides LLM-callable tools to interact with issue trackers and project management systems.
 
 ## Supported Providers

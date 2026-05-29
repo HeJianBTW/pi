@@ -1,5 +1,7 @@
 # @amaster.ai/pi-browser-use
 
+![pi-browser-use preview](https://raw.githubusercontent.com/TGYD-helige/pi/master/packages/pi-browser-use/preview.png)
+
 pi-coding-agent extension that wraps [chrome-devtools-mcp](https://github.com/ChromeDevTools/chrome-devtools-mcp), exposing all browser automation tools with a unified `browser_` prefix.
 
 ## Features

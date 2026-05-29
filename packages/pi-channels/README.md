@@ -1,5 +1,7 @@
 # @amaster.ai/pi-channels
 
+![pi-channels preview](https://raw.githubusercontent.com/TGYD-helige/pi/master/packages/pi-channels/preview.png)
+
 Pi extension for native messaging channels.
 
 This package follows the same extension shape as the open-source `@e9n/pi-channels`
