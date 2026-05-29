@@ -91,7 +91,6 @@ Rules are evaluated in priority order (descending); the first match wins.
 ```ts
 type SecurityRule = {
   id: string;
-  enabled?: boolean;
   priority?: number;                  // default 300 for user rules
   tools?: string[];                   // tool name patterns ('*', 'mcp_*', 'bash')
   sources?: ToolSource[];             // 'builtin' | 'mcp' | 'runtime'

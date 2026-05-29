@@ -41,7 +41,6 @@ export type RiskAssessment = {
 
 export type SecurityRule = {
   id: string;
-  enabled?: boolean;
   priority?: number;
   tools?: string[];
   sources?: ToolSource[];
@@ -579,18 +578,13 @@ function resolveSecurityProfile(
 }
 
 function normalizeConfiguredRules(rules: SecurityRule[] | undefined): SecurityRule[] {
-  return (rules ?? [])
-    .filter((rule) => rule.enabled !== false)
-    .map((rule) => ({
-      ...rule,
-      priority: rule.priority ?? 300,
-    }));
+  return (rules ?? []).map((rule) => ({
+    ...rule,
+    priority: rule.priority ?? 300,
+  }));
 }
 
 function matchesSecurityRule(rule: SecurityRule, context: SecurityEvaluationContext): boolean {
-  if (rule.enabled === false) {
-    return false;
-  }
   if (
     rule.tools?.length &&
     !rule.tools.some((tool) => matchesPattern(context.toolCall.name, tool))
