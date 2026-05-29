@@ -147,6 +147,7 @@ enterprise.
 
 ```text
 /channel list
+/channel reload
 /channel bridge on
 /channel bridge off
 /channel bridge status

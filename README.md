@@ -10,17 +10,23 @@ product-specific UI.
 
 ## Packages
 
-| Package | Purpose |
-| --- | --- |
-| `@amaster.ai/pi-shared` | Shared runtime types, contracts, and utilities (settings loader, event types, artifact types). |
-| `@amaster.ai/pi-storage` | JSON-file and MySQL/Prisma persistence adapters for sessions, transcripts, events, memory, artifacts, subagents, and scheduled tasks. |
-| `@amaster.ai/pi-attachments` | Attachment normalization, local/remote upload handling, document parsing, and model-readable attachment prompts. |
-| `@amaster.ai/pi-telemetry` | Runtime telemetry contracts plus Langfuse and generic OTLP/HTTP exporters. |
-| `@amaster.ai/pi-browser-use` | Browser automation extension wrapping chrome-devtools-mcp with `browser_` prefixed tools. |
-| `@amaster.ai/pi-computer-use` | Computer-use extension for CUA computer-server with desktop automation tools. |
-| `@amaster.ai/pi-turns` | Turn concurrency, queueing, cancellation, active-turn handling, prompt timeout guards, and runtime event observation. |
-| `@amaster.ai/pi-subagents` | Subagent spawning, child-session orchestration, role-aware prompts, routing hints, and cancellation helpers. |
-| `@amaster.ai/pi-task-scheduler` | Scheduled task domain types, schedule parsing, process-local timers, runner hooks, and lock-aware task execution. |
+| Category | Package | Purpose |
+| --- | --- | --- |
+| Core | `@amaster.ai/pi-shared` | Shared runtime types and contracts: settings loader, session/event/artifact types, turn and subagent types. |
+| Core | `@amaster.ai/pi-storage` | JSON-file and MySQL/Prisma persistence adapters for sessions, transcripts, events, memory, artifacts, subagents, and scheduled tasks. |
+| Extension | `@amaster.ai/pi-attachments` | Attachment normalization, local/remote upload handling, document parsing, and model-readable attachment prompts. |
+| Extension | `@amaster.ai/pi-telemetry` | Runtime telemetry with Langfuse and OpenTelemetry exporters. |
+| Extension | `@amaster.ai/pi-task-scheduler` | Cron-based scheduled task management with LLM-callable tools. |
+| Extension | `@amaster.ai/pi-browser-use` | Browser automation wrapping chrome-devtools-mcp with `browser_`-prefixed tools. |
+| Extension | `@amaster.ai/pi-computer-use` | Computer-use extension for CUA computer-server with desktop automation tools. |
+| Extension | `@amaster.ai/pi-channels` | Native messaging channels: Feishu, WeCom, and webhooks. |
+| Extension | `@amaster.ai/pi-memory` | Persistent curated memory (`MEMORY.md` + `USER.md`) injected into the system prompt as a frozen snapshot. |
+| Extension | `@amaster.ai/pi-security` | Resource-aware security policy engine and tool authorization. |
+| Extension | `@amaster.ai/pi-teamwork` | Team collaboration and issue management via Multica. |
+
+Core packages provide types and persistence used by every host application.
+Extension packages each register Pi runtime extensions via their `./extension`
+subpath entry point and are loaded on demand.
 
 Every package is ESM-only and published under the `@amaster.ai` npm scope.
 
@@ -80,7 +86,12 @@ import { JsonRuntimeStorage } from "@amaster.ai/pi-storage/json";
 import { loadPiSettings } from "@amaster.ai/pi-shared/settings";
 import { createLangfuseExporter } from "@amaster.ai/pi-telemetry/langfuse";
 import { createOtelExporter } from "@amaster.ai/pi-telemetry/otel";
+import memoryExtension from "@amaster.ai/pi-memory/extension";
 ```
+
+Extension packages register themselves through their `./extension` subpath
+entry point. Host applications import these and pass them to the Pi runtime
+during setup.
 
 See each package README for package-specific examples and public API notes.
 

@@ -543,6 +543,21 @@ export default function computerUseExtension(pi: ExtensionAPI): void {
         const screenshotResult = await client!.callTool('screenshot', screenshotArgs);
         const imageContent = screenshotResult.content?.find((c) => c.type === 'image' && c.data);
 
+        console.error(
+          '[pi-computer-use analyze_screenshot] screenshot result',
+          JSON.stringify(
+            {
+              window_id: params.window_id,
+              isError: screenshotResult.isError,
+              contentTypes: screenshotResult.content?.map((c) => c.type),
+              imageDataLength: imageContent?.data?.length,
+              imageMimeType: imageContent?.mimeType,
+            },
+            null,
+            2,
+          ),
+        );
+
         if (!imageContent?.data) {
           const errorText =
             screenshotResult.content
@@ -565,6 +580,18 @@ export default function computerUseExtension(pi: ExtensionAPI): void {
           instruction,
           imageContent.data,
           imageContent.mimeType ?? 'image/png',
+        );
+
+        console.error(
+          '[pi-computer-use analyze_screenshot] vision analysis',
+          JSON.stringify(
+            {
+              analysisLength: analysis.length,
+              analysisPreview: analysis.slice(0, 200),
+            },
+            null,
+            2,
+          ),
         );
 
         return {

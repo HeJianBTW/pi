@@ -21,16 +21,16 @@ describe('loadPolicyDir', () => {
     writeFileSync(
       join(dir, 'reviewer.json'),
       JSON.stringify({
-        extends: 'workspace-read',
-        capabilities: { allow: ['mcp__github__*'] },
+        extends: 'read-only',
+        sandbox: 'workspace-write',
       }),
     );
-    writeFileSync(join(dir, 'minimal.json'), JSON.stringify({ extends: 'copilot' }));
+    writeFileSync(join(dir, 'minimal.json'), JSON.stringify({ extends: 'full-access' }));
 
     const result = loadPolicyDir(dir);
     expect(result).toEqual({
-      reviewer: { extends: 'workspace-read', capabilities: { allow: ['mcp__github__*'] } },
-      minimal: { extends: 'copilot' },
+      reviewer: { extends: 'read-only', sandbox: 'workspace-write' },
+      minimal: { extends: 'full-access' },
     });
   });
 
@@ -40,15 +40,15 @@ describe('loadPolicyDir', () => {
 
   it('skips malformed JSON files', () => {
     writeFileSync(join(dir, 'bad.json'), '{ invalid json !!!');
-    writeFileSync(join(dir, 'good.json'), JSON.stringify({ extends: 'chat' }));
+    writeFileSync(join(dir, 'good.json'), JSON.stringify({ extends: 'read-only' }));
 
     const result = loadPolicyDir(dir);
-    expect(result).toEqual({ good: { extends: 'chat' } });
+    expect(result).toEqual({ good: { extends: 'read-only' } });
   });
 
   it('skips non-JSON files', () => {
     writeFileSync(join(dir, 'notes.txt'), 'not a policy');
-    writeFileSync(join(dir, 'valid.json'), JSON.stringify({ extends: 'admin' }));
+    writeFileSync(join(dir, 'valid.json'), JSON.stringify({ extends: 'full-access' }));
 
     const result = loadPolicyDir(dir);
     expect(Object.keys(result)).toEqual(['valid']);
@@ -69,10 +69,10 @@ describe('loadPolicyDir', () => {
   });
 
   it('uses filename without extension as profile name', () => {
-    writeFileSync(join(dir, 'my-custom-profile.json'), JSON.stringify({ extends: 'chat' }));
+    writeFileSync(join(dir, 'my-custom-profile.json'), JSON.stringify({ extends: 'read-only' }));
 
     const result = loadPolicyDir(dir);
-    expect(result['my-custom-profile']).toEqual({ extends: 'chat' });
+    expect(result['my-custom-profile']).toEqual({ extends: 'read-only' });
     expect(result['my-custom-profile.json']).toBeUndefined();
   });
 
@@ -80,8 +80,9 @@ describe('loadPolicyDir', () => {
     writeFileSync(
       join(dir, 'full.json'),
       JSON.stringify({
-        extends: 'workspace-read',
-        capabilities: { allow: ['read_file'], deny: ['run_shell'] },
+        extends: 'read-only',
+        sandbox: 'workspace-write',
+        approval: 'untrusted',
         rules: [
           {
             id: 'custom-rule',
@@ -96,8 +97,9 @@ describe('loadPolicyDir', () => {
 
     const result = loadPolicyDir(dir);
     expect(result.full).toMatchObject({
-      extends: 'workspace-read',
-      capabilities: { allow: ['read_file'], deny: ['run_shell'] },
+      extends: 'read-only',
+      sandbox: 'workspace-write',
+      approval: 'untrusted',
       rules: [{ id: 'custom-rule' }],
       defaultDecision: { kind: 'deny', reason: 'locked' },
     });
@@ -135,40 +137,46 @@ describe('loadFilePolicies', () => {
   it('project-level policies override user-level policies', () => {
     writeFileSync(
       join(userDir, 'custom.json'),
-      JSON.stringify({ extends: 'chat', capabilities: { allow: ['memory_search'] } }),
+      JSON.stringify({ extends: 'read-only', sandbox: 'read-only' }),
     );
     writeFileSync(
       join(projectDir, 'custom.json'),
-      JSON.stringify({ extends: 'copilot', capabilities: { allow: ['*'] } }),
+      JSON.stringify({ extends: 'full-access', sandbox: 'full-access' }),
     );
 
     const result = loadFilePolicies(cwd);
-    expect(result.custom).toEqual({ extends: 'copilot', capabilities: { allow: ['*'] } });
+    expect(result.custom).toEqual({ extends: 'full-access', sandbox: 'full-access' });
   });
 
   it('merges profiles from both directories', () => {
-    writeFileSync(join(userDir, 'user-only.json'), JSON.stringify({ extends: 'chat' }));
-    writeFileSync(join(projectDir, 'project-only.json'), JSON.stringify({ extends: 'admin' }));
+    writeFileSync(join(userDir, 'user-only.json'), JSON.stringify({ extends: 'read-only' }));
+    writeFileSync(
+      join(projectDir, 'project-only.json'),
+      JSON.stringify({ extends: 'full-access' }),
+    );
 
     const result = loadFilePolicies(cwd);
-    expect(result['user-only']).toEqual({ extends: 'chat' });
-    expect(result['project-only']).toEqual({ extends: 'admin' });
+    expect(result['user-only']).toEqual({ extends: 'read-only' });
+    expect(result['project-only']).toEqual({ extends: 'full-access' });
   });
 
   it('works when only user-level directory exists', () => {
     rmSync(projectDir, { recursive: true });
-    writeFileSync(join(userDir, 'only-user.json'), JSON.stringify({ extends: 'chat' }));
+    writeFileSync(join(userDir, 'only-user.json'), JSON.stringify({ extends: 'read-only' }));
 
     const result = loadFilePolicies(cwd);
-    expect(result['only-user']).toEqual({ extends: 'chat' });
+    expect(result['only-user']).toEqual({ extends: 'read-only' });
   });
 
   it('works when only project-level directory exists', () => {
     rmSync(userDir, { recursive: true });
-    writeFileSync(join(projectDir, 'only-project.json'), JSON.stringify({ extends: 'admin' }));
+    writeFileSync(
+      join(projectDir, 'only-project.json'),
+      JSON.stringify({ extends: 'full-access' }),
+    );
 
     const result = loadFilePolicies(cwd);
-    expect(result['only-project']).toEqual({ extends: 'admin' });
+    expect(result['only-project']).toEqual({ extends: 'full-access' });
   });
 
   it('returns empty when neither directory exists', () => {
@@ -210,38 +218,44 @@ describe('loadFilePolicies 3-layer with agentDir', () => {
 
   it('agentDir policy is loaded via loadFilePolicies', () => {
     writeFileSync(
-      join(agentPolicyDir, 'sandbox-exec.json'),
+      join(agentPolicyDir, 'agent-profile.json'),
       JSON.stringify({
-        capabilities: { allow: ['browser_*'] },
+        sandbox: 'workspace-write',
+        approval: 'on-request',
       }),
     );
 
     const result = loadFilePolicies(cwd, agentDir);
-    expect(result['sandbox-exec']).toEqual({
-      capabilities: { allow: ['browser_*'] },
+    expect(result['agent-profile']).toEqual({
+      sandbox: 'workspace-write',
+      approval: 'on-request',
     });
   });
 
   it('project policy overrides agentDir policy', () => {
-    writeFileSync(join(agentPolicyDir, 'custom.json'), JSON.stringify({ extends: 'chat' }));
-    writeFileSync(join(projectPolicyDir, 'custom.json'), JSON.stringify({ extends: 'admin' }));
+    writeFileSync(join(agentPolicyDir, 'custom.json'), JSON.stringify({ extends: 'read-only' }));
+    writeFileSync(
+      join(projectPolicyDir, 'custom.json'),
+      JSON.stringify({ extends: 'full-access' }),
+    );
 
     const result = loadFilePolicies(cwd, agentDir);
-    expect(result.custom).toEqual({ extends: 'admin' });
+    expect(result.custom).toEqual({ extends: 'full-access' });
   });
 
-  it('sandbox-exec.json merges browser_* into built-in sandbox-exec capabilities', () => {
+  it('agentDir profile resolves to expected capabilities', () => {
     writeFileSync(
-      join(agentPolicyDir, 'sandbox-exec.json'),
+      join(agentPolicyDir, 'agent-profile.json'),
       JSON.stringify({
-        capabilities: { allow: ['browser_*'] },
+        extends: 'read-only',
+        sandbox: 'workspace-write',
       }),
     );
 
     const filePolicies = loadFilePolicies(cwd, agentDir);
-    const policy = resolveCapabilityPolicy('sandbox-exec', {}, filePolicies);
-    expect(isCapabilityExposed('browser_list_pages', policy)).toBe(true);
-    expect(isCapabilityExposed('read_file', policy)).toBe(true);
-    expect(isCapabilityExposed('run_shell', policy)).toBe(true);
+    const policy = resolveCapabilityPolicy('agent-profile', {}, filePolicies);
+    expect(isCapabilityExposed('read', policy)).toBe(true);
+    expect(isCapabilityExposed('write', policy)).toBe(true);
+    expect(isCapabilityExposed('bash', policy)).toBe(false);
   });
 });

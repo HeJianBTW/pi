@@ -1,0 +1,24 @@
+{
+  "pi-security": {
+    "enabled": true,
+    "profile": "auto-review",
+    "security": {
+      "profiles": {
+        "auto-review": {
+          "extends": "default",
+          "rules": [
+            {
+              "id": "ask-package-install",
+              "priority": 450,
+              "tools": ["bash"],
+              "argsRegex": {
+                "command": "(npm|pnpm|yarn|pip)\\s+(install|add)"
+              },
+              "decision": { "kind": "ask", "reason": "Approve package install?" }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

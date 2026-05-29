@@ -137,7 +137,7 @@ export async function authorizeUserBash(
   }
   const toolCall: ToolCallRequest = {
     id: 'user-bash',
-    name: 'run_shell',
+    name: 'bash',
     source: 'builtin',
     args: {
       command: event.command,
@@ -270,30 +270,10 @@ function requestFromContext(ctx: ExtensionContext): RuntimeRequestContext {
 function toolCallFromPiEvent(event: ToolCallEvent): ToolCallRequest {
   return {
     id: event.toolCallId,
-    name: normalizeToolName(event.toolName),
+    name: event.toolName,
     source: toolSourceForPiTool(event.toolName),
     args: normalizeToolArgs(event.toolName, event.input),
   };
-}
-
-function normalizeToolName(toolName: string): string {
-  switch (toolName) {
-    case 'bash':
-      return 'run_shell';
-    case 'write':
-      return 'write_file';
-    case 'edit':
-      return 'edit_file';
-    case 'read':
-      return 'read_file';
-    case 'ls':
-      return 'list_files';
-    case 'grep':
-    case 'find':
-      return 'search_files';
-    default:
-      return toolName;
-  }
 }
 
 function toolSourceForPiTool(toolName: string): ToolSource {
