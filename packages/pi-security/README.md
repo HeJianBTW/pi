@@ -1,8 +1,8 @@
 # Pi Security
 
-`@amaster.ai/pi-security` provides a resource-aware security policy engine and a Pi extension entry point.
+`@amaster.ai/pi-security` provides a sandbox-aware security policy engine and a Pi extension entry point.
 
-The core engine classifies tool calls into resources such as files, shell commands, network access, memory writes, MCP calls, and subagent spawns. It then applies profile rules to decide whether a call is allowed, denied, sandbox-only, allowed with constraints, or requires human approval.
+The core engine classifies tool calls into resources (files, shell commands, network access), assesses risk, and applies profile rules to decide whether a call is allowed, denied, or requires human approval. Profiles are built from two orthogonal axes — **sandbox** (what tools are exposed) and **approval** (when to ask the user) — inspired by Codex.
 
 ## Pi extension
 
@@ -12,22 +12,9 @@ Install the extension entry point `@amaster.ai/pi-security/extension` and load t
 {
   "pi-security": {
     "enabled": true,
-    "profile": "auto-review",
+    "profile": "default",
     "approvals": {
       "allowSessionGrants": true
-    },
-    "security": {
-      "profiles": {
-        "auto-review": {
-          "rules": [
-            {
-              "id": "ask-file-writes",
-              "tools": ["write_file", "edit_file"],
-              "decision": { "kind": "ask", "reason": "File modifications require approval." }
-            }
-          ]
-        }
-      }
     }
   }
 }
@@ -35,42 +22,90 @@ Install the extension entry point `@amaster.ai/pi-security/extension` and load t
 
 The extension listens to Pi `tool_call` and `user_bash` events. It does not register an LLM-callable tool that can bypass policy. Human approvals are requested through Pi UI primitives when UI is available; non-interactive contexts fail closed when a rule requires approval.
 
-## Security profiles
+## Built-in profiles
 
-Built-in profiles and their capability policies:
+Profiles are derived from a `sandbox` × `approval` matrix. Pick one as a starting point and override either axis in your own profiles.
 
-| Profile | Mode | Description |
-|---------|------|-------------|
-| `auto-review` | Denylist (`allow: ['*']`) | All tools exposed by default; risk-based rules gate dangerous ops |
-| `admin` / `full-access` | Denylist (`allow: ['*']`) | All tools allowed, no security rules |
-| `sandbox-exec` / `copilot` | Allowlist | Core tools + MCP allowed |
-| `workspace-write` | Allowlist | File R/W, no shell |
-| `workspace-read` | Allowlist | Read-only file access |
-| `chat` | Allowlist | Memory search only |
-| `scheduled` | Allowlist | Read + MCP, no mutations |
-| `subagent` | Allowlist | Like sandbox-exec but no memory_write/sessions_spawn |
+| Profile        | Sandbox            | Approval     | Use case                                                |
+|----------------|--------------------|--------------|---------------------------------------------------------|
+| `read-only`    | `read-only`        | `never`      | Read-only inspection, no modifications                  |
+| `default`      | `workspace-write`  | `on-request` | Workspace edits with approval for writes (recommended)  |
+| `auto`         | `workspace-write`  | `on-failure` | Autonomous edits, only ask when risk is high            |
+| `full-access`  | `full-access`      | `never`      | Trusted automation, no gating (use with care)           |
 
-### Denylist vs Allowlist
+### Sandbox modes
 
-- **Denylist mode** (`allow: ['*']`): All capabilities exposed; use `deny` array and security rules to block specific tools or risky operations. `auto-review` uses this mode — new tools are automatically available without config changes.
-- **Allowlist mode** (explicit `allow` list): Only listed capabilities are exposed; unlisted tools are denied.
+| Mode               | Allowed tools                                  | Denied tools          |
+|--------------------|------------------------------------------------|-----------------------|
+| `read-only`        | `read`, `ls`, `find`, `grep`                   | `write`, `edit`, `bash` |
+| `workspace-write`  | `read`, `ls`, `find`, `grep`, `write`, `edit`  | `bash`                |
+| `full-access`      | `*` (all tools)                                | —                     |
 
-Custom profiles can override capability policies via settings:
+Tool names align with the pi-coding-agent built-in tools: `bash`, `read`, `write`, `edit`, `ls`, `find`, `grep`.
 
-```json
-{
-  "pi-security": {
-    "security": {
-      "profiles": {
-        "auto-review": {
-          "capabilities": {
-            "deny": ["sessions_spawn"]
-          }
-        }
-      }
-    }
-  }
-}
+### Approval modes
+
+| Mode          | Behavior                                                                  |
+|---------------|---------------------------------------------------------------------------|
+| `never`       | No approval prompts (deny rules still apply, e.g. for secrets).           |
+| `on-failure`  | Ask only on high/critical risk operations.                                |
+| `on-request`  | Ask on workspace writes/deletes (in addition to high-risk ops).           |
+| `untrusted`   | Ask on workspace writes plus high-risk ops; default decision is also ask. |
+
+Baseline secret protection (denying `.ssh/`, `.env`, `*.pem`, `*.key`, etc.) is always enabled, regardless of profile.
+
+## Custom profiles
+
+Profiles can be defined in three places. Higher-priority sources override lower-priority ones with the same name:
+
+1. **Project**: `<cwd>/.pi/policy/<name>.json` (highest priority)
+2. **Agent**: `<agentDir>/policy/<name>.json`
+3. **User**: `~/.pi/agent/policy/<name>.json`
+4. **Settings**: under `pi-security.security.profiles` in `pi.json`
+
+Each JSON file defines a single profile; the filename (without `.json`) is the profile name.
+
+### JSON config examples
+
+Ready-to-copy samples live under [`examples/`](./examples) and are exercised by the test suite:
+
+- [`examples/reviewer.json`](./examples/reviewer.json) — a project-level file policy. Drop into `<project>/.pi/policy/reviewer.json`. Starts from `read-only`, opens to `workspace-write`, asks on `bash`, denies external network.
+- [`examples/auto-review.settings.json`](./examples/auto-review.settings.json) — a `pi.json` snippet that defines a custom `auto-review` profile inline. Extends `default` and asks before package-manager installs (`npm/pnpm/yarn/pip install|add`) via `argsRegex`.
+
+### Profile schema
+
+```ts
+type SecurityProfileConfig = {
+  extends?: string;                   // built-in profile name or another custom profile
+  sandbox?: 'read-only' | 'workspace-write' | 'full-access';
+  approval?: 'never' | 'on-failure' | 'on-request' | 'untrusted';
+  rules?: SecurityRule[];             // appended after parent rules
+  defaultDecision?: SecurityDecision; // overrides parent default for unmatched tools
+};
+```
+
+### Rule schema
+
+Rules are evaluated in priority order (descending); the first match wins.
+
+```ts
+type SecurityRule = {
+  id: string;
+  enabled?: boolean;
+  priority?: number;                  // default 300 for user rules
+  tools?: string[];                   // tool name patterns ('*', 'mcp_*', 'bash')
+  sources?: ToolSource[];             // 'builtin' | 'mcp' | 'runtime'
+  triggers?: Array<'user' | 'agent' | 'scheduler'>;
+  senderTrusts?: Array<'owner' | 'trusted' | 'untrusted'>;
+  args?: Record<string, string>;      // exact/glob match against args
+  argsRegex?: Record<string, string>; // regex match against args
+  resources?: ('file' | 'shell' | 'network')[];
+  operations?: ('read' | 'write' | 'execute' | 'delete' | 'connect' | 'search')[];
+  scopes?: ('workspace' | 'home' | 'system' | 'external' | 'unknown')[];
+  sensitivity?: ('normal' | 'source' | 'config' | 'secret' | 'credential')[];
+  risk?: ('low' | 'medium' | 'high' | 'critical')[];
+  decision: { kind: 'allow' } | { kind: 'deny'; reason: string } | { kind: 'ask'; reason: string; prompt?: string };
+};
 ```
 
 ## Commands
@@ -81,6 +116,6 @@ Custom profiles can override capability policies via settings:
 
 ## Trust model
 
-This module is an execution gate, not a filesystem sandbox by itself. Deny and approval decisions are enforceable because they run before Pi tool execution. Constraint decisions must be paired with a runtime that actually enforces the returned constraints.
+This module is an execution gate, not a filesystem sandbox by itself. Deny and approval decisions are enforceable because they run before Pi tool execution; sandbox enforcement still depends on the runtime that executes the tool.
 
-Sensitive paths such as SSH keys, `.env`, credentials, tokens, private keys, and secret files are denied by baseline policy. Audit entries include tool names, resource summaries, risk level, and decision metadata, but they should not include plaintext secrets.
+Sensitive paths such as SSH keys, `.env`, credentials, tokens, private keys, and `secrets/` directories are denied by baseline policy across all profiles. Audit entries include tool names, resource summaries, risk level, and decision metadata, but they should not include plaintext secrets.

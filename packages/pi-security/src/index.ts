@@ -10,50 +10,18 @@ import type {
 export type SecurityDecision =
   | { kind: 'allow'; reason?: string }
   | { kind: 'deny'; reason: string }
-  | { kind: 'ask'; reason: string; prompt?: string }
-  | { kind: 'sandbox_only'; reason: string; sandboxProfile: string }
-  | { kind: 'allow_with_constraints'; reason?: string; constraints: RuntimeConstraints };
-
-export type RuntimeConstraints = {
-  filesystem?: {
-    read?: 'workspace' | 'all' | 'deny';
-    write?: 'workspace' | 'all' | 'deny';
-    allowPaths?: string[];
-    denyPaths?: string[];
-  };
-  network?: {
-    mode: 'deny' | 'allowlist' | 'unrestricted';
-    allowedDomains?: string[];
-  };
-  shell?: {
-    timeoutMs?: number;
-    requireSandbox?: boolean;
-    denyPatterns?: string[];
-  };
-  output?: {
-    redactFields?: string[];
-    maxBytes?: number;
-  };
-};
+  | { kind: 'ask'; reason: string; prompt?: string };
 
 export type CapabilityPolicy = {
   allow?: string[];
   deny?: string[];
 };
 
-export type ConfiguredCapabilityPolicy = CapabilityPolicy & {
-  mode?: 'merge' | 'replace';
-};
+export type SandboxMode = 'read-only' | 'workspace-write' | 'full-access';
+export type ApprovalMode = 'never' | 'on-failure' | 'on-request' | 'untrusted';
 
-export type SecurityResourceKind = 'file' | 'shell' | 'network' | 'memory' | 'mcp' | 'subagent';
-export type SecurityOperation =
-  | 'read'
-  | 'write'
-  | 'execute'
-  | 'delete'
-  | 'connect'
-  | 'spawn'
-  | 'search';
+export type SecurityResourceKind = 'file' | 'shell' | 'network';
+export type SecurityOperation = 'read' | 'write' | 'execute' | 'delete' | 'connect' | 'search';
 export type SecurityScope = 'workspace' | 'home' | 'system' | 'external' | 'unknown';
 export type SecuritySensitivity = 'normal' | 'source' | 'config' | 'secret' | 'credential';
 export type RiskLevel = 'low' | 'medium' | 'high' | 'critical';
@@ -76,13 +44,9 @@ export type SecurityRule = {
   enabled?: boolean;
   priority?: number;
   tools?: string[];
-  tool?: string;
   sources?: ToolSource[];
-  source?: ToolSource;
   triggers?: Array<RuntimeRequestContext['trigger']>;
-  trigger?: RuntimeRequestContext['trigger'];
   senderTrusts?: Array<RuntimeRequestContext['senderTrust']>;
-  senderTrust?: RuntimeRequestContext['senderTrust'];
   args?: Record<string, string>;
   argsRegex?: Record<string, string>;
   resources?: SecurityResourceKind[];
@@ -100,7 +64,8 @@ export type SecurityPolicyEngineOptions = {
 
 export type SecurityProfileConfig = {
   extends?: string;
-  capabilities?: ConfiguredCapabilityPolicy;
+  sandbox?: SandboxMode;
+  approval?: ApprovalMode;
   rules?: SecurityRule[];
   defaultDecision?: SecurityDecision;
 };
@@ -166,137 +131,86 @@ const DEFAULT_DECISION: SecurityDecision = {
   reason: 'No security rule matched this tool call.',
 };
 
-const OPEN_SANDBOX_CAPABILITIES = [
-  'read_file',
-  'list_files',
-  'search_files',
-  'write_file',
-  'edit_file',
-  'run_shell',
-  'run_code',
-  'memory_search',
-  'memory_write',
-  'sessions_spawn',
-  'mcp:*',
-  'mcp_*',
-  'mcp__*',
-];
-
-const DEFAULT_CAPABILITY_POLICY: CapabilityPolicy = {
-  allow: ['memory_search'],
-  deny: ['run_shell', 'run_code', 'write_file'],
-};
-
-const BUILTIN_CAPABILITY_POLICIES: Record<string, CapabilityPolicy> = {
-  chat: DEFAULT_CAPABILITY_POLICY,
-  assistant: {
-    allow: ['memory_search', 'memory_write', 'mcp:*', 'mcp_*', 'mcp__*', 'scheduler:create'],
-    deny: ['run_shell', 'run_code'],
-  },
-  'workspace-read': {
-    allow: ['read_file', 'list_files', 'search_files', 'memory_search'],
-    deny: ['write_file', 'edit_file'],
+const SANDBOX_CAPABILITIES: Record<SandboxMode, CapabilityPolicy> = {
+  'read-only': {
+    allow: ['read', 'ls', 'find', 'grep'],
+    deny: ['write', 'edit', 'bash'],
   },
   'workspace-write': {
-    allow: ['read_file', 'list_files', 'search_files', 'write_file', 'edit_file', 'memory_search'],
-    deny: ['run_shell', 'run_code'],
+    allow: ['read', 'ls', 'find', 'grep', 'write', 'edit'],
+    deny: ['bash'],
   },
-  'sandbox-exec': { allow: ['*'] },
-  copilot: { allow: OPEN_SANDBOX_CAPABILITIES },
-  'auto-review': { allow: ['*'] },
-  default: {
-    allow: ['read_file', 'list_files', 'search_files', 'write_file', 'edit_file', 'memory_search'],
-    deny: ['run_shell', 'run_code'],
-  },
-  subagent: {
-    allow: OPEN_SANDBOX_CAPABILITIES.filter(
-      (capability) => capability !== 'memory_write' && capability !== 'sessions_spawn',
-    ),
-    deny: ['memory_write', 'sessions_spawn'],
-  },
-  scheduled: {
-    allow: ['memory_search', 'read_file', 'list_files', 'search_files', 'mcp:*', 'mcp_*', 'mcp__*'],
-    deny: ['scheduler:create', 'run_shell', 'run_code', 'write_file', 'edit_file'],
-  },
-  admin: { allow: ['*'] },
   'full-access': { allow: ['*'] },
 };
 
-const BASELINE_SECURITY_RULES: SecurityRule[] = [denySecretsRule()];
-
-const BUILTIN_SECURITY_RULES: Record<string, SecurityRule[]> = {
-  default: [
-    ...BASELINE_SECURITY_RULES,
-    {
-      id: 'ask-workspace-write',
-      priority: 260,
-      resources: ['file'],
-      operations: ['write', 'delete'],
-      scopes: ['workspace'],
-      decision: {
-        kind: 'ask',
-        reason: 'Workspace file modifications require approval.',
-        prompt: 'Approve this file modification?',
-      },
-    },
-  ],
-  'auto-review': [
-    ...BASELINE_SECURITY_RULES,
-    {
-      id: 'ask-critical-risk',
-      priority: 500,
-      risk: ['critical'],
-      decision: { kind: 'ask', reason: 'Critical risk operation requires approval.' },
-    },
-    {
-      id: 'ask-high-risk',
-      priority: 420,
-      risk: ['high'],
-      decision: { kind: 'ask', reason: 'High risk operation requires approval.' },
-    },
-    {
-      id: 'ask-workspace-write',
-      priority: 260,
-      resources: ['file'],
-      operations: ['write', 'delete'],
-      scopes: ['workspace'],
-      decision: {
-        kind: 'ask',
-        reason: 'Workspace file modifications require approval.',
-        prompt: 'Approve this file modification?',
-      },
-    },
-  ],
-  scheduled: [
-    ...BASELINE_SECURITY_RULES,
-    {
-      id: 'deny-non-read-scheduled',
-      priority: 420,
-      operations: ['write', 'execute', 'delete', 'spawn'],
-      decision: {
-        kind: 'deny',
-        reason: 'Scheduled runs cannot perform mutating or executable actions by default.',
-      },
-    },
-  ],
-  subagent: [
-    ...BASELINE_SECURITY_RULES,
-    {
-      id: 'deny-recursive-subagent-spawn',
-      priority: 500,
-      tools: ['sessions_spawn'],
-      decision: { kind: 'deny', reason: 'Subagents cannot spawn child sessions by default.' },
-    },
-    {
-      id: 'deny-subagent-memory-write',
-      priority: 420,
-      tools: ['memory_write'],
-      decision: { kind: 'deny', reason: 'Subagents cannot write durable memory by default.' },
-    },
-  ],
-  admin: [],
-  'full-access': [],
+const BUILTIN_PROFILES: Record<string, { sandbox: SandboxMode; approval: ApprovalMode }> = {
+  'read-only': { sandbox: 'read-only', approval: 'never' },
+  default: { sandbox: 'workspace-write', approval: 'on-request' },
+  auto: { sandbox: 'workspace-write', approval: 'on-failure' },
+  'full-access': { sandbox: 'full-access', approval: 'never' },
 };
+
+const DEFAULT_BUILTIN_PROFILE = BUILTIN_PROFILES.default as {
+  sandbox: SandboxMode;
+  approval: ApprovalMode;
+};
+
+const DENY_SECRETS_RULE: SecurityRule = {
+  id: 'deny-secrets',
+  priority: 600,
+  sensitivity: ['secret', 'credential'],
+  decision: { kind: 'deny', reason: 'Secret or credential resources are protected.' },
+};
+
+const BASELINE_SECURITY_RULES: SecurityRule[] = [DENY_SECRETS_RULE];
+
+const ASK_WORKSPACE_WRITE_RULE: SecurityRule = {
+  id: 'ask-workspace-write',
+  priority: 260,
+  resources: ['file'],
+  operations: ['write', 'delete'],
+  scopes: ['workspace'],
+  decision: {
+    kind: 'ask',
+    reason: 'Workspace file modifications require approval.',
+    prompt: 'Approve this file modification?',
+  },
+};
+
+const ASK_HIGH_RISK_RULES: SecurityRule[] = [
+  {
+    id: 'ask-critical-risk',
+    priority: 500,
+    risk: ['critical'],
+    decision: { kind: 'ask', reason: 'Critical risk operation requires approval.' },
+  },
+  {
+    id: 'ask-high-risk',
+    priority: 420,
+    risk: ['high'],
+    decision: { kind: 'ask', reason: 'High risk operation requires approval.' },
+  },
+];
+
+function builtinRulesForApproval(approval: ApprovalMode): SecurityRule[] {
+  switch (approval) {
+    case 'never':
+      return [...BASELINE_SECURITY_RULES];
+    case 'on-failure':
+      return [...BASELINE_SECURITY_RULES, ...ASK_HIGH_RISK_RULES];
+    case 'on-request':
+      return [...BASELINE_SECURITY_RULES, ASK_WORKSPACE_WRITE_RULE];
+    case 'untrusted':
+      return [...BASELINE_SECURITY_RULES, ...ASK_HIGH_RISK_RULES, ASK_WORKSPACE_WRITE_RULE];
+  }
+}
+
+function defaultDecisionForApproval(approval: ApprovalMode): SecurityDecision {
+  if (approval === 'untrusted') {
+    return { kind: 'ask', reason: 'Untrusted profile requires approval for unknown tool calls.' };
+  }
+  return { kind: 'allow' };
+}
 
 export class SecurityPolicyEngine {
   private readonly entries: SecurityRule[];
@@ -383,9 +297,6 @@ export class SecurityGate {
       decision: evaluation.decision,
       evaluation,
     });
-    if (resolved.kind === 'ask') {
-      return resolved;
-    }
     return resolved;
   }
 
@@ -430,8 +341,6 @@ export async function assertSecurityAllowed(input: {
 export function assertSecurityDecisionAllowed(decision: SecurityDecision): void {
   switch (decision.kind) {
     case 'allow':
-    case 'allow_with_constraints':
-    case 'sandbox_only':
       return;
     case 'ask':
       throw new Error(`Tool call requires approval: ${decision.reason}`);
@@ -465,19 +374,27 @@ export function createSecurityPolicyEngineForProfile(
   filePolicies: Record<string, SecurityProfileConfig> = {},
 ): SecurityPolicyEngine {
   const resolvedProfile = resolveSecurityProfile(profile, config, [], filePolicies);
-  const capabilityRules: SecurityRule[] =
+  const denyCapabilityRules: SecurityRule[] =
+    resolvedProfile.capabilities.deny?.map((toolName) => ({
+      id: `deny-capability-${profile}-${toolName}`,
+      priority: 110,
+      tools: [toolName],
+      decision: {
+        kind: 'deny',
+        reason: `Tool '${toolName}' is denied by sandbox '${resolvedProfile.sandbox}'.`,
+      },
+    })) ?? [];
+  const allowCapabilityRules: SecurityRule[] =
     resolvedProfile.capabilities.allow?.map((toolName) => ({
       id: `allow-capability-${profile}-${toolName}`,
       priority: 100,
-      tool: toolName,
+      tools: [toolName],
       decision: { kind: 'allow' },
     })) ?? [];
   return new SecurityPolicyEngine({
-    rules: resolvedProfile.rules.concat(capabilityRules),
-    defaultDecision: resolvedProfile.defaultDecision ?? {
-      kind: 'deny',
-      reason: `Tool is not exposed by security profile: ${profile}`,
-    },
+    rules: resolvedProfile.rules.concat(denyCapabilityRules).concat(allowCapabilityRules),
+    defaultDecision:
+      resolvedProfile.defaultDecision ?? defaultDecisionForApproval(resolvedProfile.approval),
   });
 }
 
@@ -487,13 +404,13 @@ export function classifySecurityResources(input: {
   workspaceDir?: string;
 }): SecurityResource[] {
   const { toolCall } = input;
-  if (toolCall.name === 'read_file') {
+  if (toolCall.name === 'read') {
     return [fileResource('read', stringArg(toolCall.args, 'path'), input.workspaceDir)];
   }
-  if (toolCall.name === 'list_files') {
+  if (toolCall.name === 'ls') {
     return [fileResource('read', stringArg(toolCall.args, 'path'), input.workspaceDir)];
   }
-  if (toolCall.name === 'search_files') {
+  if (toolCall.name === 'find' || toolCall.name === 'grep') {
     return [
       fileResource(
         'search',
@@ -502,12 +419,11 @@ export function classifySecurityResources(input: {
       ),
     ];
   }
-  if (toolCall.name === 'write_file' || toolCall.name === 'edit_file') {
+  if (toolCall.name === 'write' || toolCall.name === 'edit') {
     return [fileResource('write', stringArg(toolCall.args, 'path'), input.workspaceDir)];
   }
-  if (toolCall.name === 'run_shell' || toolCall.name === 'run_code') {
-    const command =
-      stringArg(toolCall.args, 'command') ?? stringArg(toolCall.args, 'code') ?? toolCall.name;
+  if (toolCall.name === 'bash') {
+    const command = stringArg(toolCall.args, 'command') ?? toolCall.name;
     const resources: SecurityResource[] = [
       {
         kind: 'shell',
@@ -527,30 +443,6 @@ export function classifySecurityResources(input: {
       });
     }
     return resources;
-  }
-  if (toolCall.name === 'memory_search') {
-    return [{ kind: 'memory', operation: 'search', scope: 'unknown', sensitivity: 'normal' }];
-  }
-  if (toolCall.name === 'memory_write') {
-    return [{ kind: 'memory', operation: 'write', scope: 'unknown', sensitivity: 'normal' }];
-  }
-  if (toolCall.name === 'sessions_spawn') {
-    return [{ kind: 'subagent', operation: 'spawn', scope: 'unknown', sensitivity: 'normal' }];
-  }
-  if (
-    toolCall.source === 'mcp' ||
-    toolCall.name.startsWith('mcp_') ||
-    toolCall.name.startsWith('mcp__')
-  ) {
-    return [
-      {
-        kind: 'mcp',
-        operation: 'connect',
-        target: toolCall.name,
-        scope: 'external',
-        sensitivity: 'normal',
-      },
-    ];
   }
   return [
     {
@@ -606,15 +498,6 @@ export function assessRisk(input: {
     if (resource.kind === 'network') {
       raise('high', 'External network access');
     }
-    if (resource.kind === 'memory' && resource.operation === 'write') {
-      raise('medium', 'Durable memory write');
-    }
-    if (resource.kind === 'subagent') {
-      raise('medium', 'Subagent spawn');
-    }
-    if (resource.kind === 'mcp') {
-      raise('medium', 'External MCP tool call');
-    }
   }
   return {
     level,
@@ -638,72 +521,60 @@ export function securityEvaluationDetails(evaluation: SecurityEvaluationResult):
   };
 }
 
+type ResolvedProfile = {
+  sandbox: SandboxMode;
+  approval: ApprovalMode;
+  capabilities: CapabilityPolicy;
+  rules: SecurityRule[];
+  defaultDecision?: SecurityDecision;
+};
+
+function resolvedFromBuiltin(name: string): ResolvedProfile {
+  const builtin = BUILTIN_PROFILES[name] ?? DEFAULT_BUILTIN_PROFILE;
+  return {
+    sandbox: builtin.sandbox,
+    approval: builtin.approval,
+    capabilities: SANDBOX_CAPABILITIES[builtin.sandbox],
+    rules: builtinRulesForApproval(builtin.approval),
+  };
+}
+
 function resolveSecurityProfile(
   profile: string,
   config: SecurityConfig,
   seen: string[] = [],
   filePolicies: Record<string, SecurityProfileConfig> = {},
-): { capabilities: CapabilityPolicy; rules: SecurityRule[]; defaultDecision?: SecurityDecision } {
+): ResolvedProfile {
   const normalizedProfile = profile.trim();
   if (seen.includes(normalizedProfile)) {
-    return { capabilities: DEFAULT_CAPABILITY_POLICY, rules: [] };
+    return resolvedFromBuiltin('default');
   }
   const configured = filePolicies[normalizedProfile] ?? config.profiles?.[normalizedProfile];
-  const parent = configured?.extends
+  const parent: ResolvedProfile = configured?.extends
     ? resolveSecurityProfile(
         configured.extends,
         config,
         seen.concat(normalizedProfile),
         filePolicies,
       )
-    : {
-        capabilities: BUILTIN_CAPABILITY_POLICIES[normalizedProfile] ?? DEFAULT_CAPABILITY_POLICY,
-        rules: BUILTIN_SECURITY_RULES[normalizedProfile] ?? BASELINE_SECURITY_RULES,
-      };
+    : resolvedFromBuiltin(normalizedProfile);
   if (!configured) {
     return parent;
   }
+  const sandbox = configured.sandbox ?? parent.sandbox;
+  const approval = configured.approval ?? parent.approval;
+  const sandboxChanged = configured.sandbox !== undefined && configured.sandbox !== parent.sandbox;
+  const approvalChanged =
+    configured.approval !== undefined && configured.approval !== parent.approval;
+  const inheritedDefault = configured.defaultDecision ?? parent.defaultDecision;
   return {
-    capabilities: mergeCapabilityPolicy(parent.capabilities, configured.capabilities),
-    rules: parent.rules.concat(normalizeConfiguredRules(configured.rules)),
-    ...((configured.defaultDecision ?? parent.defaultDecision)
-      ? { defaultDecision: configured.defaultDecision ?? parent.defaultDecision }
-      : {}),
-  };
-}
-
-function denySecretsRule(): SecurityRule {
-  return {
-    id: 'deny-secrets',
-    priority: 600,
-    sensitivity: ['secret', 'credential'],
-    decision: { kind: 'deny', reason: 'Secret or credential resources are protected.' },
-  };
-}
-
-function mergeCapabilityPolicy(
-  base: CapabilityPolicy,
-  override: ConfiguredCapabilityPolicy | undefined,
-): CapabilityPolicy {
-  if (!override) {
-    return copyCapabilityPolicy(base);
-  }
-  if (override.mode === 'replace') {
-    return {
-      ...(override.allow ? { allow: uniqueStrings(override.allow) } : {}),
-      ...(override.deny ? { deny: uniqueStrings(override.deny) } : {}),
-    };
-  }
-  return {
-    allow: uniqueStrings([...(base.allow ?? []), ...(override.allow ?? [])]),
-    deny: uniqueStrings([...(base.deny ?? []), ...(override.deny ?? [])]),
-  };
-}
-
-function copyCapabilityPolicy(policy: CapabilityPolicy): CapabilityPolicy {
-  return {
-    ...(policy.allow ? { allow: [...policy.allow] } : {}),
-    ...(policy.deny ? { deny: [...policy.deny] } : {}),
+    sandbox,
+    approval,
+    capabilities: sandboxChanged ? SANDBOX_CAPABILITIES[sandbox] : parent.capabilities,
+    rules: (approvalChanged ? builtinRulesForApproval(approval) : parent.rules).concat(
+      normalizeConfiguredRules(configured.rules),
+    ),
+    ...(inheritedDefault ? { defaultDecision: inheritedDefault } : {}),
   };
 }
 
@@ -726,25 +597,13 @@ function matchesSecurityRule(rule: SecurityRule, context: SecurityEvaluationCont
   ) {
     return false;
   }
-  if (rule.tool && !matchesPattern(context.toolCall.name, rule.tool)) {
-    return false;
-  }
   if (rule.sources?.length && !rule.sources.includes(context.toolCall.source)) {
-    return false;
-  }
-  if (rule.source && rule.source !== context.toolCall.source) {
     return false;
   }
   if (rule.triggers?.length && !rule.triggers.includes(context.request.trigger)) {
     return false;
   }
-  if (rule.trigger && rule.trigger !== context.request.trigger) {
-    return false;
-  }
   if (rule.senderTrusts?.length && !rule.senderTrusts.includes(context.request.senderTrust)) {
-    return false;
-  }
-  if (rule.senderTrust && rule.senderTrust !== context.request.senderTrust) {
     return false;
   }
   if (rule.args && !matchesArgs(rule.args, context.toolCall.args)) {
@@ -914,10 +773,6 @@ function stringArg(args: JsonObject, key: string): string | undefined {
 
 function riskRank(level: RiskLevel): number {
   return { low: 1, medium: 2, high: 3, critical: 4 }[level];
-}
-
-function uniqueStrings(values: string[]): string[] {
-  return [...new Set(values)];
 }
 
 function summarizeTarget(value: string): string {

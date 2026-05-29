@@ -1,0 +1,19 @@
+{
+  "extends": "read-only",
+  "sandbox": "workspace-write",
+  "approval": "on-request",
+  "rules": [
+    {
+      "id": "ask-bash",
+      "priority": 400,
+      "tools": ["bash"],
+      "decision": { "kind": "ask", "reason": "Shell needs approval" }
+    },
+    {
+      "id": "deny-network",
+      "priority": 500,
+      "resources": ["network"],
+      "decision": { "kind": "deny", "reason": "External network is blocked" }
+    }
+  ]
+}
