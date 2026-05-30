@@ -7,6 +7,20 @@ import type { ExecFn, TeamworkConfig, TeamworkProvider } from './types.js';
 const SETTINGS_KEY = 'pi-teamwork';
 const STATUS_KEY = 'pi-teamwork';
 
+const TEAMWORK_GUIDANCE = [
+  '# Teamwork Guidance',
+  '',
+  'You are working in a shared project tracker (teamwork) where humans and other agents collaborate. Use the issue_* and project_* tools to keep that shared space in sync.',
+  '',
+  'Before starting non-trivial work, check whether a relevant issue already exists (issue_list / issue_get) — to avoid duplicating work another collaborator has picked up.',
+  '',
+  'When you reach meaningful progress, hit a blocker, or need input from a collaborator, leave a comment on the relevant issue (issue_comment). Comments are how humans and other agents observe what you are doing.',
+  '',
+  'When you finish work that an issue describes, update its status (issue_update). An issue left in an outdated state misleads other collaborators.',
+  '',
+  'The tracker is for cross-collaborator coordination, not for tracking your own session-local TODOs. Do not file an issue just to remind yourself of something within the current conversation.',
+].join('\n');
+
 export default function piTeamworkExtension(pi: ExtensionAPI): void {
   let provider: TeamworkProvider | undefined;
 
@@ -35,6 +49,15 @@ export default function piTeamworkExtension(pi: ExtensionAPI): void {
     provider = undefined;
   });
 
+  pi.on('before_agent_start', async (event) => {
+    if (!provider) return;
+    return {
+      systemPrompt: event.systemPrompt
+        ? `${event.systemPrompt}\n\n${TEAMWORK_GUIDANCE}`
+        : TEAMWORK_GUIDANCE,
+    };
+  });
+
   pi.registerCommand('teamwork-status', {
     description: 'Show teamwork provider status.',
     handler: async (_args, ctx) => {
@@ -57,8 +80,8 @@ export default function piTeamworkExtension(pi: ExtensionAPI): void {
     name: 'issue_list',
     label: 'Teamwork',
     description:
-      'List issues from the project management system. Supports filtering by status, assignee, and project.',
-    promptSnippet: 'List issues from the team project tracker with optional filters.',
+      'List issues from a shared project tracker. Issues are work items that humans or other agents collaborate on. Supports filtering by status, assignee, and project.',
+    promptSnippet: 'List issues from a shared project tracker where humans and agents collaborate.',
     parameters: Type.Object({
       status: Type.Optional(
         Type.String({ description: 'Filter by status (e.g. todo, in_progress, done, blocked).' }),
@@ -82,7 +105,8 @@ export default function piTeamworkExtension(pi: ExtensionAPI): void {
   pi.registerTool({
     name: 'issue_get',
     label: 'Teamwork',
-    description: 'Get detailed information about a specific issue.',
+    description:
+      'Get detailed information about a specific issue (a work item in the shared project tracker).',
     parameters: Type.Object({
       id: Type.String({ description: 'The issue ID.' }),
     }),
@@ -101,8 +125,10 @@ export default function piTeamworkExtension(pi: ExtensionAPI): void {
   pi.registerTool({
     name: 'issue_create',
     label: 'Teamwork',
-    description: 'Create a new issue in the project management system.',
-    promptSnippet: 'Create issues in the team project tracker.',
+    description:
+      'Create a new issue (a work item / ticket) in the shared project tracker. Use this to file work for humans or other agents to pick up.',
+    promptSnippet:
+      'Create issues / tickets in a shared project tracker for humans or agents to collaborate on.',
     parameters: Type.Object({
       title: Type.String({ description: 'Issue title.' }),
       description: Type.Optional(Type.String({ description: 'Issue description.' })),
@@ -127,7 +153,7 @@ export default function piTeamworkExtension(pi: ExtensionAPI): void {
     name: 'issue_update',
     label: 'Teamwork',
     description:
-      'Update an existing issue. Can change title, description, status, priority, or assignee.',
+      'Update an existing issue in the shared project tracker. Can change title, description, status, priority, or assignee.',
     parameters: Type.Object({
       id: Type.String({ description: 'The issue ID to update.' }),
       title: Type.Optional(Type.String({ description: 'New title.' })),
@@ -156,7 +182,8 @@ export default function piTeamworkExtension(pi: ExtensionAPI): void {
   pi.registerTool({
     name: 'issue_comment',
     label: 'Teamwork',
-    description: 'Add a comment to an issue. Use for progress updates, questions, or blockers.',
+    description:
+      'Add a comment to an issue in the shared project tracker. Use for progress updates, questions, or blockers visible to other collaborators (humans or agents).',
     parameters: Type.Object({
       issueId: Type.String({ description: 'The issue ID to comment on.' }),
       content: Type.String({ description: 'Comment content.' }),
@@ -178,7 +205,7 @@ export default function piTeamworkExtension(pi: ExtensionAPI): void {
   pi.registerTool({
     name: 'project_list',
     label: 'Teamwork',
-    description: 'List all projects in the workspace.',
+    description: 'List all projects in the shared collaboration workspace.',
     parameters: Type.Object({}),
     async execute() {
       if (!provider) return textResult('Teamwork provider is not initialized.');
@@ -196,7 +223,7 @@ export default function piTeamworkExtension(pi: ExtensionAPI): void {
     name: 'teamwork_status',
     label: 'Teamwork',
     description:
-      'Check the status of the teamwork provider (daemon status, connected agents, etc.).',
+      'Check the status of the teamwork collaboration provider (daemon status, connected agents, etc.).',
     parameters: Type.Object({}),
     async execute() {
       if (!provider) return textResult('Teamwork provider is not initialized.');
