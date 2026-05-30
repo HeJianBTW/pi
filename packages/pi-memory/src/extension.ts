@@ -8,7 +8,7 @@ const SETTINGS_KEY = 'pi-memory';
 const STATUS_KEY = 'pi-memory';
 
 const MEMORY_GUIDANCE = [
-  '## Memory Guidance',
+  '# Memory Guidance',
   '',
   'You have persistent memory across sessions via the memory_add / memory_replace / memory_remove / memory_read tools.',
   'Save durable facts: user preferences, environment details, tool quirks, and stable conventions.',

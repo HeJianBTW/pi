@@ -43,8 +43,9 @@ export function createSchedulerTools(scheduler: TaskScheduler): ToolDefinition[]
       name: 'scheduler_create',
       label: 'Scheduler',
       description:
-        'Create a scheduled task. Supports cron expressions, one-time (ISO timestamp or relative like "+10m"), and interval (e.g. "30s", "5m", "1h").',
-      promptSnippet: 'Create scheduled tasks (cron/once/interval) that run prompts on a schedule.',
+        'Schedule a prompt to be executed automatically at a future time or on a recurring basis. Supports cron expressions, one-time (ISO timestamp or relative like "+10m"), and interval (e.g. "30s", "5m", "1h"). Use this when the user wants something to run later, repeatedly, or on a timer.',
+      promptSnippet:
+        'Schedule prompts to run automatically via cron, one-time delay, or fixed interval.',
       parameters: Type.Object({
         type: taskTypeSchema,
         schedule: Type.String({
@@ -52,10 +53,14 @@ export function createSchedulerTools(scheduler: TaskScheduler): ToolDefinition[]
             'Schedule expression. Cron: "0 9 * * 1-5"; Once: ISO timestamp or "+10m"; Interval: "30s", "5m", "1h".',
         }),
         prompt: Type.String({ description: 'The prompt to execute when triggered.' }),
-        name: Type.Optional(Type.String({ description: 'Human-readable task name.' })),
-        description: Type.Optional(Type.String({ description: 'Task description.' })),
+        name: Type.Optional(
+          Type.String({ description: 'Human-readable name for this scheduled prompt.' }),
+        ),
+        description: Type.Optional(
+          Type.String({ description: 'Description of this scheduled prompt.' }),
+        ),
         enabled: Type.Optional(
-          Type.Boolean({ description: 'Whether the task is enabled. Default true.' }),
+          Type.Boolean({ description: 'Whether this scheduled prompt is enabled. Default true.' }),
         ),
       }),
       async execute(
@@ -95,8 +100,8 @@ export function createSchedulerTools(scheduler: TaskScheduler): ToolDefinition[]
     {
       name: 'scheduler_list',
       label: 'Scheduler',
-      description: 'List all scheduled tasks with their status and next run time.',
-      promptSnippet: 'List all scheduled tasks.',
+      description: 'List all scheduled prompts with their status and next run time.',
+      promptSnippet: 'List all scheduled prompts.',
       parameters: Type.Object({}),
       async execute(): Promise<AgentToolResult<unknown>> {
         const tasks = await scheduler.list();
@@ -110,9 +115,10 @@ export function createSchedulerTools(scheduler: TaskScheduler): ToolDefinition[]
     {
       name: 'scheduler_get',
       label: 'Scheduler',
-      description: 'Get detailed information about a scheduled task including run history.',
+      description:
+        'Get detailed information about a scheduled prompt, including its schedule and run history.',
       parameters: Type.Object({
-        taskId: Type.String({ description: 'The task ID to query.' }),
+        taskId: Type.String({ description: 'The scheduled-prompt ID to query.' }),
       }),
       async execute(
         _toolCallId: string,
@@ -128,15 +134,16 @@ export function createSchedulerTools(scheduler: TaskScheduler): ToolDefinition[]
     {
       name: 'scheduler_update',
       label: 'Scheduler',
-      description: 'Update a scheduled task. Can change schedule, prompt, name, or enable/disable.',
+      description:
+        'Update a scheduled prompt. Can change schedule, prompt text, name, or enable/disable.',
       parameters: Type.Object({
-        taskId: Type.String({ description: 'The task ID to update.' }),
+        taskId: Type.String({ description: 'The scheduled-prompt ID to update.' }),
         type: Type.Optional(taskTypeSchema),
         schedule: Type.Optional(Type.String({ description: 'New schedule expression.' })),
         prompt: Type.Optional(Type.String({ description: 'New prompt.' })),
         name: Type.Optional(Type.String({ description: 'New name.' })),
         description: Type.Optional(Type.String({ description: 'New description.' })),
-        enabled: Type.Optional(Type.Boolean({ description: 'Enable or disable the task.' })),
+        enabled: Type.Optional(Type.Boolean({ description: 'Enable or disable.' })),
       }),
       async execute(
         _toolCallId: string,
@@ -176,9 +183,9 @@ export function createSchedulerTools(scheduler: TaskScheduler): ToolDefinition[]
     {
       name: 'scheduler_delete',
       label: 'Scheduler',
-      description: 'Delete a scheduled task.',
+      description: 'Delete a scheduled prompt.',
       parameters: Type.Object({
-        taskId: Type.String({ description: 'The task ID to delete.' }),
+        taskId: Type.String({ description: 'The scheduled-prompt ID to delete.' }),
       }),
       async execute(
         _toolCallId: string,
@@ -192,9 +199,9 @@ export function createSchedulerTools(scheduler: TaskScheduler): ToolDefinition[]
     {
       name: 'scheduler_run_now',
       label: 'Scheduler',
-      description: 'Trigger immediate execution of a scheduled task.',
+      description: 'Trigger immediate execution of a scheduled prompt, ignoring its schedule.',
       parameters: Type.Object({
-        taskId: Type.String({ description: 'The task ID to run immediately.' }),
+        taskId: Type.String({ description: 'The scheduled-prompt ID to run immediately.' }),
       }),
       async execute(
         _toolCallId: string,
