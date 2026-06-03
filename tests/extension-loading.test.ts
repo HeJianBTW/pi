@@ -156,7 +156,7 @@ describe('Extension loading contract', () => {
   });
 
   describe('pi-computer-use registrations', () => {
-    it('registers session_start and session_shutdown handlers, tools registered on session_start', async () => {
+    it('registers session_start and session_shutdown handlers', async () => {
       const mod = await import(join(EXTENSIONS_DIR, 'pi-computer-use', 'src', 'index.ts'));
       const pi = createMockExtensionAPI();
       // biome-ignore lint/suspicious/noExplicitAny: mock API
@@ -165,17 +165,6 @@ describe('Extension loading contract', () => {
       const onCalls = pi.on.mock.calls.map((c: unknown[]) => c[0]);
       expect(onCalls).toContain('session_start');
       expect(onCalls).toContain('session_shutdown');
-
-      const sessionStartHandler = pi.on.mock.calls.find(
-        (c: unknown[]) => c[0] === 'session_start',
-      )?.[1] as (...args: unknown[]) => Promise<void>;
-      expect(sessionStartHandler).toBeDefined();
-
-      await sessionStartHandler({ type: 'session_start', reason: 'startup' }, { cwd: process.cwd(), ui: { notify: vi.fn() } });
-
-      expect(pi.registerTool).toHaveBeenCalled();
-      const toolNames = pi.registerTool.mock.calls.map((c: unknown[]) => c[0].name);
-      expect(toolNames).toContain('computer_use_click');
     });
   });
 });

@@ -11,6 +11,11 @@ on:
         options:
           - beta
           - latest
+      release_version:
+        description: npm version to publish, or auto to compute the next version
+        required: true
+        default: auto
+        type: string
 permissions:
   contents: write
 
@@ -72,6 +77,7 @@ jobs:
         id: versioning
         env:
           RELEASE_CHANNEL: ${{ inputs.npm_tag }}
+          RELEASE_VERSION_INPUT: ${{ inputs.release_version }}
         run: |
           node <<'EOF'
           const fs = require("node:fs");
@@ -79,6 +85,7 @@ jobs:
           const { execFileSync } = require("node:child_process");
 
           const channel = process.env.RELEASE_CHANNEL;
+          const versionInput = (process.env.RELEASE_VERSION_INPUT || "auto").trim();
           if (!channel) {
             throw new Error("RELEASE_CHANNEL is required");
           }
@@ -129,7 +136,20 @@ jobs:
               beta: match[4] === undefined ? null : Number(match[4]),
             };
           };
-          parseVersion(localVersion);
+          const formatBaseVersion = (version) => `${version.major}.${version.minor}.${version.patch}`;
+          const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          const writePackageVersion = (file, version) => {
+            const source = fs.readFileSync(file, "utf8");
+            const nextSource = source.replace(
+              /"version"\s*:\s*"[^"]+"/,
+              `"version": "${version}"`
+            );
+            if (nextSource === source) {
+              throw new Error(`Could not update version field in ${file}`);
+            }
+            fs.writeFileSync(file, nextSource);
+          };
+          const parsedLocalVersion = parseVersion(localVersion);
 
           const npmViewJson = (packageName, field) => {
             try {
@@ -157,32 +177,95 @@ jobs:
             packageName,
             versions: normalizeVersions(npmViewJson(packageName, "versions")),
           }));
-          const nextVersion = localVersion;
+          const isFullyPublished = (version) => remoteInfos.every((info) => info.versions?.includes(version));
+          const isPartiallyOrNotPublished = (version) => remoteInfos.some((info) => !info.versions?.includes(version));
+          const computeNextBetaVersion = () => {
+            if (parsedLocalVersion.beta !== null && isPartiallyOrNotPublished(localVersion)) {
+              return localVersion;
+            }
+
+            const baseVersion = formatBaseVersion(parsedLocalVersion);
+            const betaPattern = new RegExp(`^${escapeRegExp(baseVersion)}-beta\\.(\\d+)$`);
+            const remoteBetaNumbers = remoteInfos.flatMap((info) =>
+              (info.versions ?? []).flatMap((version) => {
+                const match = version.match(betaPattern);
+                return match ? [Number(match[1])] : [];
+              })
+            );
+            const nextBetaNumber = remoteBetaNumbers.length > 0 ? Math.max(...remoteBetaNumbers) + 1 : 1;
+            return `${baseVersion}-beta.${nextBetaNumber}`;
+          };
+          const computeNextVersion = () => {
+            if (versionInput !== "" && versionInput !== "auto") {
+              const parsedInputVersion = parseVersion(versionInput);
+              if (channel === "beta" && parsedInputVersion.beta === null) {
+                throw new Error(`Beta releases must use a beta version, received ${versionInput}`);
+              }
+              if (channel === "latest" && parsedInputVersion.beta !== null) {
+                throw new Error(`Latest releases must use a stable version, received ${versionInput}`);
+              }
+              return versionInput;
+            }
+
+            if (channel === "beta") {
+              return computeNextBetaVersion();
+            }
+
+            if (parsedLocalVersion.beta !== null) {
+              throw new Error(
+                `Cannot auto-publish ${localVersion} with the latest dist-tag. Provide a stable release_version.`
+              );
+            }
+            if (isFullyPublished(localVersion)) {
+              throw new Error(
+                `${localVersion} is already published for every package. Provide a new release_version.`
+              );
+            }
+            return localVersion;
+          };
+
+          const nextVersion = computeNextVersion();
+          if (nextVersion !== localVersion) {
+            writePackageVersion(rootPackageFile, nextVersion);
+            for (const { file } of packages) {
+              writePackageVersion(file, nextVersion);
+            }
+          }
+
           const packagesToPublish = remoteInfos
             .filter((info) => !info.versions?.includes(nextVersion))
             .map((info) => info.packageName);
-          const skipPublish = packagesToPublish.length === 0;
 
           console.log(`monorepo release version: ${nextVersion}`);
+          console.log(`requested release version: ${versionInput || "auto"}`);
           console.log(`packages to publish: ${packagesToPublish.length > 0 ? packagesToPublish.join(", ") : "(none)"}`);
+          if (packagesToPublish.length === 0) {
+            throw new Error(
+              `No packages can be published for ${nextVersion}; choose a new release_version before running the release workflow.`
+            );
+          }
 
           fs.appendFileSync(process.env.GITHUB_OUTPUT, `release_version=${nextVersion}\n`);
-          fs.appendFileSync(process.env.GITHUB_OUTPUT, `skip_publish=${skipPublish ? "true" : "false"}\n`);
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, "skip_publish=false\n");
           fs.appendFileSync(process.env.GITHUB_OUTPUT, `publish_filters=${packagesToPublish.join(" ")}\n`);
           EOF
 
-      - name: Ensure release workflow did not change versions
+      - name: Run checks
+        run: pnpm run pr-check
+
+      - name: Commit release version
+        env:
+          RELEASE_VERSION: ${{ steps.versioning.outputs.release_version }}
         run: |
           if git diff --quiet -- package.json packages/*/package.json; then
+            echo "Package versions already at ${RELEASE_VERSION}."
             exit 0
           fi
 
-          echo "Version changes must be committed through a reviewed PR before publishing from master."
           git diff -- package.json packages/*/package.json
-          exit 1
-
-      - name: Run checks
-        run: pnpm run pr-check
+          git add package.json packages/*/package.json
+          git commit -m "chore(release): ${RELEASE_VERSION}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
 
       - name: Publish to npm
         if: steps.versioning.outputs.skip_publish != 'true'
