@@ -206,13 +206,13 @@ importers:
       '@amaster.ai/pi-task-scheduler':
         specifier: workspace:*
         version: link:../pi-task-scheduler
-      '@prisma/client':
-        specifier: ^6.19.3
-        version: 6.19.3(prisma@6.19.3(typescript@5.9.3))(typescript@5.9.3)
       ioredis:
         specifier: ^5.10.1
         version: 5.10.1
     devDependencies:
+      '@prisma/client':
+        specifier: ^6.19.3
+        version: 6.19.3(prisma@6.19.3(typescript@5.9.3))(typescript@5.9.3)
       prisma:
         specifier: ^6.19.3
         version: 6.19.3(typescript@5.9.3)
