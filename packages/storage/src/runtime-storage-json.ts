@@ -1,9 +1,3 @@
-/**
- * Runtime storage adapter factory.
- *
- * Owns the concrete store selection for local JSON and platform DB modes. Route
- * and runtime code depend on store interfaces only.
- */
 import path from 'node:path';
 import type {
   CopilotMemoryStore,
@@ -17,22 +11,18 @@ import type {
   TranscriptStore,
 } from '@amaster.ai/pi-shared';
 import { JsonFileArtifactStore } from './artifact-stores.js';
-import { createDbRuntimeStores, verifyDbRuntimeSchema } from './db-runtime-storage.js';
 import {
   JsonFileLlmGenerationEventStore,
   JsonFileRuntimeEventStore,
   JsonFileRuntimeTimelineEventStore,
   JsonFileToolEventStore,
 } from './event-stores.js';
-import { RedisLockManager } from './redis-locks.js';
 import {
   JsonFileConversationStore,
   JsonFileMemoryStore,
   JsonFileTranscriptStore,
 } from './session-stores.js';
 import { JsonFileSubagentRunStore } from './subagent-store.js';
-
-export type RuntimeStorageMode = 'json' | 'db';
 
 export type RuntimeStorageBundle = {
   store: RuntimeSessionStore;
@@ -46,45 +36,7 @@ export type RuntimeStorageBundle = {
   artifacts: RuntimeArtifactStore;
 };
 
-export function createRuntimeStorage(input: {
-  mode: RuntimeStorageMode;
-  agentDir: string;
-  databaseUrl?: string | undefined;
-  redisUrl?: string | undefined;
-  eventLimits: {
-    runtimeEvents: number;
-    toolEvents: number;
-    llmGenerationEvents: number;
-  };
-}): RuntimeStorageBundle {
-  if (input.mode === 'db') {
-    assertDatabaseStorageConfigured(input.databaseUrl);
-    assertRedisStorageConfigured(input.redisUrl);
-    return createDbRuntimeStores(input.databaseUrl, input.redisUrl);
-  }
-  return createJsonRuntimeStorage(input.agentDir, input.eventLimits);
-}
-
-export async function verifyRuntimeStorage(input: {
-  mode: RuntimeStorageMode;
-  databaseUrl?: string | undefined;
-  redisUrl?: string | undefined;
-}): Promise<void> {
-  if (input.mode !== 'db') {
-    return;
-  }
-  assertDatabaseStorageConfigured(input.databaseUrl);
-  assertRedisStorageConfigured(input.redisUrl);
-  await verifyDbRuntimeSchema(input.databaseUrl);
-  const locks = new RedisLockManager(input.redisUrl);
-  try {
-    await locks.ping();
-  } finally {
-    await locks.disconnect();
-  }
-}
-
-function createJsonRuntimeStorage(
+export function createJsonRuntimeStorage(
   agentDir: string,
   eventLimits: {
     runtimeEvents: number;
@@ -115,18 +67,4 @@ function createJsonRuntimeStorage(
     subagents: new JsonFileSubagentRunStore(path.join(agentDir, 'subagents.json')),
     artifacts: new JsonFileArtifactStore(path.join(agentDir, 'artifacts.json')),
   };
-}
-
-function assertDatabaseStorageConfigured(
-  databaseUrl: string | undefined,
-): asserts databaseUrl is string {
-  if (!databaseUrl) {
-    throw new Error('STORAGE_MODE=db requires DATABASE_URL.');
-  }
-}
-
-function assertRedisStorageConfigured(redisUrl: string | undefined): asserts redisUrl is string {
-  if (!redisUrl) {
-    throw new Error('STORAGE_MODE=db requires REDIS_URL.');
-  }
 }

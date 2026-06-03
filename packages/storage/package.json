@@ -19,9 +19,13 @@
       "types": "./dist/db.d.ts",
       "default": "./dist/db.js"
     },
-    "./scheduler": {
-      "types": "./dist/scheduler.d.ts",
-      "default": "./dist/scheduler.js"
+    "./scheduler/json": {
+      "types": "./dist/scheduler-json.d.ts",
+      "default": "./dist/scheduler-json.js"
+    },
+    "./scheduler/db": {
+      "types": "./dist/scheduler-db.d.ts",
+      "default": "./dist/scheduler-db.js"
     },
     "./internal": {
       "types": "./dist/internal.d.ts",
@@ -51,7 +55,8 @@
     "pi-storage-migrate": "./dist/migration-main.js"
   },
   "scripts": {
-    "build": "pnpm run prisma:generate && tsc -b",
+    "build": "pnpm run clean && pnpm run prisma:generate && tsc -b",
+    "clean": "node -e \"const fs=require('node:fs');fs.rmSync('dist',{recursive:true,force:true});fs.rmSync('tsconfig.tsbuildinfo',{force:true})\"",
     "db:migrate": "node ./dist/migration-main.js",
     "prisma:generate": "prisma generate --schema prisma/schema.prisma",
     "typecheck": "pnpm run prisma:generate && tsc -b --pretty false",
@@ -60,10 +65,18 @@
   "dependencies": {
     "@amaster.ai/pi-task-scheduler": "workspace:*",
     "@amaster.ai/pi-shared": "workspace:*",
-    "@prisma/client": "^6.19.3",
     "ioredis": "^5.10.1"
   },
+  "peerDependencies": {
+    "@prisma/client": "^6.19.3"
+  },
+  "peerDependenciesMeta": {
+    "@prisma/client": {
+      "optional": true
+    }
+  },
   "devDependencies": {
+    "@prisma/client": "^6.19.3",
     "prisma": "^6.19.3",
     "vitest": "^4.0.0"
   }
