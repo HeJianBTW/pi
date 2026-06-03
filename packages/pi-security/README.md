@@ -40,7 +40,7 @@ Profiles are derived from a `sandbox` × `approval` matrix. Pick one as a starti
 | Mode               | Allowed tools                                  | Denied tools          |
 |--------------------|------------------------------------------------|-----------------------|
 | `read-only`        | `read`, `ls`, `find`, `grep`                   | `write`, `edit`, `bash` |
-| `workspace-write`  | `read`, `ls`, `find`, `grep`, `write`, `edit`  | `bash`                |
+| `workspace-write`  | `read`, `ls`, `find`, `grep`, `write`, `edit`, `bash` | —                     |
 | `full-access`      | `*` (all tools)                                | —                     |
 
 Tool names align with the pi-coding-agent built-in tools: `bash`, `read`, `write`, `edit`, `ls`, `find`, `grep`.

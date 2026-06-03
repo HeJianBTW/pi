@@ -256,6 +256,6 @@ describe('loadFilePolicies 3-layer with agentDir', () => {
     const policy = resolveCapabilityPolicy('agent-profile', {}, filePolicies);
     expect(isCapabilityExposed('read', policy)).toBe(true);
     expect(isCapabilityExposed('write', policy)).toBe(true);
-    expect(isCapabilityExposed('bash', policy)).toBe(false);
+    expect(isCapabilityExposed('bash', policy)).toBe(true);
   });
 });

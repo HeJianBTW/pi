@@ -56,13 +56,13 @@ describe('examples/reviewer.json', () => {
     rmSync(join(cwd, '..'), { recursive: true, force: true });
   });
 
-  it('exposes workspace-write capabilities (read + write, not bash)', () => {
+  it('exposes workspace-write capabilities (read + write + bash)', () => {
     const filePolicies = loadFilePolicies(cwd);
     const policy = resolveCapabilityPolicy('reviewer', {}, filePolicies);
     expect(isCapabilityExposed('read', policy)).toBe(true);
     expect(isCapabilityExposed('write', policy)).toBe(true);
     expect(isCapabilityExposed('edit', policy)).toBe(true);
-    expect(isCapabilityExposed('bash', policy)).toBe(false);
+    expect(isCapabilityExposed('bash', policy)).toBe(true);
   });
 
   it('asks for approval on bash via custom rule', () => {
