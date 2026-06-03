@@ -136,8 +136,8 @@ const SANDBOX_CAPABILITIES: Record<SandboxMode, CapabilityPolicy> = {
     deny: ['write', 'edit', 'bash'],
   },
   'workspace-write': {
-    allow: ['read', 'ls', 'find', 'grep', 'write', 'edit'],
-    deny: ['bash'],
+    allow: ['read', 'ls', 'find', 'grep', 'write', 'edit', 'bash'],
+    deny: [],
   },
   'full-access': { allow: ['*'] },
 };

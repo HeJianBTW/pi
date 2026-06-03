@@ -60,6 +60,16 @@ describe('security resources and risk', () => {
 });
 
 describe('security policy', () => {
+  it('allows bash in workspace-write profiles', () => {
+    const capabilities = resolveCapabilityPolicy('default');
+    const engine = createSecurityPolicyEngineForProfile('default');
+
+    expect(isCapabilityExposed('bash', capabilities)).toBe(true);
+    expect(
+      engine.decide({ request, toolCall: tool('bash', 'sandbox', { command: 'ls' }) }),
+    ).toEqual({ kind: 'allow' });
+  });
+
   it('separates exposed capabilities from execution rules', () => {
     const config = {
       profiles: {
