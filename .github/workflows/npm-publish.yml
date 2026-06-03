@@ -100,7 +100,6 @@ jobs:
             .map((entry) => path.join(packagesDir, entry.name, "package.json"))
             .filter((file) => fs.existsSync(file));
 
-          const rootPackage = JSON.parse(fs.readFileSync(rootPackageFile, "utf8"));
           const packages = packageFiles.map((file) => ({
             file,
             pkg: JSON.parse(fs.readFileSync(file, "utf8")),
@@ -109,19 +108,6 @@ jobs:
           const publishedPackages = publishablePackages.map(({ pkg }) => pkg.name);
           if (publishablePackages.length === 0) {
             throw new Error("No publishable packages found.");
-          }
-
-          const localVersion = rootPackage.version;
-          if (!localVersion) {
-            throw new Error("Root package version is required.");
-          }
-          const mismatchedLocalVersions = packages
-            .filter(({ pkg }) => pkg.version !== localVersion)
-            .map(({ pkg }) => `${pkg.name}@${pkg.version}`);
-          if (mismatchedLocalVersions.length > 0) {
-            throw new Error(
-              `Package versions must match root ${localVersion} before publishing: ${mismatchedLocalVersions.join(", ")}`
-            );
           }
 
           const parseVersion = (version) => {
@@ -137,19 +123,37 @@ jobs:
             };
           };
           const formatBaseVersion = (version) => `${version.major}.${version.minor}.${version.patch}`;
-          const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          const formatVersion = (version) => {
+            const baseVersion = formatBaseVersion(version);
+            return version.beta === null ? baseVersion : `${baseVersion}-beta.${version.beta}`;
+          };
+          const compareVersions = (left, right) => {
+            for (const part of ["major", "minor", "patch"]) {
+              if (left[part] !== right[part]) {
+                return left[part] - right[part];
+              }
+            }
+            if (left.beta === right.beta) return 0;
+            if (left.beta === null) return 1;
+            if (right.beta === null) return -1;
+            return left.beta - right.beta;
+          };
+          const maxVersion = (versions) =>
+            versions.reduce((highest, version) =>
+              highest === null || compareVersions(version, highest) > 0 ? version : highest,
+              null
+            );
           const writePackageVersion = (file, version) => {
             const source = fs.readFileSync(file, "utf8");
-            const nextSource = source.replace(
-              /"version"\s*:\s*"[^"]+"/,
-              `"version": "${version}"`
-            );
-            if (nextSource === source) {
+            const versionFieldPattern = /"version"\s*:\s*"[^"]+"/;
+            if (!versionFieldPattern.test(source)) {
               throw new Error(`Could not update version field in ${file}`);
             }
-            fs.writeFileSync(file, nextSource);
+            const nextSource = source.replace(versionFieldPattern, `"version": "${version}"`);
+            if (nextSource !== source) {
+              fs.writeFileSync(file, nextSource);
+            }
           };
-          const parsedLocalVersion = parseVersion(localVersion);
 
           const npmViewJson = (packageName, field) => {
             try {
@@ -178,22 +182,47 @@ jobs:
             versions: normalizeVersions(npmViewJson(packageName, "versions")),
           }));
           const isFullyPublished = (version) => remoteInfos.every((info) => info.versions?.includes(version));
-          const isPartiallyOrNotPublished = (version) => remoteInfos.some((info) => !info.versions?.includes(version));
+          const publishedVersions = remoteInfos
+            .flatMap((info) => info.versions ?? [])
+            .map((version) => {
+              try {
+                return parseVersion(version);
+              } catch {
+                return null;
+              }
+            })
+            .filter((version) => version !== null);
+
           const computeNextBetaVersion = () => {
-            if (parsedLocalVersion.beta !== null && isPartiallyOrNotPublished(localVersion)) {
-              return localVersion;
+            const highestBeta = maxVersion(publishedVersions.filter((version) => version.beta !== null));
+            if (highestBeta === null) {
+              throw new Error(
+                "Cannot auto-publish a beta release because npm has no published beta versions. Provide release_version."
+              );
             }
 
-            const baseVersion = formatBaseVersion(parsedLocalVersion);
-            const betaPattern = new RegExp(`^${escapeRegExp(baseVersion)}-beta\\.(\\d+)$`);
-            const remoteBetaNumbers = remoteInfos.flatMap((info) =>
-              (info.versions ?? []).flatMap((version) => {
-                const match = version.match(betaPattern);
-                return match ? [Number(match[1])] : [];
-              })
-            );
-            const nextBetaNumber = remoteBetaNumbers.length > 0 ? Math.max(...remoteBetaNumbers) + 1 : 1;
-            return `${baseVersion}-beta.${nextBetaNumber}`;
+            const highestBetaVersion = formatVersion(highestBeta);
+            if (!isFullyPublished(highestBetaVersion)) {
+              return highestBetaVersion;
+            }
+
+            return formatVersion({ ...highestBeta, beta: highestBeta.beta + 1 });
+          };
+          const computeLatestVersion = () => {
+            const highestStable = maxVersion(publishedVersions.filter((version) => version.beta === null));
+            if (highestStable === null) {
+              throw new Error(
+                "Cannot auto-publish with the latest dist-tag because npm has no published stable versions. Provide release_version."
+              );
+            }
+
+            const highestStableVersion = formatVersion(highestStable);
+            if (isFullyPublished(highestStableVersion)) {
+              throw new Error(
+                `${highestStableVersion} is already published for every package. Provide a stable release_version.`
+              );
+            }
+            return highestStableVersion;
           };
           const computeNextVersion = () => {
             if (versionInput !== "" && versionInput !== "auto") {
@@ -211,25 +240,13 @@ jobs:
               return computeNextBetaVersion();
             }
 
-            if (parsedLocalVersion.beta !== null) {
-              throw new Error(
-                `Cannot auto-publish ${localVersion} with the latest dist-tag. Provide a stable release_version.`
-              );
-            }
-            if (isFullyPublished(localVersion)) {
-              throw new Error(
-                `${localVersion} is already published for every package. Provide a new release_version.`
-              );
-            }
-            return localVersion;
+            return computeLatestVersion();
           };
 
           const nextVersion = computeNextVersion();
-          if (nextVersion !== localVersion) {
-            writePackageVersion(rootPackageFile, nextVersion);
-            for (const { file } of packages) {
-              writePackageVersion(file, nextVersion);
-            }
+          writePackageVersion(rootPackageFile, nextVersion);
+          for (const { file } of packages) {
+            writePackageVersion(file, nextVersion);
           }
 
           const packagesToPublish = remoteInfos
@@ -238,6 +255,8 @@ jobs:
 
           console.log(`monorepo release version: ${nextVersion}`);
           console.log(`requested release version: ${versionInput || "auto"}`);
+          console.log("release version source: npm published package versions");
+          console.log("package.json versions are updated only in this workflow workspace and are not committed");
           console.log(`packages to publish: ${packagesToPublish.length > 0 ? packagesToPublish.join(", ") : "(none)"}`);
           if (packagesToPublish.length === 0) {
             throw new Error(
@@ -252,20 +271,6 @@ jobs:
 
       - name: Run checks
         run: pnpm run pr-check
-
-      - name: Commit release version
-        env:
-          RELEASE_VERSION: ${{ steps.versioning.outputs.release_version }}
-        run: |
-          if git diff --quiet -- package.json packages/*/package.json; then
-            echo "Package versions already at ${RELEASE_VERSION}."
-            exit 0
-          fi
-
-          git diff -- package.json packages/*/package.json
-          git add package.json packages/*/package.json
-          git commit -m "chore(release): ${RELEASE_VERSION}"
-          git push origin "HEAD:${GITHUB_REF_NAME}"
 
       - name: Publish to npm
         if: steps.versioning.outputs.skip_publish != 'true'
