@@ -28,6 +28,9 @@ jobs:
     name: publish packages
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    outputs:
+      publish_filters: ${{ steps.versioning.outputs.publish_filters }}
+      release_version: ${{ steps.versioning.outputs.release_version }}
     env:
       GIT_ACTOR: ${{ github.actor }}
 
@@ -313,3 +316,242 @@ jobs:
             --verify-tag \
             --title "v${RELEASE_VERSION}" \
             --notes "Published npm packages with dist-tag \`${RELEASE_CHANNEL}\`."
+
+  notify-feishu:
+    name: notify feishu
+    needs: publish
+    if: needs.publish.result == 'success'
+    runs-on:
+      - self-hosted
+      - instance-hnpsq9go
+      - linux
+      - x64
+    timeout-minutes: 10
+    permissions:
+      contents: read
+
+    steps:
+      - name: Post message
+        env:
+          FEISHU_WEBHOOK_SECRET: ${{ secrets.FEISHU_WEBHOOK_SECRET }}
+          FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
+          INPUT_ACTOR: ${{ github.actor }}
+          INPUT_PACKAGE_FILTERS: ${{ needs.publish.outputs.publish_filters }}
+          INPUT_REF_NAME: ${{ github.ref_name }}
+          INPUT_RELEASE_CHANNEL: ${{ inputs.npm_tag }}
+          INPUT_RELEASE_VERSION: ${{ needs.publish.outputs.release_version }}
+          INPUT_REPOSITORY: ${{ github.repository }}
+          INPUT_RUN_ATTEMPT: ${{ github.run_attempt }}
+          INPUT_RUN_ID: ${{ github.run_id }}
+          INPUT_SERVER_URL: ${{ github.server_url }}
+          INPUT_SHA: ${{ github.sha }}
+          INPUT_WORKFLOW_NAME: ${{ github.workflow }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -z "${FEISHU_WEBHOOK_URL}" ]; then
+            echo "FEISHU_WEBHOOK_URL repository secret is not configured."
+            exit 1
+          fi
+
+          payload_file="$(mktemp)"
+
+          node <<'NODE' > "${payload_file}"
+          const crypto = require('node:crypto');
+
+          const actorMentionMap = {
+            'CheshireJCat': 'ou_8746046faa28114c556e9ad62c6e356c',
+            'Weaxs': 'ou_994c42003f423b71369ae44630f5ed3d',
+            'liushuang216': 'ou_e8b6aca2e27c4cc19c63736d2b7d2573',
+            '2betop': 'ou_20679b90d350f87842db10ac3fc9198c',
+            'hsm-lv': 'ou_50b260a2a6f729c2f06e6969e4b4e3f9',
+            'LureXudzhang': 'ou_0eeb98d8a39e1bda9c17bb1d85a91225',
+            'ForLcy': 'ou_174bbc2885c7a61ee514c386dd3b6df1',
+            'nanxing137': 'ou_11b2a4e43d0acefac59049e35cac4bef',
+            'pcdqc': 'ou_eb13b0a834f22a4be461a6ef7594a8fb'
+          };
+
+          const sha = process.env.INPUT_SHA || '';
+          const shortSha = sha.slice(0, 7) || '-';
+          const repo = process.env.INPUT_REPOSITORY;
+          const serverUrl = process.env.INPUT_SERVER_URL || 'https://github.com';
+          const runId = process.env.INPUT_RUN_ID;
+          const runAttempt = process.env.INPUT_RUN_ATTEMPT || '1';
+          const actor = process.env.INPUT_ACTOR || '-';
+          const actorOpenId = actorMentionMap[actor];
+          const actorLine = actorOpenId
+            ? `**触发人**\n<at id="${actorOpenId}"></at>`
+            : `**触发人**\n${actor}`;
+          const refName = process.env.INPUT_REF_NAME || '-';
+          const releaseChannel = process.env.INPUT_RELEASE_CHANNEL || '-';
+          const releaseVersion = process.env.INPUT_RELEASE_VERSION || '-';
+          const packageFilters = (process.env.INPUT_PACKAGE_FILTERS || '')
+            .split(/\s+/)
+            .map((item) => item.trim())
+            .filter(Boolean);
+          const packageList = packageFilters.length > 0
+            ? packageFilters.map((item) => `- \`${item}\``).join('\n')
+            : '-';
+          const timestamp = Math.floor(Date.now() / 1000).toString();
+          const webhookSecret = process.env.FEISHU_WEBHOOK_SECRET || '';
+          const repoUrl = `${serverUrl}/${repo}`;
+          const runUrl = `${serverUrl}/${repo}/actions/runs/${runId}/attempts/${runAttempt}`;
+          const releaseUrl = `${serverUrl}/${repo}/releases/tag/v${releaseVersion}`;
+
+          const body = {
+            msg_type: 'interactive',
+            card: {
+              schema: '2.0',
+              config: {
+                wide_screen_mode: true,
+              },
+              header: {
+                template: 'green',
+                title: {
+                  tag: 'plain_text',
+                  content: `${repo} npm 发布成功`,
+                },
+                subtitle: {
+                  tag: 'plain_text',
+                  content: `版本: v${releaseVersion} (${releaseChannel})`,
+                },
+              },
+              body: {
+                direction: 'vertical',
+                padding: '8px 8px 8px 8px',
+                elements: [
+                  {
+                    tag: 'markdown',
+                    content: actorLine,
+                  },
+                  {
+                    tag: 'column_set',
+                    columns: [
+                      {
+                        tag: 'column',
+                        width: 'weighted',
+                        weight: 1,
+                        elements: [
+                          {
+                            tag: 'markdown',
+                            content: `**版本**\nv${releaseVersion}`,
+                          },
+                        ],
+                      },
+                      {
+                        tag: 'column',
+                        width: 'weighted',
+                        weight: 1,
+                        elements: [
+                          {
+                            tag: 'markdown',
+                            content: `**dist-tag**\n${releaseChannel}`,
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                  {
+                    tag: 'column_set',
+                    columns: [
+                      {
+                        tag: 'column',
+                        width: 'weighted',
+                        weight: 1,
+                        elements: [
+                          {
+                            tag: 'markdown',
+                            content: `**分支**\n${refName}`,
+                          },
+                        ],
+                      },
+                      {
+                        tag: 'column',
+                        width: 'weighted',
+                        weight: 1,
+                        elements: [
+                          {
+                            tag: 'markdown',
+                            content: `**提交**\n${shortSha}`,
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                  {
+                    tag: 'markdown',
+                    content: `**发布包**\n${packageList}`,
+                  },
+                  {
+                    tag: 'column_set',
+                    horizontal_spacing: '4px',
+                    columns: [
+                      {
+                        tag: 'column',
+                        width: 'auto',
+                        elements: [
+                          {
+                            tag: 'button',
+                            type: 'primary_filled',
+                            text: {
+                              tag: 'plain_text',
+                              content: '查看 Release',
+                            },
+                            url: releaseUrl,
+                          },
+                        ],
+                      },
+                      {
+                        tag: 'column',
+                        width: 'auto',
+                        elements: [
+                          {
+                            tag: 'button',
+                            text: {
+                              tag: 'plain_text',
+                              content: '发布记录',
+                            },
+                            url: runUrl,
+                          },
+                        ],
+                      },
+                      {
+                        tag: 'column',
+                        width: 'auto',
+                        elements: [
+                          {
+                            tag: 'button',
+                            text: {
+                              tag: 'plain_text',
+                              content: '仓库',
+                            },
+                            url: repoUrl,
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                ],
+              },
+            },
+          };
+
+          if (webhookSecret) {
+            const stringToSign = `${timestamp}\n${webhookSecret}`;
+            const sign = crypto
+              .createHmac('sha256', Buffer.from(stringToSign, 'utf8'))
+              .update(Buffer.alloc(0))
+              .digest('base64');
+            body.timestamp = timestamp;
+            body.sign = sign;
+          }
+
+          process.stdout.write(JSON.stringify(body));
+          NODE
+
+          curl --fail --silent --show-error \
+            -H 'Content-Type: application/json' \
+            -X POST \
+            --data @"${payload_file}" \
+            "${FEISHU_WEBHOOK_URL}"
