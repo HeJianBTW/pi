@@ -55,6 +55,12 @@ export class JsonFileRuntimeTimelineEventStore implements RuntimeTimelineEventSt
   ): Promise<RuntimeTimelineEvent[]> {
     await this.writeTail.catch(() => undefined);
     const events = await this.readAll();
+    const cursorEvent = input.cursor
+      ? events.find(
+          (event) =>
+            event.createdAt === input.cursor?.createdAt && event.eventId === input.cursor.eventId,
+        )
+      : undefined;
     const filtered = events.filter(
       (event) =>
         (!input.sessionId ||
@@ -64,13 +70,9 @@ export class JsonFileRuntimeTimelineEventStore implements RuntimeTimelineEventSt
         (!input.traceId || event.traceId === input.traceId) &&
         (input.afterSeq === undefined || event.eventSeq > input.afterSeq) &&
         (input.beforeSeq === undefined || event.eventSeq < input.beforeSeq) &&
-        (!input.cursor || compareTimelineCursor(event, input.cursor) < 0),
+        (!input.cursor || compareTimelineCursor(event, input.cursor, cursorEvent) < 0),
     );
-    const sorted = filtered.sort(
-      (left, right) =>
-        Date.parse(left.createdAt) - Date.parse(right.createdAt) ||
-        left.eventId.localeCompare(right.eventId),
-    );
+    const sorted = filtered.sort(compareTimelineEvents);
     const limit = input.limit && input.limit > 0 ? input.limit : sorted.length;
     return sorted.slice(-limit);
   }
@@ -94,9 +96,30 @@ export class JsonFileRuntimeTimelineEventStore implements RuntimeTimelineEventSt
   }
 }
 
-function compareTimelineCursor(event: RuntimeTimelineEvent, cursor: RuntimeTimelineCursor): number {
+function compareTimelineEvents(left: RuntimeTimelineEvent, right: RuntimeTimelineEvent): number {
+  return (
+    Date.parse(left.createdAt) - Date.parse(right.createdAt) ||
+    left.eventSeq - right.eventSeq ||
+    left.eventId.localeCompare(right.eventId)
+  );
+}
+
+function compareTimelineCursor(
+  event: RuntimeTimelineEvent,
+  cursor: RuntimeTimelineCursor,
+  cursorEvent: RuntimeTimelineEvent | undefined,
+): number {
   const timeDiff = Date.parse(event.createdAt) - Date.parse(cursor.createdAt);
-  return timeDiff || event.eventId.localeCompare(cursor.eventId);
+  if (timeDiff) {
+    return timeDiff;
+  }
+  if (cursorEvent) {
+    const sequenceDiff = event.eventSeq - cursorEvent.eventSeq;
+    if (sequenceDiff) {
+      return sequenceDiff;
+    }
+  }
+  return event.eventId.localeCompare(cursor.eventId);
 }
 
 export class JsonFileToolEventStore implements ToolEventStore {

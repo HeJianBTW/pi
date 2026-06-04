@@ -48,7 +48,24 @@ describe('JsonFileRuntimeTimelineEventStore', () => {
     ]);
   });
 
-  it('supports stable createdAt/eventId cursor paging over merged timeline order', async () => {
+  it('preserves append order for events written in the same millisecond', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'pi-events-'));
+    tmpDirs.push(dir);
+    const store = new JsonFileRuntimeTimelineEventStore(path.join(dir, 'events.json'), 100);
+    const createdAt = '2026-05-13T00:00:00.000Z';
+
+    await store.append(event('z-delta', 'session-1', 'assistant_thinking_delta', { createdAt }));
+    await store.append(event('a-delta', 'session-1', 'assistant_thinking_delta', { createdAt }));
+    await store.append(event('m-delta', 'session-1', 'assistant_thinking_delta', { createdAt }));
+
+    expect(
+      (await store.list({ tenantId: 'tenant-1', sessionId: 'session-1' })).map(
+        (entry) => entry.eventId,
+      ),
+    ).toEqual(['z-delta', 'a-delta', 'm-delta']);
+  });
+
+  it('supports stable createdAt/eventSeq cursor paging over merged timeline order', async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'pi-events-'));
     tmpDirs.push(dir);
     const store = new JsonFileRuntimeTimelineEventStore(path.join(dir, 'events.json'), 100);
@@ -76,6 +93,29 @@ describe('JsonFileRuntimeTimelineEventStore', () => {
       cursor: { createdAt: firstPage[0]?.createdAt ?? '', eventId: firstPage[0]?.eventId ?? '' },
     });
     expect(secondPage.map((entry) => entry.eventId)).toEqual(['event-1']);
+  });
+
+  it('uses eventSeq for cursor paging across same-millisecond events', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'pi-events-'));
+    tmpDirs.push(dir);
+    const store = new JsonFileRuntimeTimelineEventStore(path.join(dir, 'events.json'), 100);
+    const createdAt = '2026-05-13T00:00:00.000Z';
+
+    await store.append(event('z-delta', 'session-1', 'assistant_thinking_delta', { createdAt }));
+    await store.append(event('a-delta', 'session-1', 'assistant_thinking_delta', { createdAt }));
+    await store.append(event('m-delta', 'session-1', 'assistant_thinking_delta', { createdAt }));
+    await store.append(event('q-delta', 'session-1', 'assistant_thinking_delta', { createdAt }));
+
+    const firstPage = await store.list({ tenantId: 'tenant-1', sessionId: 'session-1', limit: 2 });
+    expect(firstPage.map((entry) => entry.eventId)).toEqual(['m-delta', 'q-delta']);
+
+    const secondPage = await store.list({
+      tenantId: 'tenant-1',
+      sessionId: 'session-1',
+      limit: 2,
+      cursor: { createdAt: firstPage[0]?.createdAt ?? '', eventId: firstPage[0]?.eventId ?? '' },
+    });
+    expect(secondPage.map((entry) => entry.eventId)).toEqual(['z-delta', 'a-delta']);
   });
 
   it('treats eventId as append idempotency key', async () => {
@@ -145,10 +185,17 @@ function event(
   eventId: string,
   sessionId: string,
   eventName: string,
-  extra: { parentSessionId?: string; childSessionId?: string; runId?: string } = {},
+  extra: {
+    parentSessionId?: string;
+    childSessionId?: string;
+    runId?: string;
+    createdAt?: string;
+  } = {},
 ) {
   const sequenceHint = Number(eventId.match(/\d+/)?.[0] ?? 0);
-  const createdAt = new Date(Date.UTC(2026, 4, 13, 0, 0, 0, sequenceHint)).toISOString();
+  const createdAt =
+    extra.createdAt ?? new Date(Date.UTC(2026, 4, 13, 0, 0, 0, sequenceHint)).toISOString();
+  const { createdAt: _createdAt, ...extraFields } = extra;
   return {
     eventId,
     eventName,
@@ -158,6 +205,6 @@ function event(
     conversationId: sessionId,
     createdAt,
     payload: { id: eventId, sessionId, createdAt },
-    ...extra,
+    ...extraFields,
   };
 }

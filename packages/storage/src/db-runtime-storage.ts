@@ -426,12 +426,23 @@ class DbRuntimeTimelineEventStore implements RuntimeTimelineEventStore {
     },
   ): Promise<RuntimeTimelineEvent[]> {
     const limit = positiveLimit(input.limit);
+    const cursorEventSeq = input.cursor
+      ? await this.findCursorEventSeq(input.cursor.eventId)
+      : undefined;
     const rows = await this.db.prisma.piAgentEvent.findMany({
-      where: timelineWhere(input),
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      where: timelineWhere(input, cursorEventSeq),
+      orderBy: [{ createdAt: 'desc' }, { eventSeq: 'desc' }, { id: 'desc' }],
       take: limit,
     });
     return rows.map(timelineEventFromPrisma).reverse();
+  }
+
+  private async findCursorEventSeq(eventId: string): Promise<bigint | undefined> {
+    const row = await this.db.prisma.piAgentEvent.findUnique({
+      where: { id: eventId },
+      select: { eventSeq: true },
+    });
+    return row?.eventSeq;
   }
 
   async listBySource(
@@ -449,7 +460,7 @@ class DbRuntimeTimelineEventStore implements RuntimeTimelineEventStore {
         ...timelineWhere(input),
         ...(input.eventType ? { eventType: input.eventType } : {}),
       },
-      orderBy: [{ eventSeq: 'desc' }, { createdAt: 'desc' }],
+      orderBy: [{ createdAt: 'desc' }, { eventSeq: 'desc' }, { id: 'desc' }],
       take: positiveLimit(input.limit),
     });
     return rows.map(timelineEventFromPrisma).reverse();
@@ -878,14 +889,17 @@ function messageCreateInput(
   };
 }
 
-function timelineWhere(input: {
-  tenantId?: string;
-  sessionId?: string;
-  traceId?: string;
-  afterSeq?: number;
-  beforeSeq?: number;
-  cursor?: RuntimeTimelineCursor;
-}): Prisma.PiAgentEventWhereInput {
+function timelineWhere(
+  input: {
+    tenantId?: string;
+    sessionId?: string;
+    traceId?: string;
+    afterSeq?: number;
+    beforeSeq?: number;
+    cursor?: RuntimeTimelineCursor;
+  },
+  cursorEventSeq?: bigint,
+): Prisma.PiAgentEventWhereInput {
   const clauses: Prisma.PiAgentEventWhereInput[] = [];
   if (input.tenantId) clauses.push({ tenantId: input.tenantId });
   if (input.sessionId) {
@@ -907,12 +921,27 @@ function timelineWhere(input: {
     });
   }
   if (input.cursor) {
-    clauses.push({
-      OR: [
-        { createdAt: { lt: toDate(input.cursor.createdAt) } },
-        { createdAt: toDate(input.cursor.createdAt), id: { lt: input.cursor.eventId } },
-      ],
-    });
+    const cursorCreatedAt = toDate(input.cursor.createdAt);
+    clauses.push(
+      cursorEventSeq === undefined
+        ? {
+            OR: [
+              { createdAt: { lt: cursorCreatedAt } },
+              { createdAt: cursorCreatedAt, id: { lt: input.cursor.eventId } },
+            ],
+          }
+        : {
+            OR: [
+              { createdAt: { lt: cursorCreatedAt } },
+              { createdAt: cursorCreatedAt, eventSeq: { lt: cursorEventSeq } },
+              {
+                createdAt: cursorCreatedAt,
+                eventSeq: cursorEventSeq,
+                id: { lt: input.cursor.eventId },
+              },
+            ],
+          },
+    );
   }
   return clauses.length > 0 ? { AND: clauses } : {};
 }
