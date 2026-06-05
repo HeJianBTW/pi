@@ -1,0 +1,73 @@
+{
+  "name": "@amaster.ai/pi-image-gen",
+  "version": "0.1.2-beta.14",
+  "description": "Pi extension for image generation via OpenAI gpt-image, Google Nano Banana (Gemini), Alibaba Qwen-Image, OpenRouter, and custom providers.",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "extension",
+    "image-generation",
+    "nano-banana",
+    "gpt-image",
+    "qwen-image",
+    "openrouter"
+  ],
+  "license": "Apache-2.0",
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": {
+      "default": "./package.json"
+    }
+  },
+  "files": [
+    "dist",
+    "preview.png",
+    "README.md"
+  ],
+  "pi": {
+    "image": "https://raw.githubusercontent.com/TGYD-helige/pi/master/packages/pi-image-gen/preview.png",
+    "extensions": [
+      "./dist/index.js"
+    ]
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TGYD-helige/pi.git",
+    "directory": "packages/pi-image-gen"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b --pretty false",
+    "test": "vitest run src"
+  },
+  "dependencies": {
+    "@amaster.ai/pi-shared": "workspace:*"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=0.74.0",
+    "typebox": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    },
+    "typebox": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "0.74.0",
+    "typebox": "*",
+    "vitest": "^4.0.0"
+  }
+}

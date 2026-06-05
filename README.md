@@ -25,6 +25,7 @@ product-specific UI.
 | Extension | `@amaster.ai/pi-memory` | Persistent curated memory (`MEMORY.md` + `USER.md`) injected into the system prompt as a frozen snapshot. |
 | Extension | `@amaster.ai/pi-security` | Resource-aware security policy engine and tool authorization. |
 | Extension | `@amaster.ai/pi-teamwork` | Team collaboration and issue management via Multica. |
+| Extension | `@amaster.ai/pi-image-gen` | Image generation via OpenAI gpt-image, Google Nano Banana, Alibaba Qwen-Image, OpenRouter, and custom providers. |
 
 Core packages provide types and persistence used by every host application.
 Extension packages each register Pi runtime extensions via their `./extension`
@@ -49,6 +50,11 @@ Every package is ESM-only and published under the `@amaster.ai` npm scope.
     <td><strong>@amaster.ai/pi-memory</strong><br><img src="./packages/pi-memory/preview.png" alt="pi-memory preview" width="260"></td>
     <td><strong>@amaster.ai/pi-security</strong><br><img src="./packages/pi-security/preview.png" alt="pi-security preview" width="260"></td>
     <td><strong>@amaster.ai/pi-teamwork</strong><br><img src="./packages/pi-teamwork/preview.png" alt="pi-teamwork preview" width="260"></td>
+  </tr>
+  <tr>
+    <td><strong>@amaster.ai/pi-image-gen</strong><br><img src="./packages/pi-image-gen/preview.png" alt="pi-image-gen preview" width="260"></td>
+    <td></td>
+    <td></td>
   </tr>
 </table>
 
