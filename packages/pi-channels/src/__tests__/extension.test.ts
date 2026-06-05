@@ -83,6 +83,7 @@ describe('piChannelsExtension', () => {
     mockPi.registerCommand.mockClear();
     vi.mocked(configModule.loadChannelConfig).mockClear();
     vi.mocked(configModule.updateLocalChannelConfig).mockClear();
+    vi.unstubAllEnvs();
     vi.unstubAllGlobals();
   });
 
@@ -94,6 +95,8 @@ describe('piChannelsExtension', () => {
     expect(events.has('channel:send')).toBe(true);
     expect(events.has('channel:register')).toBe(true);
     expect(events.has('channel:list')).toBe(true);
+    expect(events.has('channel:status')).toBe(true);
+    expect(events.has('channel:capture')).toBe(true);
     expect(events.has('channel:reload')).toBe(true);
     expect(commands.has('channel')).toBe(true);
     expect(tools.has('notify')).toBe(true);
@@ -158,6 +161,169 @@ describe('piChannelsExtension', () => {
     });
   });
 
+  test('channel:reload can activate from a host-provided cwd', async () => {
+    piChannelsExtension(mockPi as never);
+    const callback = vi.fn();
+
+    events.get('channel:reload')?.({ cwd: '/workspace', callback });
+
+    await vi.waitFor(() => {
+      expect(callback).toHaveBeenCalledWith({ ok: true });
+    });
+    const statusCallback = vi.fn();
+    events.get('channel:status')?.({ callback: statusCallback });
+    expect(statusCallback).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ok: true,
+        active: true,
+        cwd: '/workspace',
+      }),
+    );
+  });
+
+  test('channel:status reports active session health', async () => {
+    piChannelsExtension(mockPi as never);
+    const inactiveCallback = vi.fn();
+
+    events.get('channel:status')?.({ callback: inactiveCallback });
+
+    expect(inactiveCallback).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ok: false,
+        active: false,
+        bridgeActive: false,
+      }),
+    );
+
+    await handlers.get('session_start')?.({}, mockCtx());
+    const activeCallback = vi.fn();
+
+    events.get('channel:status')?.({ callback: activeCallback });
+
+    expect(activeCallback).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ok: true,
+        active: true,
+        cwd: '/workspace',
+        bridgeActive: false,
+        adapterStates: expect.objectContaining({
+          webhook: expect.objectContaining({ state: 'connected' }),
+        }),
+      }),
+    );
+    expect(activeCallback.mock.calls[0]?.[0]).toMatchObject({
+      items: expect.arrayContaining([
+        expect.objectContaining({ name: 'webhook', type: 'adapter' }),
+        expect.objectContaining({ name: 'ops', type: 'route' }),
+      ]),
+    });
+  });
+
+  test('session_start can skip channel autostart when managed by the host app', async () => {
+    vi.stubEnv('PI_CHANNELS_DISABLE_SESSION_AUTOSTART', '1');
+    piChannelsExtension(mockPi as never);
+
+    await handlers.get('session_start')?.({}, mockCtx());
+    const callback = vi.fn();
+    events.get('channel:status')?.({ callback });
+
+    expect(callback).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ok: false,
+        active: false,
+        bridgeActive: false,
+      }),
+    );
+    expect(configModule.loadChannelConfig).not.toHaveBeenCalled();
+  });
+
+  test('channel:capture resolves with matching incoming token', async () => {
+    piChannelsExtension(mockPi as never);
+    await handlers.get('session_start')?.({}, mockCtx());
+    const callback = vi.fn();
+
+    events.get('channel:capture')?.({
+      adapter: 'feishu',
+      captureToken: 'capture-token',
+      timeoutMs: 5_000,
+      callback,
+    });
+    events.get('channel:register')?.({
+      name: 'feishu',
+      adapter: {
+        direction: 'bidirectional',
+        start: (onMessage: (message: unknown) => void) => {
+          onMessage({
+            adapter: 'feishu',
+            sender: 'oc_group',
+            text: 'hello capture-token',
+            metadata: {
+              chatId: 'oc_group',
+            },
+          });
+          return Promise.resolve();
+        },
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(callback).toHaveBeenCalledWith({
+        ok: true,
+        message: expect.objectContaining({
+          adapter: 'feishu',
+          sender: 'oc_group',
+          text: 'hello capture-token',
+        }),
+      });
+    });
+  });
+
+  test('emits channel:turn for incoming bridge messages', async () => {
+    vi.mocked(configModule.loadChannelConfig).mockReturnValueOnce({
+      adapters: {
+        feishu: { type: 'feishu' },
+      },
+      routes: {},
+      bridge: { enabled: true },
+    });
+    const send = vi.fn(() => Promise.resolve());
+
+    piChannelsExtension(mockPi as never);
+    await handlers.get('session_start')?.({}, mockCtx());
+    events.get('channel:register')?.({
+      name: 'feishu',
+      adapter: {
+        direction: 'bidirectional',
+        send,
+        start: (onMessage: (message: unknown) => void) => {
+          onMessage({
+            adapter: 'feishu',
+            sender: 'oc_group:user',
+            text: '/status',
+            metadata: {
+              chatId: 'oc_group',
+              chatName: '测试群',
+            },
+          });
+          return Promise.resolve();
+        },
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(mockPi.events.emit).toHaveBeenCalledWith(
+        'channel:turn',
+        expect.objectContaining({
+          sessionId: 'oc_group',
+          adapter: 'feishu',
+          recipient: 'oc_group',
+          userMessage: '/status',
+          title: '测试群',
+        }),
+      );
+    });
+  });
+
   test('notify send routes through webhook aliases', async () => {
     const fetchMock = vi.fn(async () => new Response('', { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
@@ -187,7 +353,7 @@ describe('piChannelsExtension', () => {
     });
   });
 
-  test('notify maps local channels plugin selector to the only configured route', async () => {
+  test('notify rejects local channels plugin selector as a send target', async () => {
     const fetchMock = vi.fn(async () => new Response('', { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
 
@@ -200,16 +366,13 @@ describe('piChannelsExtension', () => {
       text: 'hello',
     })) as { content: Array<{ text: string }> };
 
-    expect(result.content[0]!.text).toBe('Sent via "ops".');
-    expect(fetchMock).toHaveBeenCalledWith(
-      'https://example.test/hook',
-      expect.objectContaining({
-        method: 'POST',
-      }),
+    expect(result.content[0]!.text).toBe(
+      '@local:channels selects the plugin, not a route. Use one of these channel route mentions: @local:channels_webhook:ops.',
     );
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  test('notify maps local channel route mentions to route aliases', async () => {
+  test('notify maps provider-scoped local channel route mentions to route aliases', async () => {
     const fetchMock = vi.fn(async () => new Response('', { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
 
@@ -218,7 +381,7 @@ describe('piChannelsExtension', () => {
 
     const result = (await tools.get('notify')?.execute('call-1', {
       action: 'send',
-      adapter: '@local:channels:ops',
+      adapter: '@local:channels_webhook:ops',
       text: 'hello',
     })) as { content: Array<{ text: string }> };
 
@@ -229,6 +392,25 @@ describe('piChannelsExtension', () => {
         method: 'POST',
       }),
     );
+  });
+
+  test('notify rejects provider-scoped local channel route mentions with the wrong adapter', async () => {
+    const fetchMock = vi.fn(async () => new Response('', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    piChannelsExtension(mockPi as never);
+    await handlers.get('session_start')?.({}, mockCtx());
+
+    const result = (await tools.get('notify')?.execute('call-1', {
+      action: 'send',
+      adapter: '@local:channels_wecom:ops',
+      text: 'hello',
+    })) as { content: Array<{ text: string }> };
+
+    expect(result.content[0]!.text).toBe(
+      'Channel route "ops" uses adapter "webhook", not "wecom".',
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   test('channel:register can add runtime adapters and channel:send can use them', async () => {

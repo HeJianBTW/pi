@@ -1,5 +1,9 @@
-import type { Server } from 'node:http';
-import { startHttpEndpoint } from '../../http.js';
+import {
+  type TextMessage,
+  WSClient,
+  type WSClientOptions,
+  type WsFrame,
+} from '@wecom/aibot-node-sdk';
 import type {
   AdapterConfig,
   ChannelAdapter,
@@ -7,17 +11,17 @@ import type {
   OnIncomingMessage,
   WeComAdapterConfig,
 } from '../../types.js';
-import { WeComAgentClient } from './client.js';
-import { decryptWeComEnvelope, verifyWeComSignature } from './crypto.js';
-import type {
-  NormalizedWeComConfig,
-  ResolvedOutboundMessage,
-  WeComAgentAccount,
-  WeComTextTarget,
-} from './types.js';
-import { xmlTag, xmlText } from './xml.js';
 
-const DEFAULT_WECOM_BASE_URL = 'https://qyapi.weixin.qq.com/cgi-bin';
+type WeComEventMode = 'websocket' | 'off';
+
+type NormalizedWeComBotConfig = WeComAdapterConfig & {
+  botId: string;
+  secret: string;
+  eventMode: WeComEventMode;
+  timeoutMs: number;
+};
+
+type WeComReplyFrame = Pick<WsFrame<TextMessage>, 'headers'>;
 
 function asConfig(config: AdapterConfig): WeComAdapterConfig {
   return config as WeComAdapterConfig;
@@ -29,212 +33,261 @@ function requireString(value: unknown, name: string): string {
   throw new Error(`WeCom adapter requires ${name}`);
 }
 
-function requireNumber(value: unknown, name: string): number {
-  const raw = requireString(value, name);
-  const parsed = Number(raw);
-  if (Number.isFinite(parsed)) return parsed;
-  throw new Error(`WeCom adapter requires numeric ${name}`);
-}
-
-function optionalString(value: unknown): string | undefined {
-  if (typeof value === 'string' && value.trim()) return value.trim();
-  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+function optionalNumber(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim() && Number.isFinite(Number(value))) {
+    return Number(value);
+  }
   return undefined;
 }
 
-function normalizeConfig(config: AdapterConfig): NormalizedWeComConfig {
+function normalizeConfig(config: AdapterConfig): NormalizedWeComBotConfig {
   const cfg = asConfig(config);
   return {
     ...cfg,
-    corpId: requireString(cfg.corpId, 'corpId'),
-    agentId: requireNumber(cfg.agentId, 'agentId'),
+    botId: requireString(cfg.botId, 'botId'),
     secret: requireString(cfg.secret, 'secret'),
-    baseUrl: optionalString(cfg.baseUrl) ?? DEFAULT_WECOM_BASE_URL,
-    timeoutMs: Number(cfg.timeoutMs ?? 15_000),
-    tokenRefreshBufferSeconds: Number(cfg.tokenRefreshBufferSeconds ?? 120),
+    eventMode: cfg.eventMode === 'off' ? 'off' : 'websocket',
+    timeoutMs: optionalNumber(cfg.timeoutMs) ?? 15_000,
   };
 }
 
-function resolveTarget(message: ChannelMessage): WeComTextTarget {
-  const match = message.recipient.match(/^(user|party|tag|chat|appchat):(.+)$/);
-  if (!match) return { touser: message.recipient };
-  const id = match[2]!;
-  if (match[1] === 'party') return { toparty: id };
-  if (match[1] === 'tag') return { totag: id };
-  if (match[1] === 'chat' || match[1] === 'appchat') return { chatid: id };
-  return { touser: id };
+function createSdkLogger(
+  log: ((event: string, data?: Record<string, unknown>, level?: string) => void) | undefined,
+) {
+  const emit = (level: string, message: unknown, args: unknown[]) => {
+    log?.('wecom-sdk', { message: [message, ...args].map(String).join(' ') }, level);
+  };
+  return {
+    debug: (message: unknown, ...args: unknown[]) => emit('DEBUG', message, args),
+    info: (message: unknown, ...args: unknown[]) => emit('INFO', message, args),
+    warn: (message: unknown, ...args: unknown[]) => emit('WARN', message, args),
+    error: (message: unknown, ...args: unknown[]) => emit('ERROR', message, args),
+  };
 }
 
-function resolveOutboundMessage(message: ChannelMessage): ResolvedOutboundMessage {
+function textFromMessage(message: ChannelMessage): string {
   if (!message.text) throw new Error('WeCom adapter requires text');
-  return {
-    raw: message,
-    target: resolveTarget(message),
-    text: message.source ? `[${message.source}]\n${message.text}` : message.text,
-  };
+  return message.source ? `[${message.source}]\n${message.text}` : message.text;
 }
 
-function createAgentAccount(cfg: NormalizedWeComConfig): WeComAgentAccount {
-  return {
-    corpId: cfg.corpId,
-    agentId: cfg.agentId,
-    secret: cfg.secret,
-    baseUrl: cfg.baseUrl,
-    tokenRefreshBufferSeconds: cfg.tokenRefreshBufferSeconds,
-    network: { timeoutMs: cfg.timeoutMs },
-  };
+function senderForMessage(body: TextMessage): string {
+  const senderId = body.from?.userid ?? '';
+  return body.chattype === 'group' && body.chatid ? `${body.chatid}:${senderId}` : senderId;
 }
 
-function readSignature(url: URL): string | null {
-  return (
-    url.searchParams.get('msg_signature') ??
-    url.searchParams.get('msgsignature') ??
-    url.searchParams.get('signature')
-  );
-}
-
-function decryptAndValidate(params: {
-  encrypted: string;
-  cfg: NormalizedWeComConfig;
-  token: string;
-  encodingAesKey: string;
-  timestamp: string | null;
-  nonce: string | null;
-  signature: string | null;
-}): { message: string; receiveId: string } | null {
+function shouldAcceptMessage(body: TextMessage, cfg: NormalizedWeComBotConfig): boolean {
+  const allowedChatIds = cfg.allowedChatIds;
   if (
-    !verifyWeComSignature({
-      token: params.token,
-      timestamp: params.timestamp,
-      nonce: params.nonce,
-      encrypted: params.encrypted,
-      provided: params.signature,
-    })
+    body.chattype === 'group' &&
+    body.chatid &&
+    Array.isArray(allowedChatIds) &&
+    allowedChatIds.length > 0 &&
+    !allowedChatIds.includes(body.chatid)
   ) {
-    return null;
+    return false;
   }
 
-  const decrypted = decryptWeComEnvelope(params.encrypted, params.encodingAesKey);
-  const expectedReceiveId = optionalString(params.cfg.receiveId) ?? params.cfg.corpId;
-  if (expectedReceiveId && decrypted.receiveId && decrypted.receiveId !== expectedReceiveId) {
-    throw new Error(`Unexpected WeCom receiveId: ${decrypted.receiveId}`);
+  const senderId = body.from?.userid ?? '';
+  const allowedSenderIds = cfg.allowedSenderIds;
+  if (
+    senderId &&
+    Array.isArray(allowedSenderIds) &&
+    allowedSenderIds.length > 0 &&
+    !allowedSenderIds.includes(senderId)
+  ) {
+    return false;
   }
-  return decrypted;
+
+  return true;
 }
 
-export function createWeComAdapter(config: AdapterConfig): ChannelAdapter {
+function frameMetadata(frame: WsFrame<TextMessage>, body: TextMessage): Record<string, unknown> {
+  return {
+    messageId: body.msgid,
+    replyToMessageId: body.msgid,
+    botId: body.aibotid,
+    chatId: body.chatid,
+    groupId: body.chatid,
+    chatType: body.chattype,
+    senderId: body.from?.userid,
+    createTime: body.create_time,
+    responseUrl: body.response_url,
+    wecomReplyFrame: {
+      headers: frame.headers,
+    },
+    headers: frame.headers,
+  };
+}
+
+function replyFrameFromMetadata(
+  metadata: Record<string, unknown> | undefined,
+): WeComReplyFrame | undefined {
+  const value = metadata?.wecomReplyFrame;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const headers = (value as { headers?: unknown }).headers;
+  if (!headers || typeof headers !== 'object' || Array.isArray(headers)) return undefined;
+  return { headers: headers as WeComReplyFrame['headers'] };
+}
+
+function replyStreamId(message: ChannelMessage): string {
+  const metadata = message.metadata ?? {};
+  const messageId = typeof metadata.replyToMessageId === 'string' ? metadata.replyToMessageId : '';
+  if (messageId.trim()) return `amaster-${messageId.trim()}`;
+  return `amaster-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function replyFinishFromMetadata(metadata: Record<string, unknown> | undefined): boolean {
+  return metadata?.wecomReplyFinish !== false;
+}
+
+function normalizeWeComError(error: Error): Error {
+  if (error.message.includes('853000') || /invalid bot_?id or secret/i.test(error.message)) {
+    return new Error(
+      '企业微信智能机器人认证失败：请确认 Bot ID 和 Secret 来自同一个“智能机器人 API 模式 / 长连接”配置。Secret 不是回调 Token、EncodingAESKey，也不是自建应用 Secret。',
+    );
+  }
+  return error;
+}
+
+export function createWeComAdapter(
+  config: AdapterConfig,
+  context: {
+    log?: (event: string, data?: Record<string, unknown>, level?: string) => void;
+  } = {},
+): ChannelAdapter {
   const cfg = normalizeConfig(config);
-  const client = new WeComAgentClient(createAgentAccount(cfg));
-  let server: Server | null = null;
+  const clientOptions: WSClientOptions = {
+    botId: cfg.botId,
+    secret: cfg.secret,
+    requestTimeout: cfg.timeoutMs,
+    logger: createSdkLogger(context.log),
+  };
+  const reconnectInterval = optionalNumber(cfg.reconnectInterval);
+  if (reconnectInterval !== undefined) clientOptions.reconnectInterval = reconnectInterval;
+  const maxReconnectAttempts = optionalNumber(cfg.maxReconnectAttempts);
+  if (maxReconnectAttempts !== undefined) clientOptions.maxReconnectAttempts = maxReconnectAttempts;
+  const maxAuthFailureAttempts = optionalNumber(cfg.maxAuthFailureAttempts);
+  if (maxAuthFailureAttempts !== undefined) {
+    clientOptions.maxAuthFailureAttempts = maxAuthFailureAttempts;
+  }
+  const heartbeatInterval = optionalNumber(cfg.heartbeatInterval);
+  if (heartbeatInterval !== undefined) clientOptions.heartbeatInterval = heartbeatInterval;
+  if (typeof cfg.wsUrl === 'string' && cfg.wsUrl.trim()) clientOptions.wsUrl = cfg.wsUrl.trim();
+
+  const client = new WSClient(clientOptions);
+
+  let authenticated = false;
+  let connectPromise: Promise<void> | null = null;
+  let started = false;
+
+  client.on('authenticated', () => {
+    authenticated = true;
+    context.log?.('wecom-authenticated', { botId: cfg.botId });
+  });
+  client.on('disconnected', (reason) => {
+    authenticated = false;
+    context.log?.('wecom-disconnected', { reason }, 'WARN');
+  });
+  client.on('event.disconnected_event', () => {
+    authenticated = false;
+    context.log?.(
+      'wecom-server-disconnected',
+      { error: '企业微信长连接已被新的机器人连接顶下线，请停止其他同 Bot ID 的连接后重新连接。' },
+      'ERROR',
+    );
+  });
+  client.on('reconnecting', (attempt) => {
+    authenticated = false;
+    context.log?.('wecom-reconnecting', { attempt }, 'WARN');
+  });
+  client.on('error', (error) => {
+    context.log?.('wecom-client-error', { error: normalizeWeComError(error).message }, 'ERROR');
+  });
+
+  async function ensureConnected(): Promise<void> {
+    if (client.isConnected && authenticated) return;
+    if (connectPromise) return connectPromise;
+
+    connectPromise = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        cleanup();
+        reject(new Error('WeCom bot authentication timed out'));
+      }, cfg.timeoutMs);
+      const onAuthenticated = () => {
+        cleanup();
+        authenticated = true;
+        resolve();
+      };
+      const onError = (error: Error) => {
+        cleanup();
+        reject(normalizeWeComError(error));
+      };
+      const cleanup = () => {
+        clearTimeout(timer);
+        client.off('authenticated', onAuthenticated);
+        client.off('error', onError);
+        connectPromise = null;
+      };
+      client.on('authenticated', onAuthenticated);
+      client.on('error', onError);
+      client.connect();
+    });
+
+    return connectPromise;
+  }
 
   async function sendText(message: ChannelMessage): Promise<void> {
-    const resolved = resolveOutboundMessage(message);
-    await client.sendText({ target: resolved.target, text: resolved.text });
-  }
-
-  async function start(onMessage: OnIncomingMessage): Promise<void> {
-    if (!cfg.incoming?.enabled || server) return;
-    const token = requireString(cfg.token, 'token when incoming.enabled is true');
-    const encodingAesKey = requireString(
-      cfg.encodingAesKey,
-      'encodingAesKey when incoming.enabled is true',
-    );
-    const host = cfg.incoming.host ?? '0.0.0.0';
-    const port = cfg.incoming.port ?? 8788;
-    const path = cfg.incoming.path ?? '/wecom/events';
-
-    server = await startHttpEndpoint({
-      host,
-      port,
-      path,
-      handler: (request, response, body) => {
-        const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`);
-        const signature = readSignature(url);
-        const timestamp = url.searchParams.get('timestamp');
-        const nonce = url.searchParams.get('nonce');
-
-        if (request.method === 'GET') {
-          const echostr = url.searchParams.get('echostr');
-          if (!echostr) {
-            response.writeHead(400).end('missing echostr');
-            return;
-          }
-          const decrypted = decryptAndValidate({
-            encrypted: echostr,
-            cfg,
-            token,
-            encodingAesKey,
-            timestamp,
-            nonce,
-            signature,
-          });
-          if (!decrypted) {
-            response.writeHead(401).end('invalid signature');
-            return;
-          }
-          response.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-          response.end(decrypted.message);
-          return;
-        }
-
-        if (request.method !== 'POST') {
-          response.writeHead(405).end('method not allowed');
-          return;
-        }
-
-        const encrypted = xmlTag(body, 'Encrypt');
-        if (!encrypted) {
-          response.writeHead(400).end('missing Encrypt');
-          return;
-        }
-        const decrypted = decryptAndValidate({
-          encrypted,
-          cfg,
-          token,
-          encodingAesKey,
-          timestamp,
-          nonce,
-          signature,
-        });
-        if (!decrypted) {
-          response.writeHead(401).end('invalid signature');
-          return;
-        }
-
-        const msgType = xmlText(decrypted.message, 'MsgType');
-        if (msgType === 'text') {
-          const sender = xmlText(decrypted.message, 'FromUserName');
-          const text = xmlText(decrypted.message, 'Content').trim();
-          if (sender && text) {
-            void onMessage({
-              adapter: 'wecom',
-              sender,
-              text,
-              metadata: {
-                msgType,
-                toUserName: xmlText(decrypted.message, 'ToUserName'),
-                agentId: xmlText(decrypted.message, 'AgentID'),
-                msgId: xmlTag(decrypted.message, 'MsgId'),
-                receiveId: decrypted.receiveId,
-              },
-            });
-          }
-        }
-
-        response.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-        response.end('success');
-      },
+    const text = textFromMessage(message);
+    await ensureConnected();
+    const replyFrame = replyFrameFromMetadata(message.metadata);
+    if (replyFrame) {
+      await client.replyStream(
+        replyFrame,
+        replyStreamId(message),
+        text,
+        replyFinishFromMetadata(message.metadata),
+      );
+      return;
+    }
+    await client.sendMessage(message.recipient, {
+      msgtype: 'markdown',
+      markdown: { content: text },
     });
   }
 
+  async function start(onMessage: OnIncomingMessage): Promise<void> {
+    if (cfg.eventMode === 'off') return;
+    if (started) {
+      await ensureConnected();
+      return;
+    }
+    started = true;
+    client.on('message.text', (frame: WsFrame<TextMessage>) => {
+      const body = frame.body;
+      if (!body) return;
+      if (!shouldAcceptMessage(body, cfg)) return;
+      const text = body.text?.content?.trim();
+      if (!text) return;
+      void onMessage({
+        adapter: 'wecom',
+        sender: senderForMessage(body),
+        text,
+        metadata: frameMetadata(frame, body),
+      });
+    });
+    await ensureConnected();
+  }
+
   return {
-    direction: cfg.incoming?.enabled ? 'bidirectional' : 'outgoing',
+    direction: cfg.eventMode === 'off' ? 'outgoing' : 'bidirectional',
     send: sendText,
     start,
     async stop(): Promise<void> {
-      if (!server) return;
-      await new Promise<void>((resolve) => server!.close(() => resolve()));
-      server = null;
+      started = false;
+      authenticated = false;
+      connectPromise = null;
+      client.disconnect();
     },
   };
 }
