@@ -19,10 +19,9 @@ Feishu/WeCom adapters.
 - `feishu` - Native Feishu/Lark app messaging backed by the official
   `@larksuiteoapi/node-sdk`. Supports outgoing text messages, WebSocket events
   by default, and HTTP event callbacks as a fallback.
-- `wecom` - Native WeCom self-built app messaging. Supports outgoing text
-  messages, appchat messages, encrypted HTTP callbacks for text messages, token
-  caching, request timeouts, and actionable API errors such as trusted-IP
-  failures.
+- `wecom` - Native WeCom intelligent bot messaging backed by the official
+  `@wecom/aibot-node-sdk`. Supports WebSocket long connection events and active
+  Markdown pushes with Bot ID / Secret credentials.
 - `webhook` - Generic outgoing HTTP requests.
 
 ## Example
@@ -40,17 +39,11 @@ Feishu/WeCom adapters.
       },
       "wecom": {
         "type": "wecom",
-        "corpId": "${WECOM_CORP_ID}",
-        "agentId": "${WECOM_AGENT_ID}",
-        "secret": "${WECOM_SECRET}",
-        "timeoutMs": 15000,
-        "token": "${WECOM_CALLBACK_TOKEN}",
-        "encodingAesKey": "${WECOM_ENCODING_AES_KEY}",
-        "incoming": {
-          "enabled": true,
-          "port": 8788,
-          "path": "/wecom/events"
-        }
+        "botId": "${WECOM_BOT_ID}",
+        "secret": "${WECOM_BOT_SECRET}",
+        "eventMode": "websocket",
+        "respondToMentionsOnly": true,
+        "timeoutMs": 15000
       }
     },
     "routes": {
@@ -104,6 +97,23 @@ payloads:
 
 Set `"eventMode": "off"` for outgoing-only usage.
 
+### WeCom modes
+
+Create an intelligent bot in the WeCom admin console, choose API mode, and select
+the long connection option. Copy the Bot ID and Secret into the adapter config:
+
+```json
+{
+  "type": "wecom",
+  "botId": "${WECOM_BOT_ID}",
+  "secret": "${WECOM_BOT_SECRET}",
+  "eventMode": "websocket",
+  "allowedChatIds": ["wr_xxx"]
+}
+```
+
+Set `"eventMode": "off"` when the bot should only send messages.
+
 ## Tool
 
 ```text
@@ -122,20 +132,17 @@ user_id:abc123
 email:name@example.com
 ```
 
-For WeCom, recipients default to `touser`. Prefix the recipient to send to parties
-or tags. Prefix with `chat:` or `appchat:` to use the WeCom appchat API:
+For WeCom intelligent bots, recipients are the conversation ids used by the Bot
+API. In a group, send one message to the bot and use route capture to fill the
+group `chatid`; for one-to-one pushes, use the target user's userid:
 
 ```text
-user:zhangsan
-party:2
-tag:7
-appchat:chat-id
+wr_xxx
+zhangsan
 ```
 
-If WeCom returns `60020 not allow to access from your ip`, the adapter raises a
-typed `WeComApiError` with category `ip_whitelist`. Configure the trusted IP in
-the WeCom console, or run pi behind a fixed egress proxy that is allowed by the
-enterprise.
+The intelligent bot adapter uses the WebSocket Bot API, so long connection mode
+does not require a public callback URL.
 
 ## Events
 

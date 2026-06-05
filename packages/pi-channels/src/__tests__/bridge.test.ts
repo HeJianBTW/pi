@@ -18,10 +18,10 @@ function createChild(stdoutText: string, exitCode = 0) {
   child.stdout = new EventEmitter();
   child.stderr = new EventEmitter();
   child.kill = vi.fn();
-  queueMicrotask(() => {
+  setTimeout(() => {
     child.stdout.emit('data', Buffer.from(stdoutText));
     child.emit('close', exitCode);
-  });
+  }, 0);
   return child;
 }
 
@@ -57,18 +57,19 @@ describe('ChatBridge', () => {
       text: 'ping',
       metadata: { messageId: 'om_1', threadId: 'omt_1' },
     });
-    await new Promise((resolve) => setImmediate(resolve));
 
     expect(mockSpawn).toHaveBeenCalledWith(
       'pi',
-      ['-p', '--offline', '--no-session', '--no-extensions', 'ping'],
+      ['-p', '--offline', '--no-session', '--no-extensions', '来自即时通讯的用户消息：\nping'],
       expect.objectContaining({ cwd: '/workspace' }),
     );
-    expect(registry.send).toHaveBeenCalledWith({
-      adapter: 'feishu',
-      recipient: 'oc_chat',
-      text: 'pong',
-      metadata: { messageId: 'om_1', threadId: 'omt_1' },
+    await vi.waitFor(() => {
+      expect(registry.send).toHaveBeenCalledWith({
+        adapter: 'feishu',
+        recipient: 'oc_chat',
+        text: 'pong',
+        metadata: { messageId: 'om_1', threadId: 'omt_1' },
+      });
     });
   });
 
@@ -104,10 +105,17 @@ describe('ChatBridge', () => {
         'anthropic-compatible',
         '--model',
         'kimi-k2.5',
-        'ping',
+        '来自即时通讯的用户消息：\nping',
       ],
       expect.objectContaining({ cwd: '/workspace' }),
     );
+    await vi.waitFor(() => {
+      expect(registry.send).toHaveBeenCalledWith({
+        adapter: 'feishu',
+        recipient: 'oc_chat',
+        text: 'pong',
+      });
+    });
   });
 
   test('persists channel turns to the local pi-agent session endpoint when available', async () => {
@@ -134,20 +142,54 @@ describe('ChatBridge', () => {
       text: 'ping',
       metadata: { chatId: 'oc_chat', chatName: '项目群' },
     });
-    await new Promise((resolve) => setImmediate(resolve));
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      'http://127.0.0.1:18146/internal/channel-sessions/turn',
-      expect.objectContaining({
-        method: 'POST',
-        headers: expect.objectContaining({
-          'x-pi-agent-internal': 'channel-bridge',
-        }),
-        body: expect.any(String),
-      }),
+    await vi.waitFor(() => {
+      const channelCalls = fetchMock.mock.calls.filter(
+        (call) => call[0] === 'http://127.0.0.1:18146/internal/channel-sessions/turn',
+      );
+      expect(channelCalls.length).toBeGreaterThanOrEqual(2);
+    });
+    const channelCalls = fetchMock.mock.calls.filter(
+      (call) => call[0] === 'http://127.0.0.1:18146/internal/channel-sessions/turn',
     );
-    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    for (const call of channelCalls) {
+      expect(call[0]).toBe('http://127.0.0.1:18146/internal/channel-sessions/turn');
+      expect(call[1]).toEqual(
+        expect.objectContaining({
+          method: 'POST',
+          headers: expect.objectContaining({
+            'x-pi-agent-internal': 'channel-bridge',
+          }),
+          body: expect.any(String),
+        }),
+      );
+    }
+    const started = JSON.parse(
+      String(
+        channelCalls.find((call) => String(call[1]?.body).includes('"phase":"started"'))?.[1]?.body,
+      ),
+    );
+    expect(started).toMatchObject({
+      phase: 'started',
+      sessionId: 'oc_chat',
+      conversationId: 'oc_chat',
+      title: '飞书 / 项目群',
+      adapter: 'feishu',
+      recipient: 'oc_chat',
+      userMessage: 'ping',
+      workspaceDir: '/workspace',
+    });
+    expect(started).not.toHaveProperty('assistantMessage');
+    const body = JSON.parse(
+      String(
+        channelCalls.find((call) => {
+          const raw = String(call[1]?.body);
+          return raw.includes('"phase":"completed"') && raw.includes('"assistantMessage":"pong"');
+        })?.[1]?.body,
+      ),
+    );
     expect(body).toMatchObject({
+      phase: 'completed',
       sessionId: 'oc_chat',
       conversationId: 'oc_chat',
       title: '飞书 / 项目群',
@@ -160,6 +202,51 @@ describe('ChatBridge', () => {
         provider: 'anthropic-compatible',
         model: 'kimi-k2.5',
       },
+    });
+  });
+
+  test('acks WeCom messages before running the prompt and finishes with the final reply', async () => {
+    mockSpawn.mockReturnValue(createChild('done'));
+    const registry = {
+      getAdapter: vi.fn(() => ({ sendTyping: vi.fn(() => Promise.resolve()) })),
+      send: vi.fn(() => Promise.resolve({ ok: true })),
+    };
+    const bridge = new ChatBridge({ enabled: true }, '/workspace', registry as never);
+    bridge.start();
+
+    await bridge.handleMessage({
+      adapter: 'wecom',
+      sender: 'wr_group:user_1',
+      text: '@amaster 测试',
+      metadata: {
+        chatId: 'wr_group',
+        replyToMessageId: 'msg_x',
+        wecomReplyFrame: { headers: { req_id: 'req_x' } },
+      },
+    });
+
+    expect(registry.send).toHaveBeenNthCalledWith(1, {
+      adapter: 'wecom',
+      recipient: 'wr_group:user_1',
+      text: '收到，正在处理...',
+      metadata: {
+        chatId: 'wr_group',
+        replyToMessageId: 'msg_x',
+        wecomReplyFrame: { headers: { req_id: 'req_x' } },
+        wecomReplyFinish: false,
+      },
+    });
+    await vi.waitFor(() => {
+      expect(registry.send).toHaveBeenNthCalledWith(2, {
+        adapter: 'wecom',
+        recipient: 'wr_group:user_1',
+        text: 'done',
+        metadata: {
+          chatId: 'wr_group',
+          replyToMessageId: 'msg_x',
+          wecomReplyFrame: { headers: { req_id: 'req_x' } },
+        },
+      });
     });
   });
 

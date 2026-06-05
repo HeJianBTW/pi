@@ -90,6 +90,7 @@ export class ChatBridge {
         adapter: message.adapter,
         recipient: message.sender,
         text: builtInReply,
+        ...(message.metadata ? { metadata: message.metadata } : {}),
       });
       return;
     }
@@ -100,12 +101,36 @@ export class ChatBridge {
         adapter: message.adapter,
         recipient: message.sender,
         text: `Queue full (${this.config.maxQueuePerSender} pending). Wait or send /abort.`,
+        ...(message.metadata ? { metadata: message.metadata } : {}),
       });
       return;
     }
 
     session.queue.push({ id: `msg-${Date.now()}-${++idCounter}`, message });
+    void persistChannelTurnStarted({
+      apiBase: this.config.apiBase,
+      enabled: this.config.persistSessions,
+      cwd: this.cwd,
+      message,
+    });
+    await this.sendProcessingAck(message);
     void this.processNext(senderKey);
+  }
+
+  private async sendProcessingAck(message: IncomingMessage): Promise<void> {
+    if (message.adapter !== 'wecom') return;
+    if (!message.metadata?.wecomReplyFrame) return;
+    await this.registry
+      .send({
+        adapter: message.adapter,
+        recipient: message.sender,
+        text: '收到，正在处理...',
+        metadata: {
+          ...message.metadata,
+          wecomReplyFinish: false,
+        },
+      })
+      .catch(() => undefined);
   }
 
   private getSession(senderKey: string): SessionState {
@@ -235,6 +260,7 @@ async function persistChannelTurn(input: {
   if (!sessionId) return;
   const title = channelSessionTitle(input.message, sessionId);
   const body = {
+    phase: 'completed',
     sessionId,
     conversationId: sessionId,
     title,
@@ -242,6 +268,7 @@ async function persistChannelTurn(input: {
     recipient: sessionId,
     userMessage: input.message.text,
     assistantMessage: input.reply,
+    createdAt: channelMessageCreatedAt(input.message),
     workspaceDir: process.env.PI_AGENT_WORKSPACE || input.cwd,
     model: modelPayload(input.provider, input.model),
   };
@@ -262,6 +289,52 @@ async function persistChannelTurn(input: {
     }
   } catch (error) {
     console.warn('[pi-channels] channel_session_persist_failed', {
+      sessionId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+async function persistChannelTurnStarted(input: {
+  apiBase: string;
+  enabled: boolean;
+  cwd: string;
+  message: IncomingMessage;
+}): Promise<void> {
+  if (!input.enabled) return;
+  const apiBase = resolvePiAgentApiBase(input.apiBase);
+  if (!apiBase) return;
+  const sessionId = channelSessionId(input.message);
+  if (!sessionId) return;
+  const title = channelSessionTitle(input.message, sessionId);
+  const body = {
+    phase: 'started',
+    sessionId,
+    conversationId: sessionId,
+    title,
+    adapter: input.message.adapter,
+    recipient: sessionId,
+    userMessage: input.message.text,
+    createdAt: channelMessageCreatedAt(input.message),
+    workspaceDir: process.env.PI_AGENT_WORKSPACE || input.cwd,
+  };
+  try {
+    const response = await fetch(`${apiBase}/internal/channel-sessions/turn`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-pi-agent-internal': 'channel-bridge',
+      },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) {
+      console.warn('[pi-channels] channel_session_start_failed', {
+        status: response.status,
+        sessionId,
+      });
+    }
+  } catch (error) {
+    console.warn('[pi-channels] channel_session_start_failed', {
       sessionId,
       error: error instanceof Error ? error.message : String(error),
     });
@@ -291,6 +364,23 @@ function channelSessionTitle(message: IncomingMessage, sessionId: string): strin
           : undefined,
     ) ?? sessionId;
   return `${adapterDisplayName(message.adapter)} / ${name}`;
+}
+
+function channelMessageCreatedAt(message: IncomingMessage): string {
+  const createTime = message.metadata?.createTime;
+  if (typeof createTime === 'number' && Number.isFinite(createTime)) {
+    return new Date(createTime > 10_000_000_000 ? createTime : createTime * 1000).toISOString();
+  }
+  if (typeof createTime === 'string' && createTime.trim()) {
+    const numeric = Number(createTime);
+    if (Number.isFinite(numeric)) {
+      return new Date(numeric > 10_000_000_000 ? numeric : numeric * 1000).toISOString();
+    }
+    if (!Number.isNaN(Date.parse(createTime))) {
+      return new Date(createTime).toISOString();
+    }
+  }
+  return new Date().toISOString();
 }
 
 function adapterDisplayName(adapter: string): string {
@@ -341,7 +431,7 @@ function runPrompt(options: {
     }
     if (provider) args.push('--provider', provider);
     if (model) args.push('--model', model);
-    args.push(options.prompt);
+    args.push(formatBridgePrompt(options.prompt));
     const command = resolvePiCommand(options.cwd, options.piBin);
 
     console.debug('[pi-channels] bridge_run_prompt', {
@@ -415,6 +505,10 @@ function formatBridgeErrorReply(error: string | undefined): string {
     return '模型服务认证失败，请检查 API Key 后点击“更新配置”或重启服务。';
   }
   return `Error: ${message}`;
+}
+
+function formatBridgePrompt(prompt: string): string {
+  return `来自即时通讯的用户消息：\n${prompt}`;
 }
 
 function resolveDefaultBridgeModel(): string | null {

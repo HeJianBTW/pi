@@ -85,16 +85,18 @@ export type FeishuAdapterConfig = AdapterConfig & {
 
 export type WeComAdapterConfig = AdapterConfig & {
   type: 'wecom';
-  corpId?: string;
-  agentId?: string | number;
+  botId?: string;
   secret?: string;
-  baseUrl?: string;
+  eventMode?: 'websocket' | 'off';
   timeoutMs?: number;
-  tokenRefreshBufferSeconds?: number;
-  token?: string;
-  encodingAesKey?: string;
-  receiveId?: string;
-  incoming?: HttpIncomingConfig;
+  reconnectInterval?: number;
+  maxReconnectAttempts?: number;
+  maxAuthFailureAttempts?: number;
+  heartbeatInterval?: number;
+  wsUrl?: string;
+  respondToMentionsOnly?: boolean;
+  allowedChatIds?: string[];
+  allowedSenderIds?: string[];
 };
 
 export type WebhookAdapterConfig = AdapterConfig & {

@@ -61,7 +61,13 @@ export class ChannelRegistry {
         continue;
       }
       try {
-        const context: AdapterFactoryContext = this.log ? { cwd, log: this.log } : { cwd };
+        const context: AdapterFactoryContext = this.log
+          ? {
+              cwd,
+              log: (event, data, level) =>
+                this.log?.(event, { adapter: name, ...(data ?? {}) }, level),
+            }
+          : { cwd };
         const adapter = await factory(adapterConfig, context);
         this.adapters.set(name, adapter);
       } catch (error) {
@@ -192,6 +198,7 @@ export class ChannelRegistry {
   list(): Array<{
     name: string;
     type: 'adapter' | 'route';
+    adapter?: string;
     direction?: AdapterDirection;
     target?: string;
     label?: string;
@@ -199,6 +206,7 @@ export class ChannelRegistry {
     const result: Array<{
       name: string;
       type: 'adapter' | 'route';
+      adapter?: string;
       direction?: AdapterDirection;
       target?: string;
       label?: string;
@@ -210,6 +218,7 @@ export class ChannelRegistry {
       result.push({
         name,
         type: 'route',
+        adapter: route.adapter,
         target: `${route.adapter} -> ${route.recipient}`,
         ...(route.name ? { label: route.name } : {}),
       });

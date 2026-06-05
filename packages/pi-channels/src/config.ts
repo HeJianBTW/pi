@@ -141,12 +141,11 @@ function applyEnvOverrides(config: ChannelConfig): void {
     }
   }
 
-  if (process.env.WECOM_CORP_ID || process.env.WECOM_SECRET || process.env.WECOM_AGENT_ID) {
+  if (process.env.WECOM_BOT_ID || process.env.WECOM_BOT_SECRET) {
     config.adapters ??= {};
     config.adapters.wecom ??= { type: 'wecom' };
-    if (process.env.WECOM_CORP_ID) config.adapters.wecom.corpId = process.env.WECOM_CORP_ID;
-    if (process.env.WECOM_SECRET) config.adapters.wecom.secret = process.env.WECOM_SECRET;
-    if (process.env.WECOM_AGENT_ID) config.adapters.wecom.agentId = process.env.WECOM_AGENT_ID;
+    if (process.env.WECOM_BOT_ID) config.adapters.wecom.botId = process.env.WECOM_BOT_ID;
+    if (process.env.WECOM_BOT_SECRET) config.adapters.wecom.secret = process.env.WECOM_BOT_SECRET;
   }
 
   if (process.env.WEBHOOK_SECRET) {
