@@ -1,8 +1,17 @@
 {
-  "name": "@amaster.ai/pi-teamwork",
+  "name": "@amaster.ai/pi-image-gen",
   "version": "0.1.2-beta.15",
-  "description": "Pi extension for team collaboration and issue management via Multica",
-  "keywords": ["pi-package", "pi", "extension", "teamwork", "issues", "project-management", "multica"],
+  "description": "Pi extension for image generation via OpenAI gpt-image, Google Nano Banana (Gemini), Alibaba Qwen-Image, OpenRouter, and custom providers.",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "extension",
+    "image-generation",
+    "nano-banana",
+    "gpt-image",
+    "qwen-image",
+    "openrouter"
+  ],
   "license": "Apache-2.0",
   "type": "module",
   "sideEffects": false,
@@ -17,29 +26,29 @@
       "default": "./package.json"
     }
   },
-  "pi": {
-    "image": "https://raw.githubusercontent.com/TGYD-helige/pi/master/packages/pi-teamwork/preview.png",
-    "extensions": [
-      "./dist/index.js"
-    ]
-  },
   "files": [
     "dist",
     "preview.png",
     "README.md"
   ],
+  "pi": {
+    "image": "https://raw.githubusercontent.com/TGYD-helige/pi/master/packages/pi-image-gen/preview.png",
+    "extensions": [
+      "./dist/index.js"
+    ]
+  },
   "publishConfig": {
     "access": "public"
   },
   "repository": {
     "type": "git",
     "url": "https://github.com/TGYD-helige/pi.git",
-    "directory": "packages/pi-teamwork"
+    "directory": "packages/pi-image-gen"
   },
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc -b --pretty false",
-    "test": "vitest run"
+    "test": "vitest run src"
   },
   "dependencies": {
     "@amaster.ai/pi-shared": "workspace:*"

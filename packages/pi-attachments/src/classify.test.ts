@@ -143,8 +143,7 @@ describe('renderAttachmentBlock', () => {
       100_000,
     );
 
-    expect(result).toContain(`## report.pdf: ${filePath}`);
-    expect(result).toContain('pdftotext');
+    expect(result).toBe(`## report.pdf: ${filePath}`);
   });
 
   it('renders image file with just path heading', async () => {

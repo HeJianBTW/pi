@@ -1,0 +1,310 @@
+# @amaster.ai/pi-image-gen
+
+![pi-image-gen preview](https://raw.githubusercontent.com/TGYD-helige/pi/master/packages/pi-image-gen/preview.png)
+
+Pi extension that adds an `image_generate` tool. Supported providers:
+
+| Provider                       | Model id (alias)                              | Env var               |
+| ------------------------------ | --------------------------------------------- | --------------------- |
+| OpenAI                         | `gpt-image-1` (alias `gpt-image-2`)             | `OPENAI_API_KEY`      |
+| Google Gemini ("Nano Banana")  | `gemini-3-pro-image` (alias `nano-banana-pro`), `gemini-3-pro-image-preview`, `gemini-3.1-flash-image` (alias `nano-banana`), `gemini-3.1-flash-image-preview`, `gemini-2.5-flash-image` (alias `nano-banana-2`), `gemini-2.0-flash-image` | `GEMINI_API_KEY`      |
+| Alibaba DashScope (Qwen-Image) | `qwen-image-2.0-pro` (alias `qwen-image-pro`), `qwen-image-2.0` (alias `qwen-image-2`, `qwen-image`) | `DASHSCOPE_API_KEY` |
+| OpenRouter                     | any (use `openrouter/<vendor>/<id>`)          | `OPENROUTER_API_KEY`  |
+| Custom providers               | whatever you declare in settings              | (your choice, via `$VAR`) |
+
+The env-var names match [pi.dev's provider table](https://pi.dev/docs/latest/providers) — if the agent already has a key set for a provider, this extension will reuse it. You don't need to introduce a new variable.
+
+The active model is **fixed in settings.json**. The `image_generate` tool intentionally does **not** take a `model` parameter — point your project at one model, get consistent output. To switch models, edit settings and run `/image-gen reload`.
+
+## Install
+
+```sh
+pnpm add @amaster.ai/pi-image-gen
+```
+
+The package's `pi.extensions` field auto-registers it with the host pi-coding-agent runtime; no extra wiring needed.
+
+## Configure
+
+Settings are read by `pi-shared`'s `loadPiSettings`, which merges three files (low-to-high priority):
+
+1. `~/.pi/agent/settings.json` (global)
+2. `$PI_AGENT_HOME/settings.json` (agent dir, if `PI_AGENT_HOME` is set)
+3. `<cwd>/.pi/settings.json` (project)
+
+All settings live under the `pi-image-gen` key. The minimum viable config sets `defaultModel`:
+
+```json
+{
+  "pi-image-gen": {
+    "defaultModel": "nano-banana"
+  }
+}
+```
+
+…and exports the matching env var:
+
+```sh
+export GEMINI_API_KEY=sk-...
+```
+
+That's it. From the agent: `image_generate({ prompt: "a cyberpunk cat" })`.
+
+### All settings fields
+
+```json
+{
+  "pi-image-gen": {
+    "defaultModel": "nano-banana",
+    "outputDir": ".pi/images",
+
+    "providers": {
+      "openai":     { "baseUrl": "https://my-proxy.example.com/v1", "apiKey": "${MY_OPENAI_KEY}" },
+      "gemini":     { "headers": { "x-goog-trace": "pi-prod" } },
+      "dashscope":  { "baseUrl": "https://dashscope-intl.aliyuncs.com/api/v1" },
+      "openrouter": { "apiKey": "$OPENROUTER_API_KEY" }
+    },
+
+    "customProviders": {
+      "my-stable-diffusion": {
+        "api": "openai",
+        "baseUrl": "https://api.my-sd.example.com/v1",
+        "apiKey": "${MY_SD_KEY}",
+        "headers": { "x-tenant": "team-a" },
+        "models": [
+          { "id": "sd-3-large", "alias": "sd3" },
+          "sd-3-medium"
+        ]
+      }
+    }
+  }
+}
+```
+
+| Field             | Purpose                                                                                  |
+| ----------------- | ---------------------------------------------------------------------------------------- |
+| `defaultModel`    | Model id or alias the tool will use. **Required.**                                       |
+| `outputDir`       | Where to write generated images. Relative paths resolve against the session cwd. Default `.pi/images`. |
+| `providers`       | Per-built-in-provider override. Set `apiKey`, `baseUrl`, or `headers` to point at a proxy or non-standard env var. |
+| `customProviders` | User-defined providers — see below.                                                      |
+
+`apiKey`, `baseUrl`, and `headers` values support `$VAR` and `${VAR}` env interpolation, with `:-` fallback (e.g. `${FOO:-default}`).
+
+## Built-in setup walkthrough
+
+### 1. OpenAI (`gpt-image-1` / `gpt-image-2`)
+
+```sh
+export OPENAI_API_KEY=sk-...
+```
+
+```json
+{ "pi-image-gen": { "defaultModel": "gpt-image-2" } }
+```
+
+### 2. Google Gemini "Nano Banana"
+
+```sh
+export GEMINI_API_KEY=...
+```
+
+```json
+{ "pi-image-gen": { "defaultModel": "nano-banana" } }
+```
+
+### 3. Alibaba DashScope (Qwen-Image)
+
+```sh
+export DASHSCOPE_API_KEY=...
+```
+
+```json
+{ "pi-image-gen": { "defaultModel": "qwen-image-2" } }
+```
+
+For the international DashScope endpoint, override the base URL:
+
+```json
+{
+  "pi-image-gen": {
+    "defaultModel": "qwen-image-2",
+    "providers": {
+      "dashscope": { "baseUrl": "https://dashscope-intl.aliyuncs.com/api/v1" }
+    }
+  }
+}
+```
+
+### 4. OpenRouter (one key, many models)
+
+```sh
+export OPENROUTER_API_KEY=...
+```
+
+```json
+{ "pi-image-gen": { "defaultModel": "openrouter/google/gemini-2.5-flash-image" } }
+```
+
+The string after `openrouter/` is the OpenRouter model slug; pass any image model OpenRouter supports.
+
+## Custom providers
+
+Use `customProviders` for anything not built in: a self-hosted Stable Diffusion, an internal corp gateway, a third-party image API. The shape mirrors [pi.dev's custom-provider docs](https://pi.dev/docs/latest/custom-provider).
+
+Each custom provider declares:
+
+| Field      | Required | Notes                                                                                |
+| ---------- | -------- | ------------------------------------------------------------------------------------ |
+| `api` | yes      | One of `openai`, `gemini`, `dashscope`, `openrouter`. Picks the image-API wire shape. |
+| `baseUrl`  | yes      | API endpoint URL. `$VAR` syntax supported.                                           |
+| `apiKey`   | usually  | API key string. `$VAR` syntax supported.                                             |
+| `name`     | no       | Display name shown in `/image-gen list`.                                             |
+| `headers`  | no       | Extra headers merged into every request.                                             |
+| `models`   | no       | Optional model id/alias list. Omit to make this a **catch-all** — the provider will accept any unknown model id (passed through as the remote id). Provide a list only when you want aliases or want to route specific ids elsewhere. Each entry is a string or `{ id, alias?, name? }`. |
+
+> Note: pi.dev custom providers also have an `api` field, but its values (`openai-completions`, `anthropic-messages`, …) are LLM streaming formats that don't apply to image generation. The values here (`openai`, `gemini`, `dashscope`, `openrouter`) are image-API wire shapes — same field name, different namespace.
+
+### Example: self-hosted Stable Diffusion (OpenAI-compatible)
+
+```sh
+export SD_KEY=local-secret
+```
+
+```json
+{
+  "pi-image-gen": {
+    "defaultModel": "sd3",
+    "customProviders": {
+      "my-sd": {
+        "api": "openai",
+        "baseUrl": "http://localhost:8000/v1",
+        "apiKey": "$SD_KEY",
+        "models": [{ "id": "sd-3-large", "alias": "sd3" }]
+      }
+    }
+  }
+}
+```
+
+The agent calls `image_generate({prompt: ...})`; the extension sees `defaultModel: "sd3"`, finds it under `my-sd`, and POSTs to `http://localhost:8000/v1/images/generations` with `Bearer $SD_KEY`.
+
+### Example: Volcengine Doubao image API (OpenAI-compatible)
+
+```json
+{
+  "pi-image-gen": {
+    "defaultModel": "doubao-seed-image",
+    "customProviders": {
+      "doubao": {
+        "api": "openai",
+        "baseUrl": "https://ark.cn-beijing.volces.com/api/v3",
+        "apiKey": "${ARK_API_KEY}",
+        "models": [{ "id": "doubao-seedream-4-0-250828", "alias": "doubao-seed-image" }]
+      }
+    }
+  }
+}
+```
+
+### Example: a Gemini-shape proxy
+
+If your provider speaks the Google Generative Language wire format:
+
+```json
+{
+  "pi-image-gen": {
+    "defaultModel": "internal-banana",
+    "customProviders": {
+      "internal": {
+        "api": "gemini",
+        "baseUrl": "https://gemini-proxy.corp.example/v1beta",
+        "apiKey": "$INTERNAL_GEMINI_KEY",
+        "models": [{ "id": "gemini-2.5-flash-image", "alias": "internal-banana" }]
+      }
+    }
+  }
+}
+```
+
+### Direct addressing without an alias
+
+If a custom provider has no `models` list, you can still address it with `<providerName>/<remoteId>`:
+
+```json
+{
+  "pi-image-gen": {
+    "defaultModel": "my-sd/sd-3-large",
+    "customProviders": {
+      "my-sd": { "api": "openai", "baseUrl": "http://localhost:8000/v1", "apiKey": "$SD_KEY" }
+    }
+  }
+}
+```
+
+## Tool: `image_generate`
+
+```ts
+image_generate({
+  prompt: string,                  // required — what to draw or how to edit
+  image?: string[],                // optional — array of file paths or http(s) URLs
+  n?: number,                      // 1–8, default 1
+  size?: string,                   // e.g. "1024x1024" — provider-specific
+  filename?: string,               // filename prefix (no extension)
+  outputDir?: string,              // override settings.outputDir for this call
+})
+```
+
+Returns the absolute file path(s) of saved images. Files land in `outputDir` (default `<cwd>/.pi/images`), filename pattern `<filename or model-UTC-stamp>.<ext>`.
+
+### Tool result format
+
+The tool's text result is shaped as ready-to-paste markdown the model can copy verbatim into its reply, so the UI renders the image inline:
+
+```
+Generated 1 image(s) via amaster (custom) (qwen-image-2.0). Show each one to the user as inline markdown — copy the lines below verbatim into your reply:
+
+![white](/Users/.../white.png)
+```
+
+The `alt` text is the filename without its extension — i.e. whatever you passed as `filename`, or `<model>-<UTC-stamp>` if you didn't. When OpenAI returns a `revised_prompt`, it appears as a quote line under the image:
+
+```
+![beaver](/Users/.../beaver.png)
+> revised prompt: a cute beaver, photorealistic, water droplets
+```
+
+### Image-to-image / edit
+
+`image` is always an array — pass `["path"]` for a single image, `["a", "b"]` for multi-image conditioning. Each entry must be:
+
+- **Local file path** — absolute or relative (resolved against the session cwd).
+- **http(s) URL** — downloaded with the same fetch (and abort signal) used for the API call.
+
+Base64 strings and `data:` URIs are intentionally rejected — tool arguments don't survive megabyte-sized strings cleanly. If you have raw image bytes, write them to a file first and pass the path.
+
+**Iterating on a previous result:** pass the previous output path back. The next image is conditioned on the last one:
+
+```
+image_generate({ prompt: "a beaver chewing wood", filename: "beaver" })
+  → /Users/.../.pi/images/beaver.png
+
+image_generate({ prompt: "now in watercolor style", image: ["/Users/.../.pi/images/beaver.png"] })
+  → /Users/.../.pi/images/gpt-image-1-20260605-...png  (edited)
+```
+
+Provider behavior:
+
+| Provider | Image input route |
+|---|---|
+| OpenAI (`gpt-image-1`) | `POST /v1/images/edits` (multipart). Supports multi-image. |
+| Gemini (`gemini-3.x-flash-image`, `nano-banana`) | `inline_data` parts prepended to the user message. Supports multi-image. |
+| DashScope (`qwen-image-2.0`, `qwen-image-2.0-pro`) | `image` parts in `messages[].content`. |
+
+There is intentionally no `model` parameter on the tool — the active model is fixed by `pi-image-gen.defaultModel` in settings.
+
+## Slash commands
+
+- `/image-gen list` — show the active model, which provider it routes to, whether the key is set, configured providers, and the catalog of built-in model ids.
+- `/image-gen reload` — re-read settings from disk.
+
+Use `/image-gen list` to verify your config — it will tell you when `defaultModel` is unset, points at a provider with no API key, or names an unknown id.

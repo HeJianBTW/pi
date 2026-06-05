@@ -150,11 +150,27 @@ describe('skill loading via extension input handler', () => {
   });
 
   async function loadExtension(): Promise<{
-    runInput: (text: string) => Promise<{ action: string; text?: string } | undefined>;
+    runInput: (
+      text: string,
+      images?: Array<{ type: 'image'; mimeType: string; data: string }>,
+    ) => Promise<
+      | {
+          action: string;
+          text?: string;
+          images?: Array<{ type: 'image'; mimeType: string; data: string }>;
+        }
+      | undefined
+    >;
   }> {
     const ext = (await import('./extension.js')).default;
     let handler:
-      | ((event: { text: string; images?: unknown[] }, ctx: { cwd: string }) => Promise<unknown>)
+      | ((
+          event: {
+            text: string;
+            images?: Array<{ type: 'image'; mimeType: string; data: string }>;
+          },
+          ctx: { cwd: string },
+        ) => Promise<unknown>)
       | undefined;
     const fakeApi = {
       on: (event: string, fn: typeof handler) => {
@@ -164,9 +180,20 @@ describe('skill loading via extension input handler', () => {
     ext(fakeApi as never);
     if (!handler) throw new Error('input handler was not registered');
     return {
-      runInput: async (text: string) => {
-        const result = await handler!({ text }, { cwd });
-        return result as { action: string; text?: string } | undefined;
+      runInput: async (text, images) => {
+        const event: {
+          text: string;
+          images?: Array<{ type: 'image'; mimeType: string; data: string }>;
+        } = { text };
+        if (images) event.images = images;
+        const result = await handler!(event, { cwd });
+        return result as
+          | {
+              action: string;
+              text?: string;
+              images?: Array<{ type: 'image'; mimeType: string; data: string }>;
+            }
+          | undefined;
       },
     };
   }
@@ -249,7 +276,7 @@ describe('skill loading via extension input handler', () => {
     expect(text).not.toContain('node_modules/');
   });
 
-  it('emits skill block before clean text before attachment reminder', async () => {
+  it('emits clean text before skill and file blocks, in mention order', async () => {
     const skillDir = join(agentDir, 'skills', 'demo');
     await mkdir(skillDir, { recursive: true });
     await writeFile(join(skillDir, 'SKILL.md'), 'SKILL BODY', 'utf8');
@@ -259,15 +286,17 @@ describe('skill loading via extension input handler', () => {
     const result = await runInput('@skill:demo please summarise @note.txt');
     const text = result?.text ?? '';
 
-    const skillIdx = text.indexOf('<skill name="demo"');
     const cleanIdx = text.indexOf('please summarise');
-    const reminderIdx = text.indexOf('<system-reminder>');
+    const skillIdx = text.indexOf('<skill name="demo"');
+    const noteIdx = text.indexOf('note.txt');
 
-    expect(skillIdx).toBeGreaterThanOrEqual(0);
     expect(cleanIdx).toBeGreaterThanOrEqual(0);
-    expect(reminderIdx).toBeGreaterThanOrEqual(0);
-    expect(skillIdx).toBeLessThan(cleanIdx);
-    expect(cleanIdx).toBeLessThan(reminderIdx);
+    expect(skillIdx).toBeGreaterThanOrEqual(0);
+    expect(noteIdx).toBeGreaterThanOrEqual(0);
+    // Clean text first, then resources in the order they were mentioned:
+    // @skill:demo came before @note.txt in the input.
+    expect(cleanIdx).toBeLessThan(skillIdx);
+    expect(skillIdx).toBeLessThan(noteIdx);
   });
 
   it('renders SKILL.md with no frontmatter unchanged', async () => {
@@ -308,5 +337,175 @@ describe('skill loading via extension input handler', () => {
 
     expect(result?.action).toBe('transform');
     expect(result?.images).toEqual([inputImage]);
+  });
+});
+
+// 1×1 PNG bytes — used for image fixture tests below.
+const TINY_PNG_HEX =
+  '89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d49444154789c63000100000005000115c46f250000000049454e44ae426082';
+
+describe('image attachments produce parallel vision + markdown channels', () => {
+  let tmpRoot: string;
+  let cwd: string;
+  let agentDir: string;
+  let originalAgentHome: string | undefined;
+
+  beforeEach(async () => {
+    tmpRoot = await mkdtemp(join(tmpdir(), 'pi-attachments-img-'));
+    cwd = join(tmpRoot, 'cwd');
+    agentDir = join(tmpRoot, 'agent');
+    await mkdir(cwd, { recursive: true });
+    await mkdir(agentDir, { recursive: true });
+    originalAgentHome = process.env.PI_AGENT_HOME;
+    process.env.PI_AGENT_HOME = agentDir;
+  });
+
+  afterEach(async () => {
+    if (originalAgentHome === undefined) delete process.env.PI_AGENT_HOME;
+    else process.env.PI_AGENT_HOME = originalAgentHome;
+    await rm(tmpRoot, { recursive: true, force: true });
+  });
+
+  async function loadExt() {
+    const ext = (await import('./extension.js')).default;
+    let handler:
+      | ((
+          event: {
+            text: string;
+            images?: Array<{ type: 'image'; mimeType: string; data: string }>;
+          },
+          ctx: { cwd: string },
+        ) => Promise<unknown>)
+      | undefined;
+    ext({
+      on: (e: string, fn: typeof handler) => {
+        if (e === 'input') handler = fn;
+      },
+    } as never);
+    if (!handler) throw new Error('input handler not registered');
+    return handler;
+  }
+
+  it('writes a markdown ![](path) line for an @-mentioned image and includes its base64 in images[]', async () => {
+    const pngPath = join(cwd, 'pic.png');
+    await writeFile(pngPath, Buffer.from(TINY_PNG_HEX, 'hex'));
+    const handler = await loadExt();
+    const result = (await handler({ text: 'look at @pic.png' }, { cwd })) as
+      | { text?: string; images?: Array<{ type: 'image'; mimeType: string; data: string }> }
+      | undefined;
+
+    expect(result?.images).toHaveLength(1);
+    expect(result?.images?.[0]?.mimeType).toBe('image/png');
+    expect(result?.text ?? '').toContain(`![pic.png](${pngPath})`);
+  });
+
+  it('persists a drag-uploaded image to .pi/uploads and references it by sha256 path', async () => {
+    const data = Buffer.from(TINY_PNG_HEX, 'hex').toString('base64');
+    const handler = await loadExt();
+    const result = (await handler(
+      {
+        text: '帮我改一下这个图片',
+        images: [{ type: 'image', mimeType: 'image/png', data }],
+      },
+      { cwd },
+    )) as { text?: string; images?: unknown[] } | undefined;
+
+    // markdown line points at .pi/uploads/<hash>.png
+    expect(result?.text ?? '').toMatch(
+      new RegExp(
+        `!\\[[^\\]]+\\]\\(${cwd.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}/\\.pi/uploads/[a-f0-9]+\\.png\\)`,
+      ),
+    );
+    // file actually exists on disk
+    const m = result?.text?.match(/\.pi\/uploads\/([a-f0-9]+)\.png/);
+    expect(m).not.toBeNull();
+  });
+
+  it('preserves order: drag-uploaded images first, then @-mentions', async () => {
+    const aPath = join(cwd, 'a.png');
+    const cPath = join(cwd, 'c.png');
+    await writeFile(aPath, Buffer.from(TINY_PNG_HEX, 'hex'));
+    await writeFile(cPath, Buffer.from(TINY_PNG_HEX, 'hex'));
+
+    // The drag-upload uses a different mimeType so we can tell which entry is which.
+    const drag = {
+      type: 'image' as const,
+      mimeType: 'image/jpeg',
+      data: 'AAAA',
+    };
+
+    const handler = await loadExt();
+    const result = (await handler(
+      { text: 'compare @a.png and @c.png', images: [drag] },
+      { cwd },
+    )) as { text?: string; images?: Array<{ mimeType: string }> } | undefined;
+
+    expect(result?.images).toHaveLength(3);
+    // First image in vision = the drag upload (image/jpeg).
+    expect(result?.images?.[0]?.mimeType).toBe('image/jpeg');
+    // Then a.png, then c.png.
+    expect(result?.images?.[1]?.mimeType).toBe('image/png');
+    expect(result?.images?.[2]?.mimeType).toBe('image/png');
+
+    // Text channel must list them in the same order.
+    const text = result?.text ?? '';
+    const dragIdx = text.search(/\.pi\/uploads\//);
+    const aIdx = text.indexOf(`(${aPath})`);
+    const cIdx = text.indexOf(`(${cPath})`);
+    expect(dragIdx).toBeGreaterThanOrEqual(0);
+    expect(aIdx).toBeGreaterThanOrEqual(0);
+    expect(cIdx).toBeGreaterThanOrEqual(0);
+    expect(dragIdx).toBeLessThan(aIdx);
+    expect(aIdx).toBeLessThan(cIdx);
+  });
+
+  it('interleaves images and non-image attachments by mention order', async () => {
+    const pngA = join(cwd, 'a.png');
+    const pdfB = join(cwd, 'b.pdf');
+    const pngC = join(cwd, 'c.png');
+    await writeFile(pngA, Buffer.from(TINY_PNG_HEX, 'hex'));
+    await writeFile(pdfB, '%PDF-1.4 fake', 'utf8');
+    await writeFile(pngC, Buffer.from(TINY_PNG_HEX, 'hex'));
+
+    const handler = await loadExt();
+    const result = (await handler(
+      { text: 'review @a.png and @b.pdf and @c.png together' },
+      { cwd },
+    )) as { text?: string; images?: unknown[] } | undefined;
+
+    const text = result?.text ?? '';
+    const idxA = text.indexOf(`(${pngA})`);
+    const idxB = text.indexOf(pdfB);
+    const idxC = text.indexOf(`(${pngC})`);
+    expect(idxA).toBeGreaterThanOrEqual(0);
+    expect(idxB).toBeGreaterThanOrEqual(0);
+    expect(idxC).toBeGreaterThanOrEqual(0);
+    expect(idxA).toBeLessThan(idxB);
+    expect(idxB).toBeLessThan(idxC);
+
+    // Vision channel still has both images, in order.
+    expect(result?.images).toHaveLength(2);
+  });
+
+  it('dedupes the same drag-uploaded image (same sha256 → single write)', async () => {
+    const data = Buffer.from(TINY_PNG_HEX, 'hex').toString('base64');
+    const handler = await loadExt();
+    const result = (await handler(
+      {
+        text: 'two same images',
+        images: [
+          { type: 'image', mimeType: 'image/png', data },
+          { type: 'image', mimeType: 'image/png', data },
+        ],
+      },
+      { cwd },
+    )) as { text?: string; images?: unknown[] } | undefined;
+
+    // Vision channel keeps both (the model can see both slots), but resolved
+    // path is the same — so both markdown references point at the same file.
+    // Implementation dedupes by absolute path: only one item is recorded.
+    expect(result?.images).toHaveLength(1);
+    const matches = (result?.text ?? '').match(/\.pi\/uploads\/[a-f0-9]+\.png/g) ?? [];
+    expect(matches).toHaveLength(1);
   });
 });

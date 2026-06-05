@@ -184,9 +184,7 @@ export async function renderAttachmentBlock(
   }
 
   if (kind === 'doc') {
-    const heading = `## ${name}${fsPath ? `: ${fsPath}` : url ? `: ${url}` : ''}`;
-    const instruction = fsPath ? docReadInstruction(name, fsPath, mimeType) : undefined;
-    return instruction ? `${heading}\n${instruction}` : heading;
+    return `## ${name}${fsPath ? `: ${fsPath}` : url ? `: ${url}` : ''}`;
   }
 
   return `## ${name}${fsPath ? `: ${fsPath}` : url ? `: ${url}` : ''}`;

@@ -10,13 +10,26 @@
  * - @"/path with spaces/file.pdf" — quoted file reference
  * - @file.ts#L10-20 — line range (parsed but range applied by LLM tools)
  *
- * Image files are encoded as base64 ImageContent for multimodal input.
+ * Image attachments are exposed on two parallel channels:
+ *   1. event.images[] — base64 image content the model sees via vision.
+ *   2. event.text     — `![name](path)` markdown line per image, in the same order.
+ *
+ * The two channels are kept in lock-step so that "the first image you see" in
+ * the vision channel is the same one the first markdown ref points to. This is
+ * what lets a model call `image_generate({ image: [path] })` after looking at
+ * an uploaded image.
+ *
+ * Drag-uploaded images (those that arrive on event.images[] without an
+ * @-mention) have no source path. We materialize them to <cwd>/.pi/uploads/
+ * with a sha256-derived filename and surface that path. They're rendered
+ * before the @-mention block, matching "user uploads first, then types".
  */
-import { readFile, stat } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { resolveAgentDir } from '@amaster.ai/pi-shared/settings';
 import type { ExtensionAPI, InputEventResult } from '@earendil-works/pi-coding-agent';
-import { type AttachmentMeta, classifyAttachment, renderAttachmentContext } from './classify.js';
+import { type AttachmentMeta, classifyAttachment, renderAttachmentBlock } from './classify.js';
 
 type ImageContent = { type: 'image'; mimeType: string; data: string };
 
@@ -27,26 +40,87 @@ const REGULAR_AT_RE = /(^|\s)@([^\s@"]+)/g;
 
 type Mention = { kind: 'skill'; name: string } | { kind: 'file'; ref: string };
 
+type Item =
+  | { kind: 'image'; name: string; absolutePath: string; image: ImageContent }
+  | { kind: 'file'; meta: AttachmentMeta }
+  | { kind: 'skill'; block: string };
+
+const MIME_TO_EXT: Record<string, string> = {
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+  'image/jpg': 'jpg',
+  'image/webp': 'webp',
+  'image/gif': 'gif',
+  'image/bmp': 'bmp',
+  'image/svg+xml': 'svg',
+  'image/avif': 'avif',
+  'image/heic': 'heic',
+};
+
+const MIME_BY_EXT: Record<string, string> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  svg: 'image/svg+xml',
+  bmp: 'image/bmp',
+  avif: 'image/avif',
+  heic: 'image/heic',
+  pdf: 'application/pdf',
+  json: 'application/json',
+  xml: 'application/xml',
+};
+
 export default function piAttachmentsExtension(pi: ExtensionAPI): void {
   const maxTextChars = Number(process.env.PI_ATTACHMENT_MAX_TEXT_CHARS) || 128_000;
 
   pi.on('input', async (event, ctx): Promise<InputEventResult | undefined> => {
     const { mentions } = extractMentions(event.text);
-    if (mentions.length === 0) return;
+    const incomingImages = event.images ?? [];
+
+    if (mentions.length === 0 && incomingImages.length === 0) {
+      return;
+    }
 
     const cwd = ctx.cwd;
-    const attachments: AttachmentMeta[] = [];
-    const images: ImageContent[] = [...(event.images ?? [])];
-    const skillBlocks: string[] = [];
+    const items: Item[] = [];
     const resolvedPaths = new Set<string>();
     const resolvedSkills = new Set<string>();
 
+    // Drag-uploaded images go first, in arrival order. Persist each to disk so
+    // we can give the model a concrete path it can pass to file-aware tools.
+    for (const image of incomingImages) {
+      try {
+        const persisted = await persistDragUploadedImage(image, cwd);
+        if (resolvedPaths.has(persisted.absolutePath)) continue;
+        resolvedPaths.add(persisted.absolutePath);
+        items.push({
+          kind: 'image',
+          name: persisted.name,
+          absolutePath: persisted.absolutePath,
+          image,
+        });
+      } catch {
+        // If we can't persist (read-only fs, permissions), keep the vision
+        // channel anyway by recording the image with no path. The markdown
+        // line will use a placeholder so the model knows the image is there.
+        items.push({
+          kind: 'image',
+          name: 'uploaded-image',
+          absolutePath: '',
+          image,
+        });
+      }
+    }
+
+    // @-mentions in the order they appeared in the user's text.
     for (const mention of mentions) {
       if (mention.kind === 'skill') {
         if (resolvedSkills.has(mention.name)) continue;
         resolvedSkills.add(mention.name);
         const block = await loadSkillBlock(mention.name, cwd);
-        if (block) skillBlocks.push(block);
+        if (block) items.push({ kind: 'skill', block });
         continue;
       }
 
@@ -58,11 +132,14 @@ export default function piAttachmentsExtension(pi: ExtensionAPI): void {
       try {
         const stats = await stat(absolutePath);
         if (stats.isDirectory()) {
-          attachments.push({
-            id: absolutePath,
-            name: path.basename(absolutePath),
-            path: absolutePath,
-            mimeType: 'inode/directory',
+          items.push({
+            kind: 'file',
+            meta: {
+              id: absolutePath,
+              name: path.basename(absolutePath),
+              path: absolutePath,
+              mimeType: 'inode/directory',
+            },
           });
           continue;
         }
@@ -73,22 +150,30 @@ export default function piAttachmentsExtension(pi: ExtensionAPI): void {
 
         if (kind === 'image') {
           try {
-            const data = await readFile(absolutePath);
-            images.push({
-              type: 'image',
-              mimeType: mimeType ?? 'image/png',
-              data: data.toString('base64'),
+            const bytes = await readFile(absolutePath);
+            items.push({
+              kind: 'image',
+              name,
+              absolutePath,
+              image: {
+                type: 'image',
+                mimeType: mimeType ?? 'image/png',
+                data: bytes.toString('base64'),
+              },
             });
           } catch {
             // skip unreadable images
           }
         } else {
-          attachments.push({
-            id: absolutePath,
-            name,
-            path: absolutePath,
-            ...(mimeType ? { mimeType } : {}),
-            size: stats.size,
+          items.push({
+            kind: 'file',
+            meta: {
+              id: absolutePath,
+              name,
+              path: absolutePath,
+              ...(mimeType ? { mimeType } : {}),
+              size: stats.size,
+            },
           });
         }
       } catch {
@@ -96,32 +181,81 @@ export default function piAttachmentsExtension(pi: ExtensionAPI): void {
       }
     }
 
-    if (
-      attachments.length === 0 &&
-      skillBlocks.length === 0 &&
-      images.length === (event.images?.length ?? 0)
-    ) {
+    if (items.length === 0) {
       return;
     }
 
+    // Emit images in the same order they appear in items[]. Lock-step ordering
+    // is what guarantees `images[N]` corresponds to the Nth `![](...)` line.
+    const outputImages: ImageContent[] = items
+      .filter((item): item is Extract<Item, { kind: 'image' }> => item.kind === 'image')
+      .map((item) => item.image);
+
     const cleanText = stripMentions(event.text);
-    const context = await renderAttachmentContext(attachments, {
-      maxTextChars,
-      hasImages: images.length > 0,
-    });
+    const renderedItems: string[] = [];
+    for (const item of items) {
+      if (item.kind === 'image') {
+        renderedItems.push(renderImageMarkdown(item.name, item.absolutePath));
+      } else if (item.kind === 'skill') {
+        renderedItems.push(item.block);
+      } else {
+        renderedItems.push(await renderAttachmentBlock(item.meta, maxTextChars));
+      }
+    }
 
     const parts: string[] = [];
-    if (skillBlocks.length > 0) parts.push(skillBlocks.join('\n\n'));
     if (cleanText) parts.push(cleanText);
-    if (context) parts.push(`<system-reminder>\n${context}\n</system-reminder>`);
+    if (renderedItems.length > 0) parts.push(renderedItems.join('\n\n'));
     const text = parts.join('\n\n');
 
     return {
       action: 'transform',
       text,
-      ...(images.length > 0 ? { images } : {}),
+      ...(outputImages.length > 0 ? { images: outputImages } : {}),
     };
   });
+}
+
+/**
+ * Render an inline image reference. `![alt](path)` is the standard markdown
+ * shape; if path is empty (drag-upload that we couldn't persist) we fall back
+ * to a name-only marker so the model still sees the slot.
+ */
+function renderImageMarkdown(name: string, absolutePath: string): string {
+  if (!absolutePath) {
+    return `![${escapeMarkdown(name)}](#)`;
+  }
+  return `![${escapeMarkdown(name)}](${absolutePath})`;
+}
+
+function escapeMarkdown(value: string): string {
+  return value.replace(/[[\]()]/g, (ch) => `\\${ch}`);
+}
+
+/**
+ * Persist a drag-uploaded image (which has no source path) into
+ * `<cwd>/.pi/uploads/`, naming it by sha256 of its bytes. Same image uploaded
+ * twice → same path, no duplicate write.
+ */
+async function persistDragUploadedImage(
+  image: ImageContent,
+  cwd: string,
+): Promise<{ absolutePath: string; name: string }> {
+  const bytes = Buffer.from(image.data, 'base64');
+  const hash = createHash('sha256').update(bytes).digest('hex').slice(0, 16);
+  const ext = MIME_TO_EXT[image.mimeType] ?? 'png';
+  const name = `${hash}.${ext}`;
+  const dir = path.resolve(cwd, '.pi', 'uploads');
+  const absolutePath = path.join(dir, name);
+
+  await mkdir(dir, { recursive: true });
+  try {
+    await stat(absolutePath);
+    // already on disk — same content (sha256 collision-resistant)
+  } catch {
+    await writeFile(absolutePath, bytes);
+  }
+  return { absolutePath, name };
 }
 
 export function extractMentions(content: string): { mentions: Mention[]; raw: string[] } {
@@ -250,21 +384,6 @@ function escapeXmlAttribute(value: string): string {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
 }
-
-const MIME_BY_EXT: Record<string, string> = {
-  png: 'image/png',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  gif: 'image/gif',
-  webp: 'image/webp',
-  svg: 'image/svg+xml',
-  bmp: 'image/bmp',
-  avif: 'image/avif',
-  heic: 'image/heic',
-  pdf: 'application/pdf',
-  json: 'application/json',
-  xml: 'application/xml',
-};
 
 function guessMimeType(name: string): string | undefined {
   const ext = name.toLowerCase().split('.').pop();
