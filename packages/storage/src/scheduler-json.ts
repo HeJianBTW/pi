@@ -12,6 +12,7 @@ import { readJsonFile, writeJsonFile } from './json-file.js';
 export class JsonScheduledTaskStore implements ScheduledTaskStore {
   private loaded = false;
   private readonly tasks = new Map<string, ScheduledTask>();
+  private writeTail: Promise<unknown> = Promise.resolve();
 
   constructor(private readonly filePath: string) {}
 
@@ -26,10 +27,10 @@ export class JsonScheduledTaskStore implements ScheduledTaskStore {
   }
 
   async create(task: ScheduledTask): Promise<ScheduledTask> {
-    await this.load();
     const normalized = normalizeScheduledTask(task);
-    this.tasks.set(normalized.id, normalized);
-    await this.save();
+    await this.updateState(() => {
+      this.tasks.set(normalized.id, normalized);
+    });
     return normalized;
   }
 
@@ -38,24 +39,27 @@ export class JsonScheduledTaskStore implements ScheduledTaskStore {
     task: ScheduledTask,
     _scope: TaskSchedulerScope = {},
   ): Promise<ScheduledTask | undefined> {
-    await this.load();
-    if (!this.tasks.has(taskId)) {
+    const normalized = normalizeScheduledTask(task);
+    const updated = await this.updateState(() => {
+      if (!this.tasks.has(taskId)) {
+        return false;
+      }
+      this.tasks.set(taskId, normalized);
+      return true;
+    });
+    if (!updated) {
       return undefined;
     }
-    const normalized = normalizeScheduledTask(task);
-    this.tasks.set(taskId, normalized);
-    await this.save();
     return normalized;
   }
 
   async delete(taskId: string, _scope: TaskSchedulerScope = {}): Promise<boolean> {
-    await this.load();
-    if (!this.tasks.has(taskId)) {
-      return false;
-    }
-    const deleted = this.tasks.delete(taskId);
-    await this.save();
-    return deleted;
+    return await this.updateState(() => {
+      if (!this.tasks.has(taskId)) {
+        return false;
+      }
+      return this.tasks.delete(taskId);
+    });
   }
 
   private async load(): Promise<void> {
@@ -73,6 +77,17 @@ export class JsonScheduledTaskStore implements ScheduledTaskStore {
 
   private async save(): Promise<void> {
     await writeJsonFile(this.filePath, [...this.tasks.values()]);
+  }
+
+  private async updateState<T>(mutator: () => T): Promise<T> {
+    const pending = this.writeTail.then(async () => {
+      await this.load();
+      const result = mutator();
+      await this.save();
+      return result;
+    });
+    this.writeTail = pending.catch(() => undefined);
+    return await pending;
   }
 }
 

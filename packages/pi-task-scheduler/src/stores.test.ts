@@ -56,6 +56,16 @@ describe('JsonScheduledTaskStore', () => {
     expect(all[0]!.id).toBe('task-1');
   });
 
+  it('serializes concurrent creates without losing tasks', async () => {
+    const store = new JsonScheduledTaskStore(filePath);
+    const tasks = Array.from({ length: 20 }, (_, index) => makeTask({ id: `task-${index}` }));
+
+    await Promise.all(tasks.map((task) => store.create(task)));
+
+    const reloaded = await new JsonScheduledTaskStore(filePath).list();
+    expect(reloaded.map((task) => task.id).sort()).toEqual(tasks.map((task) => task.id).sort());
+  });
+
   it('gets a task by id', async () => {
     const store = new JsonScheduledTaskStore(filePath);
     await store.create(makeTask({ id: 'task-get' }));
