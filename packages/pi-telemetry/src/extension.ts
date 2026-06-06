@@ -59,6 +59,105 @@ function simplifyContent(content: unknown): JsonValue | undefined {
   return content as JsonValue;
 }
 
+function toolEventDetails(result: unknown): JsonObject | undefined {
+  const rawDetails =
+    result && typeof result === 'object' && !Array.isArray(result)
+      ? (result as Record<string, unknown>).details
+      : undefined;
+  const details = sanitizeToolDetails(rawDetails);
+  const output = summarizeToolResultOutput(result, rawDetails);
+  if (output !== undefined && details.output === undefined) {
+    details.output = output;
+  }
+  return Object.keys(details).length > 0 ? details : undefined;
+}
+
+function sanitizeToolDetails(value: unknown): JsonObject {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {};
+  }
+  const sanitized: JsonObject = {};
+  for (const [key, raw] of Object.entries(value)) {
+    if (key === 'fullOutput' || key === 'fullOutputMimeType') {
+      continue;
+    }
+    sanitized[key] = toTelemetryValue(raw);
+  }
+  return sanitized;
+}
+
+function summarizeToolResultOutput(result: unknown, details: unknown): JsonValue | undefined {
+  if (result === undefined || shouldSuppressToolOutput(details)) {
+    return undefined;
+  }
+  if (typeof result === 'string') {
+    return summarizeString(result);
+  }
+  if (!result || typeof result !== 'object' || Array.isArray(result)) {
+    return toTelemetryValue(result);
+  }
+  const resultRecord = result as Record<string, unknown>;
+  if (resultRecord.output !== undefined) {
+    return toTelemetryValue(resultRecord.output);
+  }
+  const text = textContentFromToolResult(resultRecord);
+  if (text) {
+    return summarizeString(text);
+  }
+  return resultRecord.content !== undefined ? toTelemetryValue(resultRecord.content) : undefined;
+}
+
+function textContentFromToolResult(result: Record<string, unknown>): string | undefined {
+  if (!Array.isArray(result.content)) {
+    return undefined;
+  }
+  const text = result.content
+    .filter((item) => item && typeof item === 'object' && !Array.isArray(item))
+    .map((item) => {
+      const record = item as Record<string, unknown>;
+      return typeof record.text === 'string' ? record.text : undefined;
+    })
+    .filter(Boolean)
+    .join('\n');
+  return text || undefined;
+}
+
+function shouldSuppressToolOutput(details: unknown): boolean {
+  return Boolean(
+    details &&
+      typeof details === 'object' &&
+      !Array.isArray(details) &&
+      (details as Record<string, unknown>).outputSuppressed === true,
+  );
+}
+
+function toTelemetryValue(value: unknown): JsonValue | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === null || typeof value === 'number' || typeof value === 'boolean') {
+    return value;
+  }
+  if (typeof value === 'string') {
+    return summarizeString(value);
+  }
+  if (Array.isArray(value)) {
+    return value.map(toTelemetryValue).filter((item) => item !== undefined);
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, raw]) => [key, toTelemetryValue(raw)]),
+    );
+  }
+  return String(value);
+}
+
+function summarizeString(value: string): string {
+  return value.length > 500
+    ? `${value.slice(0, 500)}... [truncated ${value.length - 500} chars]`
+    : value;
+}
+
 function mapUsage(usage: Record<string, unknown>): RuntimeLlmUsage {
   const result: RuntimeLlmUsage = {};
   if (typeof usage.input === 'number') result.input = usage.input;
@@ -198,6 +297,7 @@ export default function telemetryExtension(pi: ExtensionAPI): void {
 
   pi.on('tool_execution_end', async (event) => {
     if (!currentTraceId) return;
+    const details = toolEventDetails(event.result);
 
     await exporter.publish({
       id: randomUUID(),
@@ -209,6 +309,7 @@ export default function telemetryExtension(pi: ExtensionAPI): void {
       toolName: event.toolName,
       status: event.isError ? 'failed' : 'completed',
       createdAt: new Date().toISOString(),
+      ...(details ? { details } : {}),
       ...(event.isError
         ? { error: typeof event.result === 'string' ? event.result : JSON.stringify(event.result) }
         : {}),
