@@ -139,7 +139,7 @@ describe('computerUseExtension', () => {
     expect(mockPi.on).toHaveBeenCalledWith('session_shutdown', expect.any(Function));
   });
 
-  test('auto-discovers and registers upstream MCP tools with computer_use_ prefix', async () => {
+  test('registers fallback tools with computer_use_ prefix', async () => {
     await initExtension();
 
     expect(registeredTools.has('computer_use_click')).toBe(true);
@@ -152,11 +152,13 @@ describe('computerUseExtension', () => {
     expect(registeredTools.has('computer_use_screenshot')).toBe(false);
   });
 
-  test('registered tools have correct descriptions', async () => {
+  test('registered tools have correct descriptions from fallback definitions', async () => {
     await initExtension();
 
     const clickTool = registeredTools.get('computer_use_click')!;
-    expect(clickTool.description).toBe('Click at coordinates');
+    expect(clickTool.description).toBe(
+      'Left-click against a target pid via element_index or x/y coordinates',
+    );
   });
 
   test('registers analyze_screenshot tool when visionModel is configured', async () => {
@@ -201,97 +203,109 @@ describe('permissions', () => {
     for (const k of Object.keys(eventHandlers)) delete eventHandlers[k];
   });
 
-  test('notifies warning when accessibility is not granted on session_start', async () => {
-    await initExtension(undefined, (name: string) => {
-      if (name === 'check_permissions') {
-        return {
-          content: [{ type: 'text', text: '❌ Accessibility: NOT granted.' }],
-          structuredContent: { accessibility: false, screen_recording: true },
-        };
-      }
-      return { content: [{ type: 'text', text: 'Action executed.' }] };
+  test('session_start does not connect to cua-driver', async () => {
+    let connectCalled = false;
+    await initExtension(undefined, undefined, async () => {
+      connectCalled = true;
     });
 
-    expect(mockNotify).toHaveBeenCalledWith(
-      expect.stringContaining('Accessibility permission not granted'),
-      'warning',
-    );
-    expect(mockNotify).not.toHaveBeenCalledWith(
-      expect.stringContaining('Screen Recording permission not granted'),
-      expect.anything(),
-    );
-  });
-
-  test('notifies warning when screen recording is not granted on session_start', async () => {
-    await initExtension(undefined, (name: string) => {
-      if (name === 'check_permissions') {
-        return {
-          content: [{ type: 'text', text: '❌ Screen Recording: NOT granted.' }],
-          structuredContent: { accessibility: true, screen_recording: false },
-        };
-      }
-      return { content: [{ type: 'text', text: 'Action executed.' }] };
-    });
-
-    expect(mockNotify).toHaveBeenCalledWith(
-      expect.stringContaining('Screen Recording permission not granted'),
-      'warning',
-    );
-    expect(mockNotify).not.toHaveBeenCalledWith(
-      expect.stringContaining('Accessibility permission not granted'),
-      expect.anything(),
-    );
-  });
-
-  test('notifies both warnings when neither permission is granted', async () => {
-    await initExtension(undefined, (name: string) => {
-      if (name === 'check_permissions') {
-        return {
-          content: [{ type: 'text', text: 'Not granted.' }],
-          structuredContent: { accessibility: false, screen_recording: false },
-        };
-      }
-      return { content: [{ type: 'text', text: 'Action executed.' }] };
-    });
-
-    expect(mockNotify).toHaveBeenCalledWith(
-      expect.stringContaining('Accessibility permission not granted'),
-      'warning',
-    );
-    expect(mockNotify).toHaveBeenCalledWith(
-      expect.stringContaining('Screen Recording permission not granted'),
-      'warning',
-    );
-  });
-
-  test('does not notify when all permissions are granted', async () => {
-    await initExtension(undefined, (name: string) => {
-      if (name === 'check_permissions') {
-        return {
-          content: [{ type: 'text', text: 'All granted.' }],
-          structuredContent: { accessibility: true, screen_recording: true },
-        };
-      }
-      return { content: [{ type: 'text', text: 'Action executed.' }] };
-    });
-
-    expect(mockNotify).not.toHaveBeenCalled();
-  });
-
-  test('does not block session_start if check_permissions throws', async () => {
-    await initExtension(undefined, (name: string) => {
-      if (name === 'check_permissions') {
-        throw new Error('cua-driver crashed');
-      }
-      return { content: [{ type: 'text', text: 'Action executed.' }] };
-    });
-
+    expect(connectCalled).toBe(false);
     expect(registeredTools.has('computer_use_click')).toBe(true);
-    expect(mockNotify).not.toHaveBeenCalled();
+  });
+
+  test('first tool call triggers connect', async () => {
+    let connectCalled = false;
+    await initExtension(
+      undefined,
+      () => ({ content: [{ type: 'text', text: 'Action executed.' }] }),
+      async () => {
+        connectCalled = true;
+      },
+    );
+
+    expect(connectCalled).toBe(false);
+
+    const clickTool = registeredTools.get('computer_use_click')!;
+    await clickTool.execute('id', { pid: 1, x: 100, y: 100 }, undefined, undefined, mockCtx);
+
+    expect(connectCalled).toBe(true);
+  });
+
+  test('second tool call does not reconnect', async () => {
+    let connectCount = 0;
+    await initExtension(
+      undefined,
+      () => ({ content: [{ type: 'text', text: 'Action executed.' }] }),
+      async () => {
+        connectCount++;
+      },
+    );
+
+    const clickTool = registeredTools.get('computer_use_click')!;
+    await clickTool.execute('id', { pid: 1, x: 100, y: 100 }, undefined, undefined, mockCtx);
+    await clickTool.execute('id', { pid: 1, x: 200, y: 200 }, undefined, undefined, mockCtx);
+
+    expect(connectCount).toBe(1);
+  });
+
+  test('analyze_screenshot triggers lazy connect', async () => {
+    let connectCalled = false;
+    await initExtension(
+      { visionModel: { provider: 'openai', model: 'gpt-4o' } },
+      (name: string) => {
+        if (name === 'screenshot') {
+          return {
+            content: [{ type: 'image', data: 'fakebase64', mimeType: 'image/png' }],
+          };
+        }
+        return { content: [{ type: 'text', text: 'ok' }] };
+      },
+      async () => {
+        connectCalled = true;
+      },
+    );
+
+    expect(connectCalled).toBe(false);
+
+    const tool = registeredTools.get('computer_use_analyze_screenshot')!;
+    try {
+      await tool.execute('id', { window_id: 1 }, undefined, undefined, mockCtx);
+    } catch {
+      // vision model not available in test
+    }
+
+    expect(connectCalled).toBe(true);
+  });
+
+  test('reconnects after disconnect', async () => {
+    let connectCount = 0;
+    await initExtension(
+      undefined,
+      () => ({ content: [{ type: 'text', text: 'Action executed.' }] }),
+      async () => {
+        connectCount++;
+      },
+    );
+
+    const clickTool = registeredTools.get('computer_use_click')!;
+    await clickTool.execute('id', { pid: 1, x: 100, y: 100 }, undefined, undefined, mockCtx);
+    expect(connectCount).toBe(1);
+
+    // Simulate disconnect by triggering session_shutdown then session_start again
+    for (const handler of eventHandlers.session_shutdown ?? []) {
+      await handler({}, mockCtx);
+    }
+    for (const handler of eventHandlers.session_start ?? []) {
+      await handler({}, mockCtx);
+    }
+
+    // After re-init, next tool call should reconnect
+    await clickTool.execute('id', { pid: 1, x: 100, y: 100 }, undefined, undefined, mockCtx);
+    expect(connectCount).toBe(2);
   });
 
   test('tool returns friendly message on ax_not_granted error', async () => {
-    const callToolImpl = (name: string) => {
+    await initExtension(undefined, (name: string) => {
       if (name === 'check_permissions') {
         return {
           content: [{ type: 'text', text: 'All granted.' }],
@@ -302,8 +316,7 @@ describe('permissions', () => {
         content: [{ type: 'text', text: 'ax_not_granted: permission denied' }],
         isError: true,
       };
-    };
-    await initExtension(undefined, callToolImpl);
+    });
 
     const clickTool = registeredTools.get('computer_use_click')!;
     const result = (await clickTool.execute(
@@ -320,19 +333,12 @@ describe('permissions', () => {
   });
 
   test('tool returns friendly message on sc_not_granted error', async () => {
-    const callToolImpl = (name: string) => {
-      if (name === 'check_permissions') {
-        return {
-          content: [{ type: 'text', text: 'All granted.' }],
-          structuredContent: { accessibility: true, screen_recording: true },
-        };
-      }
+    await initExtension(undefined, () => {
       return {
         content: [{ type: 'text', text: 'sc_not_granted: screen recording denied' }],
         isError: true,
       };
-    };
-    await initExtension(undefined, callToolImpl);
+    });
 
     const clickTool = registeredTools.get('computer_use_click')!;
     const result = (await clickTool.execute(
@@ -349,19 +355,12 @@ describe('permissions', () => {
   });
 
   test('tool passes through non-permission errors unchanged', async () => {
-    const callToolImpl = (name: string) => {
-      if (name === 'check_permissions') {
-        return {
-          content: [{ type: 'text', text: 'All granted.' }],
-          structuredContent: { accessibility: true, screen_recording: true },
-        };
-      }
+    await initExtension(undefined, () => {
       return {
         content: [{ type: 'text', text: 'element_not_found: ref is stale' }],
         isError: true,
       };
-    };
-    await initExtension(undefined, callToolImpl);
+    });
 
     const clickTool = registeredTools.get('computer_use_click')!;
     const result = (await clickTool.execute(
@@ -384,7 +383,7 @@ describe('binary permissions', () => {
     mockNotify.mockClear();
   });
 
-  test('auto-fixes binary without execute permission via chmod', async () => {
+  test('auto-fixes binary without execute permission via chmod on first tool call', async () => {
     const { accessSync, chmodSync } = await import('node:fs');
     const mockAccessSync = vi.mocked(accessSync);
     const mockChmodSync = vi.mocked(chmodSync);
@@ -396,14 +395,18 @@ describe('binary permissions', () => {
 
     await initExtension();
 
+    expect(mockChmodSync).not.toHaveBeenCalled();
+
+    const clickTool = registeredTools.get('computer_use_click')!;
+    await clickTool.execute('id', { pid: 1, x: 100, y: 100 }, undefined, undefined, mockCtx);
+
     expect(mockChmodSync).toHaveBeenCalled();
-    expect(registeredTools.has('computer_use_click')).toBe(true);
 
     mockAccessSync.mockReset();
     mockChmodSync.mockReset();
   });
 
-  test('notifies warning when chmod fails (e.g. root-owned binary)', async () => {
+  test('tool returns error when chmod fails (e.g. root-owned binary)', async () => {
     const { accessSync, chmodSync } = await import('node:fs');
     const mockAccessSync = vi.mocked(accessSync);
     const mockChmodSync = vi.mocked(chmodSync);
@@ -417,16 +420,23 @@ describe('binary permissions', () => {
 
     await initExtension();
 
-    expect(mockNotify).toHaveBeenCalledWith(
-      expect.stringContaining('cua-driver failed to start'),
-      'warning',
-    );
+    const clickTool = registeredTools.get('computer_use_click')!;
+    const result = (await clickTool.execute(
+      'id',
+      { pid: 1, x: 100, y: 100 },
+      undefined,
+      undefined,
+      mockCtx,
+    )) as any;
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Failed to connect to cua-driver');
 
     mockAccessSync.mockReset();
     mockChmodSync.mockReset();
   });
 
-  test('registers fallback tools when binary is not executable', async () => {
+  test('registers tools at startup regardless of binary permission state', async () => {
     const { accessSync, chmodSync } = await import('node:fs');
     const mockAccessSync = vi.mocked(accessSync);
     const mockChmodSync = vi.mocked(chmodSync);
@@ -440,9 +450,9 @@ describe('binary permissions', () => {
 
     await initExtension();
 
-    expect(mockNotify).toHaveBeenCalled();
     expect(registeredTools.has('computer_use_click')).toBe(true);
     expect(registeredTools.has('computer_use_type_text')).toBe(true);
+    expect(mockNotify).not.toHaveBeenCalled();
 
     mockAccessSync.mockReset();
     mockChmodSync.mockReset();
@@ -461,12 +471,6 @@ describe('analyze_screenshot', () => {
     await initExtension(
       { visionModel: { provider: 'openai', model: 'gpt-4o' } },
       (name: string, args: Record<string, unknown>) => {
-        if (name === 'check_permissions') {
-          return {
-            content: [{ type: 'text', text: 'All granted.' }],
-            structuredContent: { accessibility: true, screen_recording: true },
-          };
-        }
         if (name === 'screenshot') {
           capturedArgs = args;
           return {
@@ -492,12 +496,6 @@ describe('analyze_screenshot', () => {
     await initExtension(
       { visionModel: { provider: 'openai', model: 'gpt-4o' } },
       (name: string, args: Record<string, unknown>) => {
-        if (name === 'check_permissions') {
-          return {
-            content: [{ type: 'text', text: 'All granted.' }],
-            structuredContent: { accessibility: true, screen_recording: true },
-          };
-        }
         if (name === 'screenshot') {
           capturedArgs = args;
           return {
@@ -527,12 +525,6 @@ describe('analyze_screenshot', () => {
     await initExtension(
       { visionModel: { provider: 'openai', model: 'gpt-4o' } },
       (name: string) => {
-        if (name === 'check_permissions') {
-          return {
-            content: [{ type: 'text', text: 'All granted.' }],
-            structuredContent: { accessibility: true, screen_recording: true },
-          };
-        }
         if (name === 'screenshot') {
           return {
             content: [{ type: 'text', text: 'screencapture failed: window not found' }],
@@ -560,12 +552,6 @@ describe('analyze_screenshot', () => {
     await initExtension(
       { visionModel: { provider: 'openai', model: 'gpt-4o' } },
       (name: string) => {
-        if (name === 'check_permissions') {
-          return {
-            content: [{ type: 'text', text: 'All granted.' }],
-            structuredContent: { accessibility: true, screen_recording: true },
-          };
-        }
         if (name === 'screenshot') {
           return {
             content: [{ type: 'text', text: 'sc_not_granted' }],
@@ -622,7 +608,7 @@ describe('connect failure resilience', () => {
     mockClientConnectFn = async () => {};
   });
 
-  test('registers fallback tools when Client.connect() throws', async () => {
+  test('registers tools at startup without connecting', async () => {
     const connectFail = async () => {
       throw new Error('Connection refused');
     };
@@ -632,26 +618,10 @@ describe('connect failure resilience', () => {
     expect(registeredTools.has('computer_use_click')).toBe(true);
     expect(registeredTools.has('computer_use_type_text')).toBe(true);
     expect(registeredTools.has('computer_use_scroll')).toBe(true);
+    expect(mockNotify).not.toHaveBeenCalled();
   });
 
-  test('notifies user when connect fails at startup', async () => {
-    const connectFail = async () => {
-      throw new Error('Connection refused');
-    };
-
-    await initExtension(undefined, undefined, connectFail);
-
-    expect(mockNotify).toHaveBeenCalledWith(
-      expect.stringContaining('cua-driver failed to start'),
-      'warning',
-    );
-    expect(mockNotify).toHaveBeenCalledWith(
-      expect.stringContaining('Connection refused'),
-      'warning',
-    );
-  });
-
-  test('tool execute returns friendly error when not connected', async () => {
+  test('tool execute returns friendly error when connect fails', async () => {
     const connectFail = async () => {
       throw new Error('Connection refused');
     };
@@ -672,7 +642,7 @@ describe('connect failure resilience', () => {
     expect(result.content[0].text).toContain('System Settings');
   });
 
-  test('tool execute notifies user when not connected', async () => {
+  test('tool execute notifies user when connect fails', async () => {
     const connectFail = async () => {
       throw new Error('Connection refused');
     };
@@ -689,7 +659,7 @@ describe('connect failure resilience', () => {
     );
   });
 
-  test('registers vision tool even when connect fails', async () => {
+  test('registers vision tool without connecting', async () => {
     const connectFail = async () => {
       throw new Error('Connection refused');
     };
