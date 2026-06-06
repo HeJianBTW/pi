@@ -204,6 +204,88 @@ describe('telemetryExtension', () => {
       toolCallId: 'call-1',
       toolName: 'read_file',
       status: 'completed',
+      details: { output: 'file contents' },
+    });
+  });
+
+  test('publishes completed tool output from text content blocks', async () => {
+    telemetryExtension(mockPi as any);
+    await fireEvent('session_start', { type: 'session_start', reason: 'startup' });
+    await fireEvent('turn_start', { type: 'turn_start', turnIndex: 0, timestamp: Date.now() });
+
+    await fireEvent('tool_execution_end', {
+      type: 'tool_execution_end',
+      toolCallId: 'call-1',
+      toolName: 'web_search',
+      result: {
+        content: [
+          { type: 'text', text: 'first result' },
+          { type: 'text', text: 'second result' },
+        ],
+      },
+      isError: false,
+    });
+
+    const events = getPublishedEvents();
+    const toolEvent = events.find((e) => 'toolCallId' in e);
+    expect(toolEvent).toMatchObject({
+      toolCallId: 'call-1',
+      toolName: 'web_search',
+      status: 'completed',
+      details: { output: 'first result\nsecond result' },
+    });
+  });
+
+  test('preserves sanitized tool details and does not overwrite explicit output', async () => {
+    telemetryExtension(mockPi as any);
+    await fireEvent('session_start', { type: 'session_start', reason: 'startup' });
+    await fireEvent('turn_start', { type: 'turn_start', turnIndex: 0, timestamp: Date.now() });
+
+    await fireEvent('tool_execution_end', {
+      type: 'tool_execution_end',
+      toolCallId: 'call-1',
+      toolName: 'run_shell',
+      result: {
+        output: 'raw stdout',
+        details: {
+          exitCode: 0,
+          output: 'normalized stdout',
+          fullOutput: 'large stdout that should not be exported',
+          fullOutputMimeType: 'text/plain',
+        },
+      },
+      isError: false,
+    });
+
+    const events = getPublishedEvents();
+    const toolEvent = events.find((e) => 'toolCallId' in e) as any;
+    expect(toolEvent.details).toEqual({
+      exitCode: 0,
+      output: 'normalized stdout',
+    });
+  });
+
+  test('allows tool results to suppress output payloads', async () => {
+    telemetryExtension(mockPi as any);
+    await fireEvent('session_start', { type: 'session_start', reason: 'startup' });
+    await fireEvent('turn_start', { type: 'turn_start', turnIndex: 0, timestamp: Date.now() });
+
+    await fireEvent('tool_execution_end', {
+      type: 'tool_execution_end',
+      toolCallId: 'call-1',
+      toolName: 'read_secret',
+      result: {
+        output: 'secret',
+        details: { outputSuppressed: true, reason: 'sensitive' },
+      },
+      isError: false,
+    });
+
+    const events = getPublishedEvents();
+    const toolEvent = events.find((e) => 'toolCallId' in e) as any;
+    expect(toolEvent.details).toEqual({
+      outputSuppressed: true,
+      reason: 'sensitive',
     });
   });
 
