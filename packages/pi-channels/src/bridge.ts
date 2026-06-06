@@ -1,5 +1,6 @@
 import { type ChildProcess, spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { ChannelRegistry } from './registry.js';
@@ -118,17 +119,20 @@ export class ChatBridge {
   }
 
   private async sendProcessingAck(message: IncomingMessage): Promise<void> {
-    if (message.adapter !== 'wecom') return;
-    if (!message.metadata?.wecomReplyFrame) return;
+    if (!shouldSendProcessingAck(message)) return;
+    const metadata =
+      message.adapter === 'wecom'
+        ? {
+            ...message.metadata,
+            wecomReplyFinish: false,
+          }
+        : message.metadata;
     await this.registry
       .send({
         adapter: message.adapter,
         recipient: message.sender,
         text: '收到，正在处理...',
-        metadata: {
-          ...message.metadata,
-          wecomReplyFinish: false,
-        },
+        ...(metadata ? { metadata } : {}),
       })
       .catch(() => undefined);
   }
@@ -196,9 +200,13 @@ export class ChatBridge {
 
     const bridgeModel = this.config.model ?? resolveDefaultBridgeModel();
     const bridgeProvider = this.config.provider ?? resolveDefaultBridgeProvider(bridgeModel);
+    const sessionId = channelSessionId(queued.message);
     const result = await runPrompt({
       cwd: this.cwd,
       prompt: queued.message.text,
+      ...(sessionId
+        ? { sessionFile: channelPromptSessionFile(this.cwd, queued.message, sessionId) }
+        : {}),
       timeoutMs: this.config.timeoutMs,
       model: bridgeModel,
       provider: bridgeProvider,
@@ -242,6 +250,12 @@ export class ChatBridge {
       }
     }
   }
+}
+
+function shouldSendProcessingAck(message: IncomingMessage): boolean {
+  if (message.adapter === 'wecom') return Boolean(message.metadata?.wecomReplyFrame);
+  if (message.adapter === 'dingtalk') return typeof message.metadata?.sessionWebhook === 'string';
+  return false;
 }
 
 async function persistChannelTurn(input: {
@@ -415,6 +429,7 @@ function resolvePiAgentApiBase(configured: string): string | undefined {
 function runPrompt(options: {
   cwd: string;
   prompt: string;
+  sessionFile?: string;
   timeoutMs: number;
   model: string | null;
   provider: string | null;
@@ -423,7 +438,12 @@ function runPrompt(options: {
   signal?: AbortSignal;
 }): Promise<BridgeRunResult> {
   return new Promise((resolve) => {
-    const args = ['-p', '--offline', '--no-session', '--no-extensions'];
+    const args = ['-p', '--offline', '--no-extensions'];
+    if (options.sessionFile) {
+      args.push('--session', options.sessionFile);
+    } else {
+      args.push('--no-session');
+    }
     const model = options.model ?? resolveDefaultBridgeModel();
     const provider = options.provider ?? resolveDefaultBridgeProvider(model);
     if (shouldAttachBridgeProvider(provider)) {
@@ -439,6 +459,7 @@ function runPrompt(options: {
       command,
       provider,
       model,
+      sessionFile: options.sessionFile,
       hasAnthropicBaseUrl: Boolean(process.env.ANTHROPIC_BASE_URL),
       hasAnthropicApiKey: Boolean(process.env.ANTHROPIC_API_KEY),
       providerExtension: shouldAttachBridgeProvider(provider)
@@ -492,6 +513,20 @@ function runPrompt(options: {
       resolve({ ok: false, response: '', error: error.message });
     });
   });
+}
+
+function channelPromptSessionFile(
+  cwd: string,
+  message: IncomingMessage,
+  sessionId: string,
+): string {
+  const sessionDir = join(cwd, '.pi', 'channel-sessions');
+  if (existsSync(cwd)) mkdirSync(sessionDir, { recursive: true });
+  const fingerprint = createHash('sha256')
+    .update(`${message.adapter}:${sessionId}`)
+    .digest('hex')
+    .slice(0, 24);
+  return join(sessionDir, `${message.adapter}-${fingerprint}.jsonl`);
 }
 
 function formatBridgeErrorReply(error: string | undefined): string {

@@ -36,6 +36,12 @@ type ChannelRuntimeContext = {
   ui: Pick<ExtensionContext['ui'], 'notify' | 'setStatus'>;
 };
 
+type ChannelSendEvent = ChannelMessage & {
+  config?: ChannelConfig;
+  cwd?: string;
+  callback?: (result: { ok: boolean; error?: string }) => void;
+};
+
 const RECONNECT_DELAYS_MS = [1_000, 3_000, 10_000];
 const RECONNECT_STABLE_RESET_MS = 60_000;
 
@@ -128,10 +134,11 @@ export default function piChannelsExtension(pi: ExtensionAPI): void {
         routes: Object.keys(config.routes ?? {}),
         registry: registry.list(),
       });
-      await registry.startListening();
-
       bridge = new ChatBridge(config.bridge, ctx.cwd, registry);
-      if (config.bridge?.enabled) bridge.start();
+      if (config.bridge?.enabled) {
+        await registry.startListening();
+        bridge.start();
+      }
 
       const errors = registry.getErrors();
       lastError = errors.map((item) => `${item.adapter}: ${item.error}`).join('; ') || undefined;
@@ -247,7 +254,7 @@ export default function piChannelsExtension(pi: ExtensionAPI): void {
     name: 'notify',
     label: 'Channel',
     description:
-      'Send messages through configured pi channels. Supports native Feishu, WeCom, and webhooks. Use configured adapter names or route aliases. A chat mention such as @local:channels_wecom:ops means route alias "ops" on the WeCom adapter; @local:channels alone selects the plugin, not a send target.',
+      'Send messages through configured pi channels. Supports native Feishu, DingTalk, WeCom, and webhooks. Use configured adapter names or route aliases. A chat mention such as @local:channels_dingtalk:ops means route alias "ops" on the DingTalk adapter; @local:channels alone selects the plugin, not a send target.',
     parameters: Type.Object({
       action: enumSchema(
         ['send', 'list', 'list-adapters', 'list-routes', 'test'],
@@ -295,7 +302,7 @@ export default function piChannelsExtension(pi: ExtensionAPI): void {
       }
 
       if (!params.adapter) return textToolResult('Missing required field: adapter.');
-      const adapterName = normalizeAdapterName(params.adapter, registry.list());
+      const adapterName = normalizeAdapterName(params.adapter, params.recipient, registry.list());
       if (!adapterName.ok) return textToolResult(adapterName.error);
 
       let rawBody: unknown;
@@ -318,7 +325,7 @@ export default function piChannelsExtension(pi: ExtensionAPI): void {
 
       const message: ChannelMessage = {
         adapter: adapterName.value,
-        recipient: params.recipient ?? '',
+        recipient: adapterName.recipient ?? params.recipient ?? '',
         payloadMode: params.payloadMode ?? (params.json ? 'raw' : 'envelope'),
         ...(Object.keys(webhook).length > 0 ? { webhook } : {}),
       };
@@ -336,11 +343,40 @@ export default function piChannelsExtension(pi: ExtensionAPI): void {
   });
 
   pi.events.on('channel:send', (raw: unknown) => {
-    const data = raw as ChannelMessage & {
+    const data = raw as ChannelSendEvent;
+    const { callback, config, cwd, ...message } = data;
+    void ensureSendAdapter(message, config, cwd)
+      .then((ensureResult) => (ensureResult.ok ? registry.send(message) : ensureResult))
+      .then((result) => callback?.(result))
+      .catch((error) =>
+        callback?.({ ok: false, error: error instanceof Error ? error.message : String(error) }),
+      );
+  });
+
+  pi.events.on('channel:ensure-listening', (raw: unknown) => {
+    const data = raw as {
+      adapter?: unknown;
+      config?: ChannelConfig;
+      cwd?: unknown;
       callback?: (result: { ok: boolean; error?: string }) => void;
     };
-    const { callback, ...message } = data;
-    registry.send(message).then((result) => callback?.(result));
+    const adapter = typeof data.adapter === 'string' ? data.adapter.trim() : '';
+    if (!adapter) {
+      data.callback?.({ ok: false, error: 'adapter is required' });
+      return;
+    }
+    void ensureListeningAdapter(
+      adapter,
+      data.config,
+      typeof data.cwd === 'string' ? data.cwd : undefined,
+    )
+      .then((result) => data.callback?.(result))
+      .catch((error) =>
+        data.callback?.({
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
   });
 
   pi.events.on('channel:register', (raw: unknown) => {
@@ -485,6 +521,62 @@ export default function piChannelsExtension(pi: ExtensionAPI): void {
       waiter.callback({ ok: true, message });
     }
     return captured;
+  }
+
+  async function ensureSendAdapter(
+    message: ChannelMessage,
+    config: ChannelConfig | undefined,
+    cwd: string | undefined,
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    if (!config) return { ok: true };
+    sessionCwd = cwd?.trim() || sessionCwd;
+    registry.loadRoutes(config);
+    const resolved = registry.resolveTarget(message.adapter, message.recipient);
+    await registry.ensureAdapter(resolved.adapter, config, sessionCwd);
+    const error = registry.getErrors().find((item) => item.adapter === resolved.adapter);
+    if (error) return { ok: false, error: error.error };
+    adapterStates = {
+      ...adapterStates,
+      [resolved.adapter]: {
+        state: 'connected',
+        updatedAt: new Date().toISOString(),
+        connectedAt: new Date().toISOString(),
+      },
+    };
+    return { ok: true };
+  }
+
+  async function ensureListeningAdapter(
+    adapter: string,
+    config: ChannelConfig | undefined,
+    cwd: string | undefined,
+  ): Promise<{ ok: boolean; error?: string }> {
+    if (!config) {
+      const existing = registry.getAdapter(adapter);
+      if (!existing) return { ok: false, error: `No adapter "${adapter}"` };
+      await registry.startListening(adapter);
+      return { ok: true };
+    }
+    sessionCwd = cwd?.trim() || sessionCwd;
+    registry.loadRoutes(config);
+    await registry.ensureAdapter(adapter, config, sessionCwd);
+    await registry.startListening(adapter);
+    const error = registry.getErrors().find((item) => item.adapter === adapter);
+    adapterStates = {
+      ...adapterStates,
+      [adapter]: error
+        ? {
+            state: 'error',
+            updatedAt: new Date().toISOString(),
+            error: error.error,
+          }
+        : {
+            state: 'connected',
+            updatedAt: new Date().toISOString(),
+            connectedAt: new Date().toISOString(),
+          },
+    };
+    return error ? { ok: false, error: error.error } : { ok: true };
   }
 
   function rejectCaptureWaiters(error: string): void {
@@ -718,32 +810,27 @@ function emptyListMessage(action: NotifyParams['action']): string {
 
 function normalizeAdapterName(
   value: string,
+  recipient: string | undefined,
   items: ReturnType<ChannelRegistry['list']>,
-): { ok: true; value: string } | { ok: false; error: string } {
+): { ok: true; value: string; recipient?: string } | { ok: false; error: string } {
   const trimmed = value.trim();
+  const trimmedRecipient = recipient?.trim();
   const routeSelector = /^@?local:channels_([\w.-]+):([\w.-]+)$/.exec(trimmed);
   if (routeSelector) {
     const adapterName = routeSelector[1]!;
     const routeName = routeSelector[2]!;
-    const route = items.find((item) => item.type === 'route' && item.name === routeName);
-    if (route) {
-      if (route.adapter && route.adapter !== adapterName) {
-        return {
-          ok: false,
-          error: `Channel route "${routeName}" uses adapter "${route.adapter}", not "${adapterName}".`,
-        };
-      }
-      return { ok: true, value: route.name };
+    return normalizeProviderRoute(adapterName, routeName, items);
+  }
+  const splitRouteSelector = /^@?local:channels_([\w.-]+)$/.exec(trimmed);
+  if (splitRouteSelector) {
+    const adapterName = splitRouteSelector[1]!;
+    if (!trimmedRecipient) {
+      return {
+        ok: false,
+        error: `Channel route mentions must include a route, for example @local:channels_${adapterName}:ops.`,
+      };
     }
-    const routes = items.filter((item) => item.type === 'route');
-    return {
-      ok: false,
-      error: routes.length
-        ? `Unknown channel route "${routeName}". Use one of: ${routes
-            .map((item) => `local:channels_${item.adapter ?? 'adapter'}:${item.name}`)
-            .join(', ')}.`
-        : `Unknown channel route "${routeName}". No routes are configured.`,
-    };
+    return normalizeProviderRoute(adapterName, trimmedRecipient, items, true);
   }
   if (/^@?local:channels[:/][\w.-]+$/.test(trimmed)) {
     return {
@@ -753,6 +840,13 @@ function normalizeAdapterName(
     };
   }
   if (trimmed !== '@local:channels' && trimmed !== 'local:channels') {
+    if (trimmedRecipient) {
+      const route = items.find(
+        (item) =>
+          item.type === 'route' && item.name === trimmedRecipient && item.adapter === trimmed,
+      );
+      if (route) return { ok: true, value: route.name, recipient: '' };
+    }
     return { ok: true, value: trimmed };
   }
 
@@ -777,6 +871,33 @@ function normalizeAdapterName(
     ok: false,
     error:
       '@local:channels selects the plugin, not a send target. Run notify with action "list" and use an adapter name or route alias.',
+  };
+}
+
+function normalizeProviderRoute(
+  adapterName: string,
+  routeName: string,
+  items: ReturnType<ChannelRegistry['list']>,
+  clearRecipient = false,
+): { ok: true; value: string; recipient?: string } | { ok: false; error: string } {
+  const route = items.find((item) => item.type === 'route' && item.name === routeName);
+  if (route) {
+    if (route.adapter && route.adapter !== adapterName) {
+      return {
+        ok: false,
+        error: `Channel route "${routeName}" uses adapter "${route.adapter}", not "${adapterName}".`,
+      };
+    }
+    return { ok: true, value: route.name, ...(clearRecipient ? { recipient: '' } : {}) };
+  }
+  const routes = items.filter((item) => item.type === 'route');
+  return {
+    ok: false,
+    error: routes.length
+      ? `Unknown channel route "${routeName}". Use one of: ${routes
+          .map((item) => `local:channels_${item.adapter ?? 'adapter'}:${item.name}`)
+          .join(', ')}.`
+      : `Unknown channel route "${routeName}". No routes are configured.`,
   };
 }
 

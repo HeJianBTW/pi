@@ -25,6 +25,12 @@ function createChild(stdoutText: string, exitCode = 0) {
   return child;
 }
 
+function sessionFileArg(call: unknown[] | undefined): string {
+  const args = call?.[1] as string[] | undefined;
+  const index = args?.indexOf('--session') ?? -1;
+  return index >= 0 ? (args?.[index + 1] ?? '') : '';
+}
+
 describe('ChatBridge', () => {
   beforeEach(() => {
     mockSpawn.mockReset();
@@ -60,7 +66,14 @@ describe('ChatBridge', () => {
 
     expect(mockSpawn).toHaveBeenCalledWith(
       'pi',
-      ['-p', '--offline', '--no-session', '--no-extensions', '来自即时通讯的用户消息：\nping'],
+      [
+        '-p',
+        '--offline',
+        '--no-extensions',
+        '--session',
+        expect.stringMatching(/^\/workspace\/\.pi\/channel-sessions\/feishu-[0-9a-f]{24}\.jsonl$/),
+        '来自即时通讯的用户消息：\nping',
+      ],
       expect.objectContaining({ cwd: '/workspace' }),
     );
     await vi.waitFor(() => {
@@ -97,8 +110,9 @@ describe('ChatBridge', () => {
       [
         '-p',
         '--offline',
-        '--no-session',
         '--no-extensions',
+        '--session',
+        expect.stringMatching(/^\/workspace\/\.pi\/channel-sessions\/feishu-[0-9a-f]{24}\.jsonl$/),
         '-e',
         expect.stringContaining('bridge-provider.js'),
         '--provider',
@@ -116,6 +130,39 @@ describe('ChatBridge', () => {
         text: 'pong',
       });
     });
+  });
+
+  test('uses the same pi session file for multiple messages from the same channel session', async () => {
+    mockSpawn.mockReturnValue(createChild('pong'));
+    const registry = {
+      getAdapter: vi.fn(() => ({ sendTyping: vi.fn(() => Promise.resolve()) })),
+      send: vi.fn(() => Promise.resolve({ ok: true })),
+    };
+    const bridge = new ChatBridge({ enabled: true }, '/workspace', registry as never);
+    bridge.start();
+
+    await bridge.handleMessage({
+      adapter: 'dingtalk',
+      sender: 'cid_group',
+      text: '第一句',
+      metadata: { conversationId: 'cid_group' },
+    });
+    await vi.waitFor(() => expect(mockSpawn).toHaveBeenCalledTimes(1));
+
+    await bridge.handleMessage({
+      adapter: 'dingtalk',
+      sender: 'cid_group',
+      text: '第二句',
+      metadata: { conversationId: 'cid_group' },
+    });
+    await vi.waitFor(() => expect(mockSpawn).toHaveBeenCalledTimes(2));
+
+    const firstSessionFile = sessionFileArg(mockSpawn.mock.calls[0]);
+    const secondSessionFile = sessionFileArg(mockSpawn.mock.calls[1]);
+    expect(firstSessionFile).toMatch(
+      /^\/workspace\/\.pi\/channel-sessions\/dingtalk-[0-9a-f]{24}\.jsonl$/,
+    );
+    expect(secondSessionFile).toBe(firstSessionFile);
   });
 
   test('persists channel turns to the local pi-agent session endpoint when available', async () => {
@@ -245,6 +292,53 @@ describe('ChatBridge', () => {
           chatId: 'wr_group',
           replyToMessageId: 'msg_x',
           wecomReplyFrame: { headers: { req_id: 'req_x' } },
+        },
+      });
+    });
+  });
+
+  test('acks DingTalk messages before running the prompt and finishes with the final reply', async () => {
+    mockSpawn.mockReturnValue(createChild('done'));
+    const registry = {
+      getAdapter: vi.fn(() => ({ sendTyping: vi.fn(() => Promise.resolve()) })),
+      send: vi.fn(() => Promise.resolve({ ok: true })),
+    };
+    const bridge = new ChatBridge({ enabled: true }, '/workspace', registry as never);
+    bridge.start();
+
+    await bridge.handleMessage({
+      adapter: 'dingtalk',
+      sender: 'cid_group',
+      text: '@amaster 测试',
+      metadata: {
+        conversationId: 'cid_group',
+        replyToMessageId: 'msg_ding',
+        sessionWebhook: 'https://oapi.dingtalk.com/robot/sendBySession?session=s1',
+        sessionWebhookExpiredTime: Date.now() + 60_000,
+      },
+    });
+
+    expect(registry.send).toHaveBeenNthCalledWith(1, {
+      adapter: 'dingtalk',
+      recipient: 'cid_group',
+      text: '收到，正在处理...',
+      metadata: {
+        conversationId: 'cid_group',
+        replyToMessageId: 'msg_ding',
+        sessionWebhook: 'https://oapi.dingtalk.com/robot/sendBySession?session=s1',
+        sessionWebhookExpiredTime: expect.any(Number),
+      },
+    });
+    await vi.waitFor(() => {
+      expect(registry.send).toHaveBeenNthCalledWith(2, {
+        adapter: 'dingtalk',
+        recipient: 'cid_group',
+        text: 'done',
+        metadata: {
+          conversationId: 'cid_group',
+          replyToMessageId: 'msg_ding',
+          sessionWebhook: 'https://oapi.dingtalk.com/robot/sendBySession?session=s1',
+          sessionWebhookExpiredTime: expect.any(Number),
         },
       });
     });
