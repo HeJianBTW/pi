@@ -607,43 +607,8 @@ export default function computerUseExtension(pi: ExtensionAPI): void {
     client = new CuaDriverClient(config);
     connected = false;
 
-    let upstreamTools:
-      | Array<{ name: string; description?: string | undefined; inputSchema: unknown }>
-      | undefined;
-
-    try {
-      await client.connect();
-      connected = true;
-      upstreamTools = await client.listAllTools();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      ctx.ui.notify(
-        `pi-computer-use: cua-driver failed to start — ${msg}. Tools registered but may fail until permissions are granted.`,
-        'warning',
-      );
-    }
-
-    registerTools(upstreamTools ?? FALLBACK_TOOLS);
+    registerTools(FALLBACK_TOOLS);
     registerVisionTool();
-
-    if (connected) {
-      try {
-        const permResult = await client!.callTool('check_permissions', {});
-        const structured = (permResult as Record<string, unknown>).structuredContent as
-          | { accessibility?: boolean; screen_recording?: boolean }
-          | undefined;
-        if (structured) {
-          if (!structured.accessibility) {
-            ctx.ui.notify(`pi-computer-use: ${accessibilityHint()}`, 'warning');
-          }
-          if (!structured.screen_recording) {
-            ctx.ui.notify(`pi-computer-use: ${screenRecordingHint()}`, 'warning');
-          }
-        }
-      } catch {
-        // permission check is best-effort
-      }
-    }
   });
 
   pi.on('session_shutdown', async () => {
