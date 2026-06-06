@@ -1,3 +1,4 @@
+import { createDingTalkAdapter } from './adapters/dingtalk.js';
 import { createFeishuAdapter } from './adapters/feishu.js';
 import { createWebhookAdapter } from './adapters/webhook.js';
 import { createWeComAdapter } from './adapters/wecom.js';
@@ -24,6 +25,7 @@ type AdapterFactory = (
 ) => Promise<ChannelAdapter> | ChannelAdapter;
 
 const adapterFactories: Record<string, AdapterFactory> = {
+  dingtalk: createDingTalkAdapter,
   feishu: createFeishuAdapter,
   webhook: createWebhookAdapter,
   wecom: createWeComAdapter,
@@ -31,6 +33,7 @@ const adapterFactories: Record<string, AdapterFactory> = {
 
 export class ChannelRegistry {
   private adapters = new Map<string, ChannelAdapter>();
+  private adapterFingerprints = new Map<string, string>();
   private routes = new Map<string, ChannelRouteConfig>();
   private errors: Array<{ adapter: string; error: string }> = [];
   private onIncoming: OnIncomingMessage = () => undefined;
@@ -47,37 +50,66 @@ export class ChannelRegistry {
   async loadConfig(config: ChannelConfig, cwd: string): Promise<void> {
     await this.stopAll();
     this.adapters.clear();
+    this.adapterFingerprints.clear();
     this.routes.clear();
     this.errors = [];
 
-    for (const [alias, target] of Object.entries(config.routes ?? {})) {
-      this.routes.set(alias, target);
-    }
+    this.loadRoutes(config);
 
     for (const [name, adapterConfig] of Object.entries(config.adapters ?? {})) {
-      const factory = adapterFactories[adapterConfig.type];
-      if (!factory) {
-        this.errors.push({ adapter: name, error: `Unknown adapter type: ${adapterConfig.type}` });
-        continue;
-      }
-      try {
-        const context: AdapterFactoryContext = this.log
-          ? {
-              cwd,
-              log: (event, data, level) =>
-                this.log?.(event, { adapter: name, ...(data ?? {}) }, level),
-            }
-          : { cwd };
-        const adapter = await factory(adapterConfig, context);
-        this.adapters.set(name, adapter);
-      } catch (error) {
-        this.errors.push({ adapter: name, error: errorMessage(error) });
-      }
+      await this.loadAdapter(name, adapterConfig, cwd);
     }
   }
 
-  async startListening(): Promise<void> {
+  loadRoutes(config: ChannelConfig): void {
+    this.routes.clear();
+    for (const [alias, target] of Object.entries(config.routes ?? {})) {
+      this.routes.set(alias, target);
+    }
+  }
+
+  async loadAdapter(name: string, config: AdapterConfig, cwd: string): Promise<void> {
+    const fingerprint = JSON.stringify(config);
+    if (this.adapters.has(name) && this.adapterFingerprints.get(name) === fingerprint) return;
+    this.errors = this.errors.filter((error) => error.adapter !== name);
+    const factory = adapterFactories[config.type];
+    if (!factory) {
+      this.errors.push({ adapter: name, error: `Unknown adapter type: ${config.type}` });
+      return;
+    }
+    const previous = this.adapters.get(name);
+    await previous?.stop?.();
+    this.adapters.delete(name);
+    this.adapterFingerprints.delete(name);
+    try {
+      const context: AdapterFactoryContext = this.log
+        ? {
+            cwd,
+            log: (event, data, level) =>
+              this.log?.(event, { adapter: name, ...(data ?? {}) }, level),
+          }
+        : { cwd };
+      const adapter = await factory(config, context);
+      this.adapters.set(name, adapter);
+      this.adapterFingerprints.set(name, fingerprint);
+    } catch (error) {
+      this.errors.push({ adapter: name, error: errorMessage(error) });
+    }
+  }
+
+  async ensureAdapter(name: string, config: ChannelConfig, cwd: string): Promise<void> {
+    const adapterConfig = config.adapters?.[name];
+    if (!adapterConfig) {
+      this.errors = this.errors.filter((error) => error.adapter !== name);
+      this.errors.push({ adapter: name, error: `No adapter config "${name}"` });
+      return;
+    }
+    await this.loadAdapter(name, adapterConfig, cwd);
+  }
+
+  async startListening(adapterName?: string): Promise<void> {
     for (const [name, adapter] of this.adapters) {
+      if (adapterName && name !== adapterName) continue;
       if (!adapter.start || adapter.direction === 'outgoing') continue;
       try {
         await adapter.start((message: IncomingMessage) => {
@@ -109,6 +141,8 @@ export class ChannelRegistry {
     for (const adapter of this.adapters.values()) {
       await adapter.stop?.();
     }
+    this.adapters.clear();
+    this.adapterFingerprints.clear();
   }
 
   register(name: string, adapter: ChannelAdapter): void {
@@ -230,10 +264,14 @@ export class ChannelRegistry {
     return [...this.errors];
   }
 
-  private resolve(adapterName: string, recipient: string): { adapter: string; recipient: string } {
+  resolveTarget(adapterName: string, recipient: string): { adapter: string; recipient: string } {
     const route = this.routes.get(adapterName);
     if (!route) return { adapter: adapterName, recipient };
     return { adapter: route.adapter, recipient: recipient || route.recipient };
+  }
+
+  private resolve(adapterName: string, recipient: string): { adapter: string; recipient: string } {
+    return this.resolveTarget(adapterName, recipient);
   }
 }
 

@@ -181,6 +181,42 @@ describe('piChannelsExtension', () => {
     );
   });
 
+  test('channel:send can send with scoped config without loading unrelated adapters', async () => {
+    const fetchMock = vi.fn(async () => new Response('', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    piChannelsExtension(mockPi as never);
+    const callback = vi.fn();
+
+    events.get('channel:send')?.({
+      adapter: 'ops',
+      recipient: '',
+      text: 'hello',
+      config: {
+        adapters: {
+          webhook: { type: 'webhook' },
+          broken: { type: 'missing-adapter' },
+        },
+        routes: {
+          ops: { adapter: 'webhook', recipient: 'https://example.test/hook' },
+          brokenOps: { adapter: 'broken', recipient: 'unused' },
+        },
+      },
+      cwd: '/workspace',
+      callback,
+    });
+
+    await vi.waitFor(() => {
+      expect(callback).toHaveBeenCalledWith({ ok: true });
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://example.test/hook',
+      expect.objectContaining({
+        method: 'POST',
+      }),
+    );
+  });
+
   test('channel:status reports active session health', async () => {
     piChannelsExtension(mockPi as never);
     const inactiveCallback = vi.fn();
@@ -386,6 +422,52 @@ describe('piChannelsExtension', () => {
     })) as { content: Array<{ text: string }> };
 
     expect(result.content[0]!.text).toBe('Sent via "ops".');
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://example.test/hook',
+      expect.objectContaining({
+        method: 'POST',
+      }),
+    );
+  });
+
+  test('notify maps split local channel provider and recipient route aliases to routes', async () => {
+    const fetchMock = vi.fn(async () => new Response('', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    piChannelsExtension(mockPi as never);
+    await handlers.get('session_start')?.({}, mockCtx());
+
+    const result = (await tools.get('notify')?.execute('call-1', {
+      action: 'send',
+      adapter: 'local:channels_webhook',
+      recipient: 'ops',
+      text: 'hello',
+    })) as { content: Array<{ text: string }> };
+
+    expect(result.content[0]!.text).toBe('Sent via "ops" to ops.');
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://example.test/hook',
+      expect.objectContaining({
+        method: 'POST',
+      }),
+    );
+  });
+
+  test('notify maps adapter plus recipient route aliases to routes', async () => {
+    const fetchMock = vi.fn(async () => new Response('', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    piChannelsExtension(mockPi as never);
+    await handlers.get('session_start')?.({}, mockCtx());
+
+    const result = (await tools.get('notify')?.execute('call-1', {
+      action: 'send',
+      adapter: 'webhook',
+      recipient: 'ops',
+      text: 'hello',
+    })) as { content: Array<{ text: string }> };
+
+    expect(result.content[0]!.text).toBe('Sent via "ops" to ops.');
     expect(fetchMock).toHaveBeenCalledWith(
       'https://example.test/hook',
       expect.objectContaining({

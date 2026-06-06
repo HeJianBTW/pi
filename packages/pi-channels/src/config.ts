@@ -148,6 +148,20 @@ function applyEnvOverrides(config: ChannelConfig): void {
     if (process.env.WECOM_BOT_SECRET) config.adapters.wecom.secret = process.env.WECOM_BOT_SECRET;
   }
 
+  if (process.env.DINGTALK_CLIENT_ID || process.env.DINGTALK_CLIENT_SECRET) {
+    config.adapters ??= {};
+    config.adapters.dingtalk ??= { type: 'dingtalk' };
+    if (process.env.DINGTALK_CLIENT_ID) {
+      config.adapters.dingtalk.clientId = process.env.DINGTALK_CLIENT_ID;
+    }
+    if (process.env.DINGTALK_CLIENT_SECRET) {
+      config.adapters.dingtalk.clientSecret = process.env.DINGTALK_CLIENT_SECRET;
+    }
+    if (process.env.DINGTALK_ROBOT_CODE) {
+      config.adapters.dingtalk.robotCode = process.env.DINGTALK_ROBOT_CODE;
+    }
+  }
+
   if (process.env.WEBHOOK_SECRET) {
     config.adapters ??= {};
     config.adapters.webhook ??= { type: 'webhook' };

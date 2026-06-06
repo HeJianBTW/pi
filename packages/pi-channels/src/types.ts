@@ -99,6 +99,22 @@ export type WeComAdapterConfig = AdapterConfig & {
   allowedSenderIds?: string[];
 };
 
+export type DingTalkAdapterConfig = AdapterConfig & {
+  type: 'dingtalk';
+  clientId?: string;
+  clientSecret?: string;
+  robotCode?: string;
+  eventMode?: 'stream' | 'off';
+  respondToMentionsOnly?: boolean;
+  allowedConversationIds?: string[];
+  allowedSenderIds?: string[];
+  keepAlive?: boolean;
+  debug?: boolean;
+  ua?: string;
+  openApiBaseUrl?: string;
+  tokenUrl?: string;
+};
+
 export type WebhookAdapterConfig = AdapterConfig & {
   type: 'webhook';
   method?: string;

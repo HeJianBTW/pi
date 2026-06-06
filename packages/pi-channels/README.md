@@ -12,7 +12,7 @@ It does not depend on `@e9n/pi-channels` at runtime. That package is published a
 a standalone extension source package with the older `@mariozechner/*` peer
 namespace and Slack/Telegram dependencies. This package keeps the same channel
 contract while targeting this repo's `@earendil-works/*` API surface and native
-Feishu/WeCom adapters.
+Feishu/DingTalk/WeCom adapters.
 
 ## Channels
 
@@ -22,6 +22,10 @@ Feishu/WeCom adapters.
 - `wecom` - Native WeCom intelligent bot messaging backed by the official
   `@wecom/aibot-node-sdk`. Supports WebSocket long connection events and active
   Markdown pushes with Bot ID / Secret credentials.
+- `dingtalk` - Native DingTalk app bot messaging backed by the official
+  `dingtalk-stream` SDK. Supports Stream mode incoming bot messages, reply
+  messages through `sessionWebhook`, and active group text pushes through the
+  DingTalk OpenAPI.
 - `webhook` - Generic outgoing HTTP requests.
 
 ## Example
@@ -44,6 +48,13 @@ Feishu/WeCom adapters.
         "eventMode": "websocket",
         "respondToMentionsOnly": true,
         "timeoutMs": 15000
+      },
+      "dingtalk": {
+        "type": "dingtalk",
+        "clientId": "${DINGTALK_CLIENT_ID}",
+        "clientSecret": "${DINGTALK_CLIENT_SECRET}",
+        "eventMode": "stream",
+        "respondToMentionsOnly": true
       }
     },
     "routes": {
@@ -97,6 +108,29 @@ payloads:
 
 Set `"eventMode": "off"` for outgoing-only usage.
 
+### DingTalk modes
+
+Create a DingTalk internal app, add the bot capability, select Stream mode, and
+publish it. Copy the Client ID and Client Secret into the adapter config:
+
+```json
+{
+  "type": "dingtalk",
+  "clientId": "${DINGTALK_CLIENT_ID}",
+  "clientSecret": "${DINGTALK_CLIENT_SECRET}",
+  "robotCode": "${DINGTALK_ROBOT_CODE}",
+  "eventMode": "stream",
+  "respondToMentionsOnly": true,
+  "allowedConversationIds": ["cid_xxx"]
+}
+```
+
+Incoming replies use the per-message `sessionWebhook` when available. Active
+route sends use DingTalk's group message OpenAPI with the route recipient as the
+conversation/openConversationId. `robotCode` defaults to `clientId` when omitted.
+
+Set `"eventMode": "off"` when the bot should only send messages.
+
 ### WeCom modes
 
 Create an intelligent bot in the WeCom admin console, choose API mode, and select
@@ -143,6 +177,13 @@ zhangsan
 
 The intelligent bot adapter uses the WebSocket Bot API, so long connection mode
 does not require a public callback URL.
+
+For DingTalk app bots, send one message to the bot and use route capture to fill
+the group conversation id:
+
+```text
+cid_xxx
+```
 
 ## Events
 
