@@ -1,0 +1,421 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { search } from '../search.js';
+import type { WebToolSettings } from '../types.js';
+
+const mockFetch = vi.fn();
+vi.stubGlobal('fetch', mockFetch);
+
+describe('search - all providers', () => {
+  let originalEnv: NodeJS.ProcessEnv;
+
+  beforeEach(() => {
+    originalEnv = { ...process.env };
+    mockFetch.mockReset();
+  });
+
+  afterEach(() => {
+    process.env = originalEnv;
+  });
+
+  it('gemini: calls generateContent with google_search tool', async () => {
+    const settings: WebToolSettings = {
+      search: { provider: 'gemini' },
+      providers: { gemini: { apiKey: 'gemini-key' } },
+    };
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        candidates: [
+          {
+            content: { parts: [{ text: 'Gemini answer' }], role: 'model' },
+            groundingMetadata: {
+              groundingChunks: [{ web: { uri: 'https://example.com', title: 'Example' } }],
+            },
+          },
+        ],
+      }),
+    });
+
+    const result = await search({ query: 'test' }, settings);
+
+    expect(result.provider).toBe('gemini');
+    expect(result.answer).toBe('Gemini answer');
+    expect(result.results).toHaveLength(1);
+    expect(result.results[0]!.url).toBe('https://example.com');
+
+    const [url, opts] = mockFetch.mock.calls[0]!;
+    expect(url).toContain('/models/gemini-2.5-flash:generateContent');
+    expect(opts.headers['x-goog-api-key']).toBe('gemini-key');
+  });
+
+  it('perplexity: calls agent API with web_search tool', async () => {
+    const settings: WebToolSettings = {
+      search: { provider: 'perplexity' },
+      providers: { perplexity: { apiKey: 'pplx-key' } },
+    };
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        output: [
+          {
+            type: 'search_results',
+            results: [
+              { id: 1, url: 'https://example.com', title: 'Result', snippet: 'snippet text' },
+            ],
+          },
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text: 'Perplexity answer' }],
+          },
+        ],
+      }),
+    });
+
+    const result = await search({ query: 'test' }, settings);
+
+    expect(result.provider).toBe('perplexity');
+    expect(result.answer).toBe('Perplexity answer');
+    expect(result.results).toHaveLength(1);
+    expect(result.results[0]!.content).toBe('snippet text');
+
+    const [url, opts] = mockFetch.mock.calls[0]!;
+    expect(url).toBe('https://api.perplexity.ai/v1/agent');
+    expect(opts.headers.Authorization).toBe('Bearer pplx-key');
+  });
+
+  it('openrouter: calls chat completions with openrouter:web_search', async () => {
+    const settings: WebToolSettings = {
+      search: { provider: 'openrouter' },
+      providers: { openrouter: { apiKey: 'or-key' } },
+    };
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: 'OpenRouter answer',
+              annotations: [{ type: 'url_citation', url: 'https://example.com', title: 'Source' }],
+            },
+          },
+        ],
+      }),
+    });
+
+    const result = await search({ query: 'test' }, settings);
+
+    expect(result.provider).toBe('openrouter');
+    expect(result.answer).toBe('OpenRouter answer');
+    expect(result.results).toHaveLength(1);
+
+    const [url] = mockFetch.mock.calls[0]!;
+    expect(url).toBe('https://openrouter.ai/api/v1/chat/completions');
+  });
+
+  it('xai: calls responses API with web_search tool', async () => {
+    const settings: WebToolSettings = {
+      search: { provider: 'xai' },
+      providers: { xai: { apiKey: 'xai-key' } },
+    };
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        output: [
+          {
+            type: 'message',
+            content: [{ type: 'output_text', text: 'xAI answer' }],
+          },
+        ],
+        citations: [{ url: 'https://x.com/post', title: 'X Post' }],
+      }),
+    });
+
+    const result = await search({ query: 'test' }, settings);
+
+    expect(result.provider).toBe('xai');
+    expect(result.answer).toBe('xAI answer');
+    expect(result.results).toHaveLength(1);
+    expect(result.results[0]!.url).toBe('https://x.com/post');
+
+    const [url, opts] = mockFetch.mock.calls[0]!;
+    expect(url).toBe('https://api.x.ai/v1/responses');
+    expect(opts.headers.Authorization).toBe('Bearer xai-key');
+  });
+
+  it('openai: calls responses API with web_search tool', async () => {
+    const settings: WebToolSettings = {
+      search: { provider: 'openai' },
+      providers: { openai: { apiKey: 'oai-key' } },
+    };
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        output: [
+          {
+            type: 'message',
+            content: [
+              {
+                type: 'output_text',
+                text: 'OpenAI answer',
+                annotations: [{ type: 'url_citation', url: 'https://openai.com', title: 'OpenAI' }],
+              },
+            ],
+          },
+        ],
+      }),
+    });
+
+    const result = await search({ query: 'test' }, settings);
+
+    expect(result.provider).toBe('openai');
+    expect(result.answer).toBe('OpenAI answer');
+    expect(result.results).toHaveLength(1);
+    expect(result.results[0]!.url).toBe('https://openai.com');
+
+    const [url, opts] = mockFetch.mock.calls[0]!;
+    expect(url).toBe('https://api.openai.com/v1/responses');
+    expect(opts.headers.Authorization).toBe('Bearer oai-key');
+  });
+
+  it('anthropic: calls messages API with web_search tool', async () => {
+    const settings: WebToolSettings = {
+      search: { provider: 'anthropic' },
+      providers: { anthropic: { apiKey: 'ant-key' } },
+    };
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        content: [
+          {
+            type: 'text',
+            text: 'Anthropic answer',
+            citations: [
+              {
+                type: 'web_search_result_location',
+                url: 'https://anthropic.com',
+                title: 'Anthropic',
+                cited_text: 'cited',
+              },
+            ],
+          },
+        ],
+      }),
+    });
+
+    const result = await search({ query: 'test' }, settings);
+
+    expect(result.provider).toBe('anthropic');
+    expect(result.answer).toBe('Anthropic answer');
+    expect(result.results).toHaveLength(1);
+    expect(result.results[0]!.url).toBe('https://anthropic.com');
+
+    const [url, opts] = mockFetch.mock.calls[0]!;
+    expect(url).toBe('https://api.anthropic.com/v1/messages');
+    expect(opts.headers['x-api-key']).toBe('ant-key');
+    expect(opts.headers['anthropic-version']).toBe('2023-06-01');
+  });
+
+  it('openrouter: passes domain filters', async () => {
+    const settings: WebToolSettings = {
+      search: { provider: 'openrouter' },
+      providers: { openrouter: { apiKey: 'key' } },
+    };
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ choices: [{ message: { content: 'ok' } }] }),
+    });
+
+    await search({ query: 'test', includeDomains: ['example.com'] }, settings);
+
+    const body = JSON.parse(mockFetch.mock.calls[0]![1].body);
+    expect(body.tools[0].parameters.allowed_domains).toEqual(['example.com']);
+  });
+
+  it('openai: passes domain filters', async () => {
+    const settings: WebToolSettings = {
+      search: { provider: 'openai' },
+      providers: { openai: { apiKey: 'key' } },
+    };
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        output: [{ type: 'message', content: [{ type: 'output_text', text: 'ok' }] }],
+      }),
+    });
+
+    await search({ query: 'test', excludeDomains: ['reddit.com'] }, settings);
+
+    const body = JSON.parse(mockFetch.mock.calls[0]![1].body);
+    expect(body.tools[0].filters.blocked_domains).toEqual(['reddit.com']);
+  });
+
+  it('xai: passes allowed_domains via filters', async () => {
+    const settings: WebToolSettings = {
+      search: { provider: 'xai' },
+      providers: { xai: { apiKey: 'key' } },
+    };
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ output: [], citations: [] }),
+    });
+
+    await search({ query: 'test', includeDomains: ['x.com'] }, settings);
+
+    const body = JSON.parse(mockFetch.mock.calls[0]![1].body);
+    expect(body.tools[0].filters.allowed_domains).toEqual(['x.com']);
+  });
+
+  it('gemini: uses custom model from settings', async () => {
+    const settings: WebToolSettings = {
+      search: { provider: 'gemini' },
+      providers: { gemini: { apiKey: 'key', model: 'gemini-3.5-flash' } },
+    };
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ candidates: [{ content: { parts: [{ text: 'ok' }], role: 'model' } }] }),
+    });
+
+    await search({ query: 'test' }, settings);
+
+    const [url] = mockFetch.mock.calls[0]!;
+    expect(url).toContain('/models/gemini-3.5-flash:generateContent');
+  });
+
+  it('perplexity: uses custom model from settings', async () => {
+    const settings: WebToolSettings = {
+      search: { provider: 'perplexity' },
+      providers: { perplexity: { apiKey: 'key', model: 'sonar-pro' } },
+    };
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        output: [{ type: 'message', content: [{ type: 'output_text', text: 'ok' }] }],
+      }),
+    });
+
+    await search({ query: 'test' }, settings);
+
+    const body = JSON.parse(mockFetch.mock.calls[0]![1].body);
+    expect(body.model).toBe('sonar-pro');
+  });
+});
+
+describe('XaiProvider.xsearch', () => {
+  let originalEnv: NodeJS.ProcessEnv;
+
+  beforeEach(() => {
+    originalEnv = { ...process.env };
+    mockFetch.mockReset();
+  });
+
+  afterEach(() => {
+    process.env = originalEnv;
+  });
+
+  it('calls xAI responses API with x_search tool type', async () => {
+    const { XaiProvider } = await import('../providers/xai.js');
+    const provider = new XaiProvider();
+    const resolved = { id: 'xai' as const, baseUrl: 'https://api.x.ai/v1', apiKey: 'xai-key' };
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        output: [
+          {
+            type: 'message',
+            content: [{ type: 'output_text', text: 'People are excited about xAI' }],
+          },
+        ],
+        citations: [{ url: 'https://x.com/elonmusk/status/123', title: 'Elon on xAI' }],
+      }),
+    });
+
+    const result = await provider.xsearch({ query: 'xAI news' }, resolved);
+
+    expect(result.answer).toBe('People are excited about xAI');
+    expect(result.results).toHaveLength(1);
+    expect(result.results[0]!.url).toContain('x.com');
+
+    const body = JSON.parse(mockFetch.mock.calls[0]![1].body);
+    expect(body.tools[0].type).toBe('x_search');
+  });
+
+  it('passes allowedHandles filter', async () => {
+    const { XaiProvider } = await import('../providers/xai.js');
+    const provider = new XaiProvider();
+    const resolved = { id: 'xai' as const, baseUrl: 'https://api.x.ai/v1', apiKey: 'key' };
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ output: [], citations: [] }),
+    });
+
+    await provider.xsearch({ query: 'test', allowedHandles: ['elonmusk'] }, resolved);
+
+    const body = JSON.parse(mockFetch.mock.calls[0]![1].body);
+    expect(body.tools[0].allowed_x_handles).toEqual(['elonmusk']);
+  });
+
+  it('passes excludedHandles filter', async () => {
+    const { XaiProvider } = await import('../providers/xai.js');
+    const provider = new XaiProvider();
+    const resolved = { id: 'xai' as const, baseUrl: 'https://api.x.ai/v1', apiKey: 'key' };
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ output: [], citations: [] }),
+    });
+
+    await provider.xsearch({ query: 'test', excludedHandles: ['bot'] }, resolved);
+
+    const body = JSON.parse(mockFetch.mock.calls[0]![1].body);
+    expect(body.tools[0].excluded_x_handles).toEqual(['bot']);
+  });
+
+  it('passes date range filters', async () => {
+    const { XaiProvider } = await import('../providers/xai.js');
+    const provider = new XaiProvider();
+    const resolved = { id: 'xai' as const, baseUrl: 'https://api.x.ai/v1', apiKey: 'key' };
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ output: [], citations: [] }),
+    });
+
+    await provider.xsearch(
+      { query: 'test', fromDate: '2025-10-01', toDate: '2025-10-10' },
+      resolved,
+    );
+
+    const body = JSON.parse(mockFetch.mock.calls[0]![1].body);
+    expect(body.tools[0].from_date).toBe('2025-10-01');
+    expect(body.tools[0].to_date).toBe('2025-10-10');
+  });
+
+  it('throws on missing API key', async () => {
+    const { XaiProvider } = await import('../providers/xai.js');
+    const provider = new XaiProvider();
+    const resolved = { id: 'xai' as const, baseUrl: 'https://api.x.ai/v1' };
+
+    await expect(provider.xsearch({ query: 'test' }, resolved)).rejects.toThrow(
+      'xAI API key not configured',
+    );
+  });
+
+  it('throws on HTTP error', async () => {
+    const { XaiProvider } = await import('../providers/xai.js');
+    const provider = new XaiProvider();
+    const resolved = { id: 'xai' as const, baseUrl: 'https://api.x.ai/v1', apiKey: 'key' };
+
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 429,
+      text: async () => 'Rate limited',
+    });
+
+    await expect(provider.xsearch({ query: 'test' }, resolved)).rejects.toThrow(
+      'xAI API error 429',
+    );
+  });
+});
