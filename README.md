@@ -20,6 +20,7 @@ product-specific UI.
 | Extension | `@amaster.ai/pi-telemetry` | Runtime telemetry with Langfuse and OpenTelemetry exporters. |
 | Extension | `@amaster.ai/pi-task-scheduler` | Cron-based scheduled task management with LLM-callable tools. |
 | Extension | `@amaster.ai/pi-browser-use` | Browser automation wrapping chrome-devtools-mcp with `browser_`-prefixed tools. |
+| Extension | `@amaster.ai/pi-web-access` | Web search and URL content extraction across configurable providers. |
 | Extension | `@amaster.ai/pi-computer-use` | Computer-use extension for CUA computer-server with desktop automation tools. |
 | Extension | `@amaster.ai/pi-channels` | Native messaging channels: Feishu, WeCom, and webhooks. |
 | Extension | `@amaster.ai/pi-memory` | Persistent curated memory (`MEMORY.md` + `USER.md`) injected into the system prompt as a frozen snapshot. |
@@ -53,7 +54,7 @@ Every package is ESM-only and published under the `@amaster.ai` npm scope.
   </tr>
   <tr>
     <td><strong>@amaster.ai/pi-image-gen</strong><br><img src="./packages/pi-image-gen/preview.png" alt="pi-image-gen preview" width="260"></td>
-    <td></td>
+    <td><strong>@amaster.ai/pi-web-access</strong><br><img src="./packages/pi-web-access/preview.png" alt="pi-web-access preview" width="260"></td>
     <td></td>
   </tr>
 </table>

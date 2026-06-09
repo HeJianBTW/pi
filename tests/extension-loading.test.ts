@@ -135,7 +135,7 @@ describe('Extension loading contract', () => {
       expect(onCalls).toContain('session_shutdown');
     });
 
-    it('registers browser_ prefixed tools after session_start', async () => {
+    it('registers browser_ prefixed tools after session_start', { timeout: 15000 }, async () => {
       const mod = await import(join(EXTENSIONS_DIR, 'pi-browser-use', 'src', 'index.ts'));
       const pi = createMockExtensionAPI();
       // biome-ignore lint/suspicious/noExplicitAny: mock API

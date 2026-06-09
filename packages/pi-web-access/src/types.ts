@@ -1,0 +1,44 @@
+/** Built-in provider identifiers. */
+export type BuiltInProviderId =
+  | 'tavily'
+  | 'kimi'
+  | 'mimo'
+  | 'zai'
+  | 'gemini'
+  | 'perplexity'
+  | 'openrouter'
+  | 'xai'
+  | 'openai'
+  | 'anthropic';
+
+// ─── Settings ────────────────────────────────────────────────────────────────
+
+export interface ProviderConfig {
+  apiKey?: string;
+  baseUrl?: string;
+  model?: string;
+  headers?: Record<string, string>;
+}
+
+export interface SummaryModelConfig {
+  provider: string;
+  model: string;
+}
+
+export interface SearchConfig {
+  provider?: BuiltInProviderId;
+}
+
+export interface FetchConfig {
+  provider?: BuiltInProviderId;
+  summary?: SummaryModelConfig;
+}
+
+export interface WebToolSettings {
+  /** Search tool config. */
+  search?: SearchConfig;
+  /** Fetch tool config. */
+  fetch?: FetchConfig;
+  /** Per-provider config. */
+  providers?: Partial<Record<BuiltInProviderId, ProviderConfig>>;
+}
