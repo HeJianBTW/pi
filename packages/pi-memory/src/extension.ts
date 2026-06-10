@@ -1,6 +1,11 @@
 import path from 'node:path';
 import { loadPiSettings, resolveAgentDir } from '@amaster.ai/pi-shared/settings';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
+import {
+  createExtractionRunner,
+  type ExtractionModelConfig,
+  type ExtractionRunner,
+} from './background-extraction.js';
 import { MemoryStore } from './store.js';
 import { createMemoryTools } from './tools.js';
 
@@ -30,6 +35,10 @@ export type PiMemoryExtensionConfig = {
   userCharLimit?: number;
   /** Pre-built store (host-controlled mode). */
   store?: MemoryStore;
+  /** Model for background memory extraction. Omit to disable extraction. */
+  extractionModel?: ExtractionModelConfig;
+  /** Turns between extraction runs. Default: 5. */
+  extractionInterval?: number;
 };
 
 type ResolvedConfig = {
@@ -37,15 +46,19 @@ type ResolvedConfig = {
   memoryCharLimit?: number;
   userCharLimit?: number;
   store?: MemoryStore;
+  extractionModel?: ExtractionModelConfig;
+  extractionInterval: number;
 };
 
 function resolveConfig(raw?: PiMemoryExtensionConfig): ResolvedConfig {
   const resolved: ResolvedConfig = {
     dataDir: raw?.dataDir?.trim() || path.join(resolveAgentDir(), 'memories'),
+    extractionInterval: raw?.extractionInterval ?? 5,
   };
   if (raw?.memoryCharLimit !== undefined) resolved.memoryCharLimit = raw.memoryCharLimit;
   if (raw?.userCharLimit !== undefined) resolved.userCharLimit = raw.userCharLimit;
   if (raw?.store) resolved.store = raw.store;
+  if (raw?.extractionModel) resolved.extractionModel = raw.extractionModel;
   return resolved;
 }
 
@@ -67,6 +80,7 @@ export default function memoryExtension(
 ): void {
   let store: MemoryStore | undefined;
   let snapshot = '';
+  let extractionRunner: ExtractionRunner | undefined;
 
   pi.on('session_start', async (_event, ctx) => {
     const fileConfig = loadSettings(ctx.cwd);
@@ -89,14 +103,28 @@ export default function memoryExtension(
       for (const tool of createMemoryTools(store)) {
         pi.registerTool(tool);
       }
+
+      if (config.extractionModel && store) {
+        extractionRunner = createExtractionRunner({
+          store,
+          modelConfig: config.extractionModel,
+          interval: config.extractionInterval,
+          modelRegistry: ctx.modelRegistry as never,
+          onNotify: (msg, level) => ctx.ui.notify(msg, level),
+        });
+      }
     } catch (err) {
       ctx.ui.setStatus(STATUS_KEY, 'memory: unavailable');
-      // Surface as a notification only — registration failure shouldn't crash the session.
       ctx.ui.notify(
         `pi-memory failed to initialize: ${err instanceof Error ? err.message : String(err)}`,
         'error',
       );
     }
+  });
+
+  pi.on('turn_end', async (event) => {
+    if (!extractionRunner) return;
+    extractionRunner.onTurnEnd(event as never);
   });
 
   pi.on('before_agent_start', async (event) => {
@@ -107,6 +135,8 @@ export default function memoryExtension(
   });
 
   pi.on('session_shutdown', async () => {
+    extractionRunner?.shutdown();
+    extractionRunner = undefined;
     store = undefined;
     snapshot = '';
   });

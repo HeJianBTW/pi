@@ -70,8 +70,10 @@ export default function piWebToolExtension(pi: ExtensionAPI): void {
             }),
           ),
           topic: Type.Optional(
-            Type.Union([Type.Literal('general'), Type.Literal('news')], {
-              description: 'Topic category.',
+            Type.Unsafe<'general' | 'news'>({
+              type: 'string',
+              enum: ['general', 'news'],
+              description: 'Topic category. Must be one of: "general", "news".',
             }),
           ),
           timeRange: Type.Optional(

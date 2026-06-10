@@ -1,3 +1,6 @@
+export type { ExtractionModelConfig, ExtractionRunner } from './background-extraction.js';
+export { createExtractionRunner } from './background-extraction.js';
+export type { PiMemoryExtensionConfig } from './extension.js';
 export { default } from './extension.js';
 export type {
   MemoryDriftError,

@@ -29,6 +29,10 @@
       "types": "./dist/threat-patterns.d.ts",
       "default": "./dist/threat-patterns.js"
     },
+    "./background-extraction": {
+      "types": "./dist/background-extraction.d.ts",
+      "default": "./dist/background-extraction.js"
+    },
     "./package.json": {
       "default": "./package.json"
     }
@@ -62,10 +66,18 @@
     "proper-lockfile": "^4.1.2"
   },
   "peerDependencies": {
+    "@earendil-works/pi-agent-core": ">=0.74.0",
+    "@earendil-works/pi-ai": ">=0.74.0",
     "@earendil-works/pi-coding-agent": ">=0.74.0",
     "typebox": "*"
   },
   "peerDependenciesMeta": {
+    "@earendil-works/pi-agent-core": {
+      "optional": true
+    },
+    "@earendil-works/pi-ai": {
+      "optional": true
+    },
     "@earendil-works/pi-coding-agent": {
       "optional": true
     },
@@ -74,6 +86,8 @@
     }
   },
   "devDependencies": {
+    "@earendil-works/pi-agent-core": "0.74.0",
+    "@earendil-works/pi-ai": "0.74.0",
     "@earendil-works/pi-coding-agent": "0.74.0",
     "@types/proper-lockfile": "^4.1.4",
     "typebox": "*",
