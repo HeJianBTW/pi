@@ -1,5 +1,5 @@
 import type { ResolvedProvider, SearchParams, SearchResponse, SearchResult } from './base.js';
-import { BaseProvider } from './base.js';
+import { BaseProvider, getEnvironmentContext, SEARCH_SYSTEM_PROMPT } from './base.js';
 
 const REQUEST_TIMEOUT_MS = 60_000;
 
@@ -29,7 +29,10 @@ export class XaiProvider extends BaseProvider {
 
     const body = {
       model: provider.model ?? 'grok-4.3',
-      input: [{ role: 'user', content: params.query }],
+      input: [
+        { role: 'system', content: SEARCH_SYSTEM_PROMPT },
+        { role: 'user', content: `${getEnvironmentContext()}\n\n${params.query}` },
+      ],
       tools: [tool],
     };
     const headers: Record<string, string> = {
@@ -68,7 +71,10 @@ export class XaiProvider extends BaseProvider {
 
     const body = {
       model: provider.model ?? 'grok-4.3',
-      input: [{ role: 'user', content: params.query }],
+      input: [
+        { role: 'system', content: SEARCH_SYSTEM_PROMPT },
+        { role: 'user', content: `${getEnvironmentContext()}\n\n${params.query}` },
+      ],
       tools: [tool],
     };
     const headers: Record<string, string> = {

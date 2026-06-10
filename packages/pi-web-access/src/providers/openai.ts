@@ -1,4 +1,4 @@
-import { BaseProvider } from './base.js';
+import { BaseProvider, getEnvironmentContext, SEARCH_SYSTEM_PROMPT } from './base.js';
 import type { ResolvedProvider, SearchParams, SearchResponse, SearchResult } from './index.js';
 
 const REQUEST_TIMEOUT_MS = 60_000;
@@ -22,7 +22,12 @@ export class OpenAIProvider extends BaseProvider {
       tool.filters = filters;
     }
 
-    const body = { model: provider.model ?? 'gpt-5.5', input: params.query, tools: [tool] };
+    const body = {
+      model: provider.model ?? 'gpt-5.5',
+      instructions: SEARCH_SYSTEM_PROMPT,
+      input: `${getEnvironmentContext()}\n\n${params.query}`,
+      tools: [tool],
+    };
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${provider.apiKey}`,

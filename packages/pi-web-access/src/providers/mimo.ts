@@ -1,4 +1,4 @@
-import { BaseProvider } from './base.js';
+import { BaseProvider, getEnvironmentContext, SEARCH_SYSTEM_PROMPT } from './base.js';
 import type { ResolvedProvider, SearchParams, SearchResponse, SearchResult } from './index.js';
 
 const REQUEST_TIMEOUT_MS = 60_000;
@@ -16,7 +16,10 @@ export class MimoProvider extends BaseProvider {
     const url = `${provider.baseUrl.replace(/\/$/, '')}/chat/completions`;
     const body = {
       model: provider.model ?? 'mimo-v2.5-pro',
-      messages: [{ role: 'user', content: params.query }],
+      messages: [
+        { role: 'system', content: SEARCH_SYSTEM_PROMPT },
+        { role: 'user', content: `${getEnvironmentContext()}\n\n${params.query}` },
+      ],
       tools: [{ type: 'web_search', max_keyword: 3, force_search: true }],
       max_completion_tokens: 2048,
       temperature: 1.0,

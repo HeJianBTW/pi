@@ -1,4 +1,4 @@
-import { BaseProvider } from './base.js';
+import { BaseProvider, getEnvironmentContext, SEARCH_SYSTEM_PROMPT } from './base.js';
 import type { ResolvedProvider, SearchParams, SearchResponse, SearchResult } from './index.js';
 
 const REQUEST_TIMEOUT_MS = 60_000;
@@ -16,7 +16,8 @@ export class GeminiProvider extends BaseProvider {
     const model = provider.model ?? 'gemini-2.5-flash';
     const url = `${provider.baseUrl.replace(/\/$/, '')}/models/${model}:generateContent`;
     const body = {
-      contents: [{ parts: [{ text: params.query }] }],
+      systemInstruction: { parts: [{ text: SEARCH_SYSTEM_PROMPT }] },
+      contents: [{ parts: [{ text: `${getEnvironmentContext()}\n\n${params.query}` }] }],
       tools: [{ google_search: {} }],
     };
     const headers: Record<string, string> = {

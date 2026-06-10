@@ -1,4 +1,4 @@
-import { BaseProvider } from './base.js';
+import { BaseProvider, getEnvironmentContext, SEARCH_SYSTEM_PROMPT } from './base.js';
 import type { ResolvedProvider, SearchParams, SearchResponse } from './index.js';
 
 const REQUEST_TIMEOUT_MS = 60_000;
@@ -30,12 +30,8 @@ export class KimiProvider extends BaseProvider {
     }
 
     const messages: KimiMessage[] = [
-      {
-        role: 'system',
-        content:
-          'You are a helpful assistant that searches the web to answer questions. Provide concise, factual answers based on web search results.',
-      },
-      { role: 'user', content: params.query },
+      { role: 'system', content: SEARCH_SYSTEM_PROMPT },
+      { role: 'user', content: `${getEnvironmentContext()}\n\n${params.query}` },
     ];
 
     const firstResponse = await this.callApi(messages, provider);
