@@ -141,19 +141,134 @@ export default function memoryExtension(
     snapshot = '';
   });
 
-  pi.registerCommand('pi-memory-status', {
-    description: 'Show pi-memory status (entry counts and char usage).',
-    handler: async (_args, ctx) => {
+  pi.registerCommand('memory', {
+    description: 'Manage persistent memory. Subcommands: status, read, add, replace, remove.',
+    getArgumentCompletions: (prefix) => {
+      const subcommands = ['status', 'read', 'add', 'replace', 'remove'];
+      const matches = subcommands.filter((s) => s.startsWith(prefix.trim().toLowerCase()));
+      return matches.map((s) => ({ label: s, value: s }));
+    },
+    handler: async (args, ctx) => {
       if (!store) {
         ctx.ui.notify('pi-memory is not loaded.', 'warning');
         return;
       }
-      const memEntries = store.getEntries('memory');
-      const userEntries = store.getEntries('user');
-      ctx.ui.notify(
-        `MEMORY.md: ${memEntries.length} entries\nUSER.md: ${userEntries.length} entries`,
-        'info',
-      );
+
+      const parts = args.trim().split(/\s+/).filter(Boolean);
+      const subcommand = parts[0]?.toLowerCase() ?? 'status';
+      const rest = parts.slice(1).join(' ').trim();
+
+      switch (subcommand) {
+        case 'status': {
+          const memResult = await store.read('memory');
+          const userResult = await store.read('user');
+          ctx.ui.notify(
+            `MEMORY.md: ${memResult.entryCount} entries (${memResult.usage})\nUSER.md: ${userResult.entryCount} entries (${userResult.usage})`,
+            'info',
+          );
+          break;
+        }
+
+        case 'read': {
+          const target = rest === 'user' ? 'user' : 'memory';
+          const result = await store.read(target as 'memory' | 'user');
+          if (result.entries.length === 0) {
+            ctx.ui.notify(`${target}: (empty)`, 'info');
+          } else {
+            ctx.ui.notify(
+              `${target} [${result.usage}]:\n${result.entries.map((e, i) => `${i + 1}. ${e}`).join('\n')}`,
+              'info',
+            );
+          }
+          break;
+        }
+
+        case 'add': {
+          if (!rest) {
+            ctx.ui.notify('Usage: /memory add [user|memory] <content>', 'warning');
+            break;
+          }
+          const addParts = rest.split(/\s+/);
+          let target: 'memory' | 'user' = 'memory';
+          let content = rest;
+          if (addParts[0] === 'user' || addParts[0] === 'memory') {
+            target = addParts[0] as 'memory' | 'user';
+            content = addParts.slice(1).join(' ');
+          }
+          if (!content) {
+            ctx.ui.notify('Usage: /memory add [user|memory] <content>', 'warning');
+            break;
+          }
+          const addResult = await store.add(target, content);
+          ctx.ui.notify(
+            addResult.success ? `Added to ${target}.` : `Failed: ${addResult.error}`,
+            addResult.success ? 'info' : 'warning',
+          );
+          break;
+        }
+
+        case 'replace': {
+          // Format: /memory replace [target] <oldText> -> <newContent>
+          if (!rest?.includes('->')) {
+            ctx.ui.notify(
+              'Usage: /memory replace [user|memory] <oldText> -> <newContent>',
+              'warning',
+            );
+            break;
+          }
+          const replaceParts = rest.split(/\s+/);
+          let rTarget: 'memory' | 'user' = 'memory';
+          let replaceBody = rest;
+          if (replaceParts[0] === 'user' || replaceParts[0] === 'memory') {
+            rTarget = replaceParts[0] as 'memory' | 'user';
+            replaceBody = replaceParts.slice(1).join(' ');
+          }
+          const [oldText, newContent] = replaceBody.split('->').map((s) => s.trim());
+          if (!oldText || !newContent) {
+            ctx.ui.notify(
+              'Usage: /memory replace [user|memory] <oldText> -> <newContent>',
+              'warning',
+            );
+            break;
+          }
+          const replaceResult = await store.replace(rTarget, oldText, newContent);
+          ctx.ui.notify(
+            replaceResult.success ? `Replaced in ${rTarget}.` : `Failed: ${replaceResult.error}`,
+            replaceResult.success ? 'info' : 'warning',
+          );
+          break;
+        }
+
+        case 'remove': {
+          if (!rest) {
+            ctx.ui.notify('Usage: /memory remove [user|memory] <substring>', 'warning');
+            break;
+          }
+          const rmParts = rest.split(/\s+/);
+          let rmTarget: 'memory' | 'user' = 'memory';
+          let rmText = rest;
+          if (rmParts[0] === 'user' || rmParts[0] === 'memory') {
+            rmTarget = rmParts[0] as 'memory' | 'user';
+            rmText = rmParts.slice(1).join(' ');
+          }
+          if (!rmText) {
+            ctx.ui.notify('Usage: /memory remove [user|memory] <substring>', 'warning');
+            break;
+          }
+          const rmResult = await store.remove(rmTarget, rmText);
+          ctx.ui.notify(
+            rmResult.success ? `Removed from ${rmTarget}.` : `Failed: ${rmResult.error}`,
+            rmResult.success ? 'info' : 'warning',
+          );
+          break;
+        }
+
+        default:
+          ctx.ui.notify(
+            'Unknown subcommand. Available: status, read, add, replace, remove.',
+            'warning',
+          );
+      }
     },
   });
 }
