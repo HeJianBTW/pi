@@ -1,5 +1,7 @@
 # @amaster.ai/pi-memory-mem0
 
+![pi-memory-mem0 preview](https://raw.githubusercontent.com/TGYD-helige/pi/master/packages/pi-memory-mem0/preview.png)
+
 Passive semantic memory extension powered by [Mem0](https://mem0.ai) — supports both Platform (cloud) and Open-Source (local SQLite) modes.
 
 ## How It Works

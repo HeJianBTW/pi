@@ -22,12 +22,14 @@
     }
   },
   "pi": {
+    "image": "https://raw.githubusercontent.com/TGYD-helige/pi/master/packages/pi-memory-mem0/preview.png",
     "extensions": [
       "./dist/index.js"
     ]
   },
   "files": [
     "dist",
+    "preview.png",
     "README.md"
   ],
   "publishConfig": {

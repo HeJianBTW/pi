@@ -55,7 +55,7 @@ Every package is ESM-only and published under the `@amaster.ai` npm scope.
   <tr>
     <td><strong>@amaster.ai/pi-image-gen</strong><br><img src="./packages/pi-image-gen/preview.png" alt="pi-image-gen preview" width="260"></td>
     <td><strong>@amaster.ai/pi-web-access</strong><br><img src="./packages/pi-web-access/preview.png" alt="pi-web-access preview" width="260"></td>
-    <td></td>
+    <td><strong>@amaster.ai/pi-memory-mem0</strong><br><img src="./packages/pi-memory-mem0/preview.png" alt="pi-memory-mem0 preview" width="260"></td>
   </tr>
 </table>
 
