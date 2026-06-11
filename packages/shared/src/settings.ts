@@ -4,7 +4,8 @@ import { basename, join, resolve } from 'node:path';
 
 export type PiSettingsOptions = {
   cwd?: string;
-  agentDir?: string;
+  /** Override for the config directory. If not set, resolveConfigDir() is used. */
+  configDir?: string;
 };
 
 function resolveEnvVars(value: unknown): unknown {
@@ -43,8 +44,30 @@ function readSettingsSection<T>(filePath: string, key: string): Partial<T> {
   }
 }
 
-export function resolveAgentDir(override?: string): string {
+/**
+ * Resolve the user data / runtime home directory.
+ * Used for: memories, data, skills, logs.
+ */
+export function resolveHome(override?: string): string {
   return resolve(override ?? process.env.PI_AGENT_HOME ?? join(homedir(), '.pi', 'agent'));
+}
+
+/**
+ * Resolve the system config directory.
+ * Used for: settings.json, policy, auth, models.
+ */
+export function resolveConfigDir(override?: string): string {
+  return resolve(
+    override ??
+      process.env.PI_CODING_AGENT_DIR ??
+      process.env.PI_AGENT_HOME ??
+      join(homedir(), '.pi', 'agent'),
+  );
+}
+
+/** @deprecated Use resolveHome() or resolveConfigDir() instead. */
+export function resolveAgentDir(override?: string): string {
+  return resolveHome(override);
 }
 
 /**
@@ -54,19 +77,19 @@ export function resolveAgentDir(override?: string): string {
  */
 export function loadPiSettings<T>(key: string, options?: PiSettingsOptions): T {
   const globalDir = resolve(join(homedir(), '.pi', 'agent'));
-  const agentDir = resolveAgentDir(options?.agentDir);
+  const configDir = resolveConfigDir(options?.configDir);
   const cwd = options?.cwd ?? process.cwd();
 
   const globalSettings = readSettingsSection<T>(join(globalDir, 'settings.json'), key);
 
-  const agentSettings =
-    agentDir === globalDir
+  const configSettings =
+    configDir === globalDir
       ? ({} as Partial<T>)
-      : readSettingsSection<T>(join(agentDir, 'settings.json'), key);
+      : readSettingsSection<T>(join(configDir, 'settings.json'), key);
 
   const projectSettings = readSettingsSection<T>(join(cwd, '.pi', 'settings.json'), key);
 
-  return { ...globalSettings, ...agentSettings, ...projectSettings } as T;
+  return { ...globalSettings, ...configSettings, ...projectSettings } as T;
 }
 
 export function loadJsonProfileDir<T>(dir: string): Record<string, T> {
@@ -95,13 +118,15 @@ export function loadJsonProfileDir<T>(dir: string): Record<string, T> {
 
 export function loadPiPolicyProfiles<T>(options?: PiSettingsOptions): Record<string, T> {
   const globalDir = resolve(join(homedir(), '.pi', 'agent', 'policy'));
-  const agentDir = resolve(join(resolveAgentDir(options?.agentDir), 'policy'));
+  const configPolicyDir = resolve(join(resolveConfigDir(options?.configDir), 'policy'));
   const projectDir = resolve(join(options?.cwd ?? process.cwd(), '.pi', 'policy'));
 
   const globalPolicies = loadJsonProfileDir<T>(globalDir);
-  const agentPolicies =
-    agentDir === globalDir ? ({} as Record<string, T>) : loadJsonProfileDir<T>(agentDir);
+  const configPolicies =
+    configPolicyDir === globalDir
+      ? ({} as Record<string, T>)
+      : loadJsonProfileDir<T>(configPolicyDir);
   const projectPolicies = loadJsonProfileDir<T>(projectDir);
 
-  return { ...globalPolicies, ...agentPolicies, ...projectPolicies };
+  return { ...globalPolicies, ...configPolicies, ...projectPolicies };
 }

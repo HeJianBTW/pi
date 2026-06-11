@@ -1,4 +1,4 @@
-import { loadPiSettings, resolveAgentDir } from '@amaster.ai/pi-shared/settings';
+import { loadPiSettings } from '@amaster.ai/pi-shared/settings';
 import type { ResolvedProvider } from './providers/index.js';
 import type { BuiltInProviderId, WebToolSettings } from './types.js';
 
@@ -48,7 +48,6 @@ export function loadWebToolSettings(cwd: string): WebToolSettings {
   try {
     return loadPiSettings<WebToolSettings>(SETTINGS_KEY, {
       cwd,
-      agentDir: resolveAgentDir(),
     });
   } catch {
     return {};

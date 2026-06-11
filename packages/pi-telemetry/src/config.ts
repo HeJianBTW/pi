@@ -1,5 +1,4 @@
 import { loadPiSettings, type PiSettingsOptions } from '@amaster.ai/pi-shared/settings';
-import { getAgentDir } from '@earendil-works/pi-coding-agent';
 
 export interface LangfuseConfig {
   enabled?: boolean;
@@ -38,5 +37,5 @@ export function resolveConfig(config?: TelemetryConfig): TelemetryConfig {
 }
 
 export function loadConfigFromFile(options?: PiSettingsOptions): TelemetryConfig {
-  return loadPiSettings<TelemetryConfig>('pi-telemetry', { agentDir: getAgentDir(), ...options });
+  return loadPiSettings<TelemetryConfig>('pi-telemetry', { ...options });
 }

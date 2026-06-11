@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { loadPiSettings, resolveAgentDir } from '@amaster.ai/pi-shared/settings';
+import { loadPiSettings, resolveHome } from '@amaster.ai/pi-shared/settings';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import {
   createExtractionRunner,
@@ -52,7 +52,7 @@ type ResolvedConfig = {
 
 function resolveConfig(raw?: PiMemoryExtensionConfig): ResolvedConfig {
   const resolved: ResolvedConfig = {
-    dataDir: raw?.dataDir?.trim() || path.join(resolveAgentDir(), 'memories'),
+    dataDir: raw?.dataDir?.trim() || path.join(resolveHome(), 'memories'),
     extractionInterval: raw?.extractionInterval ?? 5,
   };
   if (raw?.memoryCharLimit !== undefined) resolved.memoryCharLimit = raw.memoryCharLimit;
@@ -66,7 +66,6 @@ function loadSettings(cwd: string): PiMemoryExtensionConfig | undefined {
   try {
     const config = loadPiSettings<Partial<PiMemoryExtensionConfig>>(SETTINGS_KEY, {
       cwd,
-      agentDir: resolveAgentDir(),
     });
     return Object.keys(config).length > 0 ? (config as PiMemoryExtensionConfig) : undefined;
   } catch {

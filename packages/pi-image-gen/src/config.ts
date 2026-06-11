@@ -1,4 +1,4 @@
-import { loadPiSettings, resolveAgentDir } from '@amaster.ai/pi-shared/settings';
+import { loadPiSettings } from '@amaster.ai/pi-shared/settings';
 import {
   BUILT_IN_MODELS,
   DEFAULT_API_STYLE,
@@ -21,7 +21,6 @@ export function loadImageGenSettings(cwd: string): ImageGenSettings {
   try {
     return loadPiSettings<ImageGenSettings>(SETTINGS_KEY, {
       cwd,
-      agentDir: resolveAgentDir(),
     });
   } catch {
     return {};

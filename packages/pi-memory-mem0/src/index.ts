@@ -9,7 +9,7 @@
  * Supports ${ENV_VAR:-fallback} in all string values.
  */
 
-import { loadPiSettings, resolveAgentDir } from '@amaster.ai/pi-shared/settings';
+import { loadPiSettings } from '@amaster.ai/pi-shared/settings';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Prefetch } from './prefetch.js';
 import { createMem0Provider, type Mem0Provider } from './provider.js';
@@ -24,7 +24,6 @@ function loadConfig(cwd: string): Mem0ExtensionConfig {
   try {
     return loadPiSettings<Mem0ExtensionConfig>(SETTINGS_KEY, {
       cwd,
-      agentDir: resolveAgentDir(),
     });
   } catch {
     return {};
