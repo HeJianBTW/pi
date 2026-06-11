@@ -113,9 +113,37 @@ Mem0 被动语义记忆扩展 — 支持 Platform (云端) 和 Open-Source (本�
 
 ## API Key 解析顺序 (OSS 模式)
 
+LLM 和 Embedder 的 API key **各自独立解析**，按以下顺序：
+
 1. settings.json 的 `oss.llm.config.apiKey` / `oss.embedder.config.apiKey` (显式配置)
 2. pi model registry 的对应 provider key (`useRegistryKeys: true` 时)
 3. 环境变量 (`OPENAI_API_KEY`, `DEEPSEEK_API_KEY` 等，mem0 SDK 内部读取)
+
+例如配置 `"llm": { "provider": "deepseek" }` + `"embedder": { "provider": "openai" }`，会分别从 pi registry 拿 deepseek 的 key 给 LLM，拿 openai 的 key 给 embedder。
+
+### 通过代理 API 调用 (如 amaster)
+
+如果你的 embedding/LLM 走统一代理（如 amaster credits），可以配 `baseUrl` 转发：
+
+```json
+{
+  "pi-memory-mem0": {
+    "mode": "open-source",
+    "oss": {
+      "llm": {
+        "provider": "openai",
+        "config": { "model": "deepseek-v4", "baseUrl": "https://credits.amaster.ai/v1" }
+      },
+      "embedder": {
+        "provider": "openai",
+        "config": { "model": "text-embedding-3-small", "baseUrl": "https://credits.amaster.ai/v1" }
+      }
+    }
+  }
+}
+```
+
+这样 key 从 pi registry 的 `openai` provider 解析，但实际请求发到 amaster 的端点。
 
 ## 提供的工具
 
