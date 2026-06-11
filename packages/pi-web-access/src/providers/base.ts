@@ -1,5 +1,16 @@
 import type { BuiltInProviderId } from '../types.js';
 
+// ─── Shared constants for LLM-based providers ────────────────────────────────
+
+export const SEARCH_SYSTEM_PROMPT = 'You are an assistant for performing a web search tool use';
+
+export function getEnvironmentContext(): string {
+  const now = new Date();
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const date = now.toISOString().split('T')[0];
+  return `[Current date: ${date}, Timezone: ${tz}]`;
+}
+
 // ─── Provider contract types ─────────────────────────────────────────────────
 
 export interface ResolvedProvider {

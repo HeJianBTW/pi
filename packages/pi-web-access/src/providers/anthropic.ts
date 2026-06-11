@@ -5,7 +5,7 @@ import type {
   SearchResponse,
   SearchResult,
 } from './base.js';
-import { BaseProvider } from './base.js';
+import { BaseProvider, getEnvironmentContext, SEARCH_SYSTEM_PROMPT } from './base.js';
 
 const REQUEST_TIMEOUT_MS = 60_000;
 
@@ -28,7 +28,8 @@ export class AnthropicProvider extends BaseProvider {
     const body = {
       model: provider.model ?? 'claude-sonnet-4-6',
       max_tokens: 4096,
-      messages: [{ role: 'user', content: params.query }],
+      system: SEARCH_SYSTEM_PROMPT,
+      messages: [{ role: 'user', content: `${getEnvironmentContext()}\n\n${params.query}` }],
       tools: [tool],
     };
     const headers: Record<string, string> = {

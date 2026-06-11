@@ -19,7 +19,7 @@ export type {
   SearchResult,
   WebProvider,
 } from './base.js';
-export { BaseProvider } from './base.js';
+export { BaseProvider, getEnvironmentContext, SEARCH_SYSTEM_PROMPT } from './base.js';
 
 // ─── Registry ────────────────────────────────────────────────────────────────
 

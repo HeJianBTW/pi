@@ -5,7 +5,7 @@ import type {
   SearchResponse,
   SearchResult,
 } from './base.js';
-import { BaseProvider } from './base.js';
+import { BaseProvider, getEnvironmentContext, SEARCH_SYSTEM_PROMPT } from './base.js';
 
 const REQUEST_TIMEOUT_MS = 60_000;
 
@@ -28,7 +28,12 @@ export class PerplexityProvider extends BaseProvider {
     if (params.timeRange) filters.search_recency_filter = params.timeRange;
     if (Object.keys(filters).length > 0) tool.filters = filters;
 
-    const body = { model: provider.model ?? 'openai/gpt-5.5', input: params.query, tools: [tool] };
+    const body = {
+      model: provider.model ?? 'openai/gpt-5.5',
+      instructions: SEARCH_SYSTEM_PROMPT,
+      input: `${getEnvironmentContext()}\n\n${params.query}`,
+      tools: [tool],
+    };
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${provider.apiKey}`,
