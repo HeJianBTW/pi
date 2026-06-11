@@ -19,6 +19,7 @@ export interface ResolvedProvider {
   apiKey?: string;
   model?: string;
   headers?: Record<string, string>;
+  timeoutMs?: number;
 }
 
 export interface SearchParams {

@@ -35,6 +35,8 @@ export interface FetchConfig {
 }
 
 export interface WebToolSettings {
+  /** Request timeout in milliseconds (default varies by provider: 30s-60s). */
+  timeoutMs?: number;
   /** Search tool config. */
   search?: SearchConfig;
   /** Fetch tool config. */

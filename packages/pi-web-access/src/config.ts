@@ -103,6 +103,7 @@ export function resolveProvider(
   if (config.headers) provider.headers = config.headers;
   const model = config.model ?? DEFAULT_MODEL[requested];
   if (model) provider.model = model;
+  if (settings.timeoutMs) provider.timeoutMs = settings.timeoutMs;
   return provider;
 }
 

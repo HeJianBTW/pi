@@ -7,7 +7,7 @@ import type {
 } from './base.js';
 import { BaseProvider, getEnvironmentContext, SEARCH_SYSTEM_PROMPT } from './base.js';
 
-const REQUEST_TIMEOUT_MS = 60_000;
+const DEFAULT_TIMEOUT_MS = 60_000;
 
 export class PerplexityProvider extends BaseProvider {
   readonly id = 'perplexity' as const;
@@ -44,7 +44,7 @@ export class PerplexityProvider extends BaseProvider {
       method: 'POST',
       headers,
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: AbortSignal.timeout(provider.timeoutMs ?? DEFAULT_TIMEOUT_MS),
     });
     if (!response.ok) {
       const text = await response.text().catch(() => '');
@@ -101,7 +101,7 @@ export class PerplexityProvider extends BaseProvider {
       method: 'POST',
       headers,
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: AbortSignal.timeout(provider.timeoutMs ?? DEFAULT_TIMEOUT_MS),
     });
     if (!response.ok) {
       const text = await response.text().catch(() => '');

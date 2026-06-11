@@ -1,7 +1,7 @@
 import { BaseProvider, getEnvironmentContext, SEARCH_SYSTEM_PROMPT } from './base.js';
 import type { ResolvedProvider, SearchParams, SearchResponse, SearchResult } from './index.js';
 
-const REQUEST_TIMEOUT_MS = 60_000;
+const DEFAULT_TIMEOUT_MS = 60_000;
 
 export class GeminiProvider extends BaseProvider {
   readonly id = 'gemini' as const;
@@ -30,7 +30,7 @@ export class GeminiProvider extends BaseProvider {
       method: 'POST',
       headers,
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: AbortSignal.timeout(provider.timeoutMs ?? DEFAULT_TIMEOUT_MS),
     });
     if (!response.ok) {
       const text = await response.text().catch(() => '');

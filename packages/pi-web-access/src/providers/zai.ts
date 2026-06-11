@@ -7,7 +7,7 @@ import type {
 } from './base.js';
 import { BaseProvider } from './base.js';
 
-const REQUEST_TIMEOUT_MS = 30_000;
+const DEFAULT_TIMEOUT_MS = 30_000;
 
 const TIME_RANGE_MAP: Record<string, string> = {
   day: 'oneDay',
@@ -46,7 +46,7 @@ export class ZaiProvider extends BaseProvider {
       method: 'POST',
       headers,
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: AbortSignal.timeout(provider.timeoutMs ?? DEFAULT_TIMEOUT_MS),
     });
 
     if (!response.ok) {
@@ -85,7 +85,7 @@ export class ZaiProvider extends BaseProvider {
       method: 'POST',
       headers,
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: AbortSignal.timeout(provider.timeoutMs ?? DEFAULT_TIMEOUT_MS),
     });
 
     if (!response.ok) {

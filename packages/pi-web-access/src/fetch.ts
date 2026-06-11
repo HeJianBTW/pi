@@ -4,7 +4,7 @@ import type { FetchResponse } from './providers/index.js';
 import { getProvider } from './providers/index.js';
 import type { WebToolSettings } from './types.js';
 
-const REQUEST_TIMEOUT_MS = 30_000;
+const DEFAULT_TIMEOUT_MS = 30_000;
 const JINA_READER_BASE = 'https://r.jina.ai';
 
 const USER_AGENT =
@@ -15,12 +15,12 @@ export type WebFetchResponse = FetchResponse;
 
 // ─── Jina Reader (free, supports JS rendering) ──────────────────────────────
 
-async function fetchViaJina(url: string): Promise<FetchResponse> {
+async function fetchViaJina(url: string, timeoutMs: number): Promise<FetchResponse> {
   const endpoint = `${JINA_READER_BASE}/${url}`;
 
   const response = await fetch(endpoint, {
     headers: { Accept: 'text/markdown', 'X-No-Cache': 'true' },
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    signal: AbortSignal.timeout(timeoutMs),
   });
 
   if (!response.ok) {
@@ -36,13 +36,13 @@ async function fetchViaJina(url: string): Promise<FetchResponse> {
 
 // ─── Local fallback (HTTP GET + turndown) ────────────────────────────────────
 
-async function fetchLocal(url: string): Promise<FetchResponse> {
+async function fetchLocal(url: string, timeoutMs: number): Promise<FetchResponse> {
   const response = await fetch(url, {
     headers: {
       'User-Agent': USER_AGENT,
       Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
     },
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    signal: AbortSignal.timeout(timeoutMs),
     redirect: 'follow',
   });
 
@@ -68,11 +68,11 @@ async function fetchLocal(url: string): Promise<FetchResponse> {
 
 // ─── Default fallback: Jina Reader → Local ───────────────────────────────────
 
-async function fetchWithFallback(url: string): Promise<FetchResponse> {
+async function fetchWithFallback(url: string, timeoutMs: number): Promise<FetchResponse> {
   try {
-    return await fetchViaJina(url);
+    return await fetchViaJina(url, timeoutMs);
   } catch {
-    return fetchLocal(url);
+    return fetchLocal(url, timeoutMs);
   }
 }
 
@@ -82,6 +82,7 @@ export async function webFetch(
   params: WebFetchParams,
   settings: WebToolSettings,
 ): Promise<FetchResponse> {
+  const timeoutMs = settings.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const resolved = resolveFetchProvider(settings);
   if (resolved) {
     const provider = getProvider(resolved.id);
@@ -90,5 +91,5 @@ export async function webFetch(
     }
     return provider.fetch(params.url, resolved);
   }
-  return fetchWithFallback(params.url);
+  return fetchWithFallback(params.url, timeoutMs);
 }
