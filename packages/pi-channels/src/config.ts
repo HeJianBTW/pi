@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { getAgentDir, SettingsManager } from '@earendil-works/pi-coding-agent';
+import { loadPiSettings, resolveAgentDir } from '@amaster.ai/pi-shared/settings';
 import type { ChannelConfig } from './types.js';
 
 const SETTINGS_KEY = 'pi-channels';
@@ -56,9 +56,8 @@ function discoverLocalSettingsFiles(cwd: string): string[] {
     found.push(resolved);
   };
 
-  if (process.env.PI_AGENT_HOME) {
-    add(join(process.env.PI_AGENT_HOME, 'settings.json'));
-  }
+  const agentDir = resolveAgentDir();
+  add(join(agentDir, 'settings.json'));
 
   let current = resolve(cwd);
   const upwards: string[] = [];
@@ -91,10 +90,8 @@ function mergeChannelConfig(base: ChannelConfig, override: ChannelConfig): Chann
 }
 
 export function loadChannelConfig(cwd: string): ChannelConfig {
-  const agentDir = getAgentDir();
-  const sm = SettingsManager.create(cwd, agentDir);
-  const global = section(sm.getGlobalSettings() as Record<string, unknown>);
-  const project = section(sm.getProjectSettings() as Record<string, unknown>);
+  const agentDir = resolveAgentDir();
+  const config = loadPiSettings<ChannelConfig>(SETTINGS_KEY, { cwd, agentDir });
 
   const settingsFiles = discoverLocalSettingsFiles(cwd);
   const local = settingsFiles.reduce(
@@ -102,18 +99,18 @@ export function loadChannelConfig(cwd: string): ChannelConfig {
     {} as ChannelConfig,
   );
 
-  const config = mergeChannelConfig(mergeChannelConfig(global, project), local);
+  const merged = mergeChannelConfig(config, local);
 
-  applyEnvOverrides(config);
+  applyEnvOverrides(merged);
   console.debug('[pi-channels] config', {
     cwd,
     agentDir,
     settingsFiles,
-    adapters: Object.keys(config.adapters ?? {}),
-    routes: Object.keys(config.routes ?? {}),
-    bridgeEnabled: Boolean(config.bridge?.enabled),
+    adapters: Object.keys(merged.adapters ?? {}),
+    routes: Object.keys(merged.routes ?? {}),
+    bridgeEnabled: Boolean(merged.bridge?.enabled),
   });
-  return config;
+  return merged;
 }
 
 export function updateLocalChannelConfig(
