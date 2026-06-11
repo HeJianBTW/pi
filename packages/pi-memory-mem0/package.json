@@ -1,17 +1,8 @@
 {
-  "name": "@amaster.ai/pi-channels",
+  "name": "@amaster.ai/pi-memory-mem0",
   "version": "0.1.2-beta.15",
-  "description": "Pi extension for native messaging channels including Feishu, DingTalk, WeCom, and webhooks.",
-  "keywords": [
-    "pi-package",
-    "pi",
-    "extension",
-    "channels",
-    "feishu",
-    "dingtalk",
-    "wecom",
-    "webhooks"
-  ],
+  "description": "Mem0 passive memory extension for pi — dual-mode: Platform (cloud) or Open-Source (local SQLite).",
+  "keywords": ["pi-package", "pi", "extension", "memory", "mem0", "semantic-search", "sqlite"],
   "license": "Apache-2.0",
   "type": "module",
   "sideEffects": false,
@@ -22,47 +13,55 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./provider": {
+      "types": "./dist/provider.d.ts",
+      "default": "./dist/provider.js"
+    },
     "./package.json": {
       "default": "./package.json"
     }
   },
-  "files": [
-    "dist",
-    "preview.png",
-    "README.md"
-  ],
   "pi": {
-    "image": "https://raw.githubusercontent.com/TGYD-helige/pi/master/packages/pi-channels/preview.png",
     "extensions": [
       "./dist/index.js"
     ]
   },
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "publishConfig": {
     "access": "public"
   },
   "repository": {
     "type": "git",
     "url": "https://github.com/TGYD-helige/pi.git",
-    "directory": "packages/pi-channels"
+    "directory": "packages/pi-memory-mem0"
   },
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc -b --pretty false",
     "test": "vitest run src"
   },
+  "dependencies": {
+    "@amaster.ai/pi-shared": "workspace:*",
+    "mem0ai": "^3.0.6"
+  },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": ">=0.74.0",
     "typebox": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    },
+    "typebox": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "0.74.0",
     "typebox": "*",
     "vitest": "^4.0.0"
-  },
-  "dependencies": {
-    "@amaster.ai/pi-shared": "workspace:*",
-    "@larksuiteoapi/node-sdk": "^1.64.0",
-    "@wecom/aibot-node-sdk": "^1.0.7",
-    "dingtalk-stream": "^2.1.6-beta.1"
   }
 }
