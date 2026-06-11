@@ -239,7 +239,6 @@ function loadSettings(cwd: string): PiSecurityExtensionConfig | undefined {
   try {
     const config = loadPiSettings<Partial<PiSecurityExtensionConfig>>(SETTINGS_KEY, {
       cwd,
-      agentDir: getAgentDir(),
     });
     return Object.keys(config).length > 0 ? (config as PiSecurityExtensionConfig) : undefined;
   } catch {

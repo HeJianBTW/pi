@@ -27,7 +27,7 @@
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { resolveAgentDir } from '@amaster.ai/pi-shared/settings';
+import { resolveHome } from '@amaster.ai/pi-shared/settings';
 import type { ExtensionAPI, InputEventResult } from '@earendil-works/pi-coding-agent';
 import { type AttachmentMeta, classifyAttachment, renderAttachmentBlock } from './classify.js';
 
@@ -345,7 +345,7 @@ function parseFileReference(mention: string): {
  */
 export function skillSearchPaths(name: string, cwd: string): string[] {
   const projectDir = path.resolve(cwd, '.pi', 'skills', name);
-  const userDir = path.resolve(resolveAgentDir(), 'skills', name);
+  const userDir = path.resolve(resolveHome(), 'skills', name);
   return [projectDir, userDir].map((dir) => path.join(dir, 'SKILL.md'));
 }
 

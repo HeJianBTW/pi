@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { loadPiSettings, resolveAgentDir } from '@amaster.ai/pi-shared/settings';
+import { loadPiSettings, resolveConfigDir } from '@amaster.ai/pi-shared/settings';
 import type { ChannelConfig } from './types.js';
 
 const SETTINGS_KEY = 'pi-channels';
@@ -56,7 +56,7 @@ function discoverLocalSettingsFiles(cwd: string): string[] {
     found.push(resolved);
   };
 
-  const agentDir = resolveAgentDir();
+  const agentDir = resolveConfigDir();
   add(join(agentDir, 'settings.json'));
 
   let current = resolve(cwd);
@@ -90,8 +90,8 @@ function mergeChannelConfig(base: ChannelConfig, override: ChannelConfig): Chann
 }
 
 export function loadChannelConfig(cwd: string): ChannelConfig {
-  const agentDir = resolveAgentDir();
-  const config = loadPiSettings<ChannelConfig>(SETTINGS_KEY, { cwd, agentDir });
+  const agentDir = resolveConfigDir();
+  const config = loadPiSettings<ChannelConfig>(SETTINGS_KEY, { cwd });
 
   const settingsFiles = discoverLocalSettingsFiles(cwd);
   const local = settingsFiles.reduce(

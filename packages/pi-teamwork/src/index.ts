@@ -1,4 +1,4 @@
-import { loadPiSettings, resolveAgentDir } from '@amaster.ai/pi-shared/settings';
+import { loadPiSettings } from '@amaster.ai/pi-shared/settings';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
 import { initMulticaProvider } from './adapters/multica.js';
@@ -245,7 +245,6 @@ function loadConfig(cwd: string): TeamworkConfig {
   try {
     const config = loadPiSettings<Partial<TeamworkConfig>>(SETTINGS_KEY, {
       cwd,
-      agentDir: resolveAgentDir(),
     });
     return Object.keys(config).length > 0 ? (config as TeamworkConfig) : {};
   } catch {

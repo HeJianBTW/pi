@@ -1,7 +1,6 @@
 import { loadPiSettings, type PiSettingsOptions } from '@amaster.ai/pi-shared/settings';
 import { type TextContent as AiTextContent, complete } from '@earendil-works/pi-ai';
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
-import { getAgentDir } from '@earendil-works/pi-coding-agent';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
@@ -133,7 +132,6 @@ export class DevToolsClient {
 /** Read the pi-browser-use section from .pi/settings.json. */
 function loadConfigFromFile(options?: PiSettingsOptions): BrowserUseConfig {
   return loadPiSettings<BrowserUseConfig>('pi-browser-use', {
-    agentDir: getAgentDir(),
     ...options,
   });
 }

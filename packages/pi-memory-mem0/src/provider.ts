@@ -7,7 +7,7 @@
  */
 
 import { join } from 'node:path';
-import { resolveAgentDir } from '@amaster.ai/pi-shared/settings';
+import { resolveHome } from '@amaster.ai/pi-shared/settings';
 import type { AddResult, Mem0ExtensionConfig, MemoryItem } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -175,7 +175,7 @@ class OSSProvider implements Mem0Provider {
       // Default: SQLite in <PI_AGENT_HOME>/memories/mem0.db (alongside pi-memory's files)
       config.vectorStore = {
         provider: 'sqlite',
-        config: { dbPath: join(resolveAgentDir(), 'memories', 'mem0.db') },
+        config: { dbPath: join(resolveHome(), 'memories', 'mem0.db') },
       };
     }
 

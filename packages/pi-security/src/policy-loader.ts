@@ -29,10 +29,10 @@ export function loadPolicyDir(dirPath: string): Record<string, SecurityProfileCo
 
 export function loadFilePolicies(
   cwd: string,
-  agentDir?: string,
+  configDir?: string,
 ): Record<string, SecurityProfileConfig> {
   return loadPiPolicyProfiles<SecurityProfileConfig>({
     cwd,
-    ...(agentDir !== undefined ? { agentDir } : {}),
+    ...(configDir !== undefined ? { configDir } : {}),
   });
 }

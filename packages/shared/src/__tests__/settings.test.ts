@@ -171,16 +171,16 @@ describe('loadPiSettings env var resolution', () => {
 describe('3-layer settings resolution', () => {
   let base: string;
   let globalDir: string;
-  let agentDir: string;
+  let configDir: string;
   let projectDir: string;
 
   beforeEach(() => {
     base = join(tmpdir(), `pi-3layer-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     globalDir = join(base, 'home', '.pi', 'agent');
-    agentDir = join(base, 'agent-config');
+    configDir = join(base, 'agent-config');
     projectDir = join(base, 'project');
     mkdirSync(globalDir, { recursive: true });
-    mkdirSync(agentDir, { recursive: true });
+    mkdirSync(configDir, { recursive: true });
     mkdirSync(join(projectDir, '.pi'), { recursive: true });
     mockedHome = join(base, 'home');
   });
@@ -190,25 +190,25 @@ describe('3-layer settings resolution', () => {
     rmSync(base, { recursive: true, force: true });
   });
 
-  it('agentDir settings override global settings', async () => {
+  it('configDir settings override global settings', async () => {
     writeFileSync(
       join(globalDir, 'settings.json'),
       JSON.stringify({ ext: { a: 'global', b: 'global' } }),
     );
-    writeFileSync(join(agentDir, 'settings.json'), JSON.stringify({ ext: { a: 'agent' } }));
+    writeFileSync(join(configDir, 'settings.json'), JSON.stringify({ ext: { a: 'agent' } }));
 
     const { loadPiSettings } = await import('../../src/settings.js');
     const result = loadPiSettings<{ a: string; b: string }>('ext', {
-      agentDir,
+      configDir,
       cwd: projectDir,
     });
     expect(result.a).toBe('agent');
     expect(result.b).toBe('global');
   });
 
-  it('project settings override agentDir settings', async () => {
+  it('project settings override configDir settings', async () => {
     writeFileSync(
-      join(agentDir, 'settings.json'),
+      join(configDir, 'settings.json'),
       JSON.stringify({ ext: { a: 'agent', b: 'agent' } }),
     );
     writeFileSync(
@@ -218,29 +218,29 @@ describe('3-layer settings resolution', () => {
 
     const { loadPiSettings } = await import('../../src/settings.js');
     const result = loadPiSettings<{ a: string; b: string }>('ext', {
-      agentDir,
+      configDir,
       cwd: projectDir,
     });
     expect(result.a).toBe('project');
     expect(result.b).toBe('agent');
   });
 
-  it('env var interpolation works in agentDir layer', async () => {
+  it('env var interpolation works in configDir layer', async () => {
     const origEndpoint = process.env.MY_ENDPOINT;
     process.env.MY_ENDPOINT = 'https://api.example.com';
     writeFileSync(
-      join(agentDir, 'settings.json'),
+      join(configDir, 'settings.json'),
       JSON.stringify({ ext: { url: envRef('MY_ENDPOINT') } }),
     );
 
     const { loadPiSettings } = await import('../../src/settings.js');
-    const result = loadPiSettings<{ url: string }>('ext', { agentDir, cwd: projectDir });
+    const result = loadPiSettings<{ url: string }>('ext', { configDir, cwd: projectDir });
     expect(result.url).toBe('https://api.example.com');
     if (origEndpoint === undefined) delete process.env.MY_ENDPOINT;
     else process.env.MY_ENDPOINT = origEndpoint;
   });
 
-  it('skips agentDir layer when it equals global dir', async () => {
+  it('skips configDir layer when it equals global dir', async () => {
     writeFileSync(join(globalDir, 'settings.json'), JSON.stringify({ ext: { a: 'global' } }));
     writeFileSync(
       join(projectDir, '.pi', 'settings.json'),
@@ -257,20 +257,20 @@ describe('3-layer settings resolution', () => {
 describe('loadPiPolicyProfiles', () => {
   let base: string;
   let globalPolicyDir: string;
-  let agentDir: string;
-  let agentPolicyDir: string;
+  let configDir: string;
+  let configPolicyDir: string;
   let projectDir: string;
   let projectPolicyDir: string;
 
   beforeEach(() => {
     base = join(tmpdir(), `pi-policy-3layer-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     globalPolicyDir = join(base, 'home', '.pi', 'agent', 'policy');
-    agentDir = join(base, 'agent-config');
-    agentPolicyDir = join(agentDir, 'policy');
+    configDir = join(base, 'agent-config');
+    configPolicyDir = join(configDir, 'policy');
     projectDir = join(base, 'project');
     projectPolicyDir = join(projectDir, '.pi', 'policy');
     mkdirSync(globalPolicyDir, { recursive: true });
-    mkdirSync(agentPolicyDir, { recursive: true });
+    mkdirSync(configPolicyDir, { recursive: true });
     mkdirSync(projectPolicyDir, { recursive: true });
     mockedHome = join(base, 'home');
   });
@@ -280,15 +280,15 @@ describe('loadPiPolicyProfiles', () => {
     rmSync(base, { recursive: true, force: true });
   });
 
-  it('agentDir policy is readable', async () => {
+  it('configDir policy is readable', async () => {
     writeFileSync(
-      join(agentPolicyDir, 'sandbox-exec.json'),
+      join(configPolicyDir, 'sandbox-exec.json'),
       JSON.stringify({ extends: 'sandbox-exec', capabilities: { allow: ['browser_*'] } }),
     );
 
     const { loadPiPolicyProfiles } = await import('../../src/settings.js');
     const result = loadPiPolicyProfiles<{ extends?: string; capabilities?: { allow?: string[] } }>({
-      agentDir,
+      configDir,
       cwd: projectDir,
     });
     expect(result['sandbox-exec']).toEqual({
@@ -297,9 +297,9 @@ describe('loadPiPolicyProfiles', () => {
     });
   });
 
-  it('project policy overrides agentDir policy with same name', async () => {
+  it('project policy overrides configDir policy with same name', async () => {
     writeFileSync(
-      join(agentPolicyDir, 'custom.json'),
+      join(configPolicyDir, 'custom.json'),
       JSON.stringify({ extends: 'chat', capabilities: { allow: ['read_file'] } }),
     );
     writeFileSync(
@@ -309,7 +309,7 @@ describe('loadPiPolicyProfiles', () => {
 
     const { loadPiPolicyProfiles } = await import('../../src/settings.js');
     const result = loadPiPolicyProfiles<{ extends?: string; capabilities?: { allow?: string[] } }>({
-      agentDir,
+      configDir,
       cwd: projectDir,
     });
     expect(result.custom).toEqual({ extends: 'copilot', capabilities: { allow: ['*'] } });
@@ -317,14 +317,14 @@ describe('loadPiPolicyProfiles', () => {
 
   it('merges profiles from all three directories', async () => {
     writeFileSync(join(globalPolicyDir, 'global-only.json'), JSON.stringify({ extends: 'chat' }));
-    writeFileSync(join(agentPolicyDir, 'agent-only.json'), JSON.stringify({ extends: 'admin' }));
+    writeFileSync(join(configPolicyDir, 'agent-only.json'), JSON.stringify({ extends: 'admin' }));
     writeFileSync(
       join(projectPolicyDir, 'project-only.json'),
       JSON.stringify({ extends: 'copilot' }),
     );
 
     const { loadPiPolicyProfiles } = await import('../../src/settings.js');
-    const result = loadPiPolicyProfiles<{ extends?: string }>({ agentDir, cwd: projectDir });
+    const result = loadPiPolicyProfiles<{ extends?: string }>({ configDir, cwd: projectDir });
     expect(result['global-only']).toEqual({ extends: 'chat' });
     expect(result['agent-only']).toEqual({ extends: 'admin' });
     expect(result['project-only']).toEqual({ extends: 'copilot' });
@@ -332,11 +332,11 @@ describe('loadPiPolicyProfiles', () => {
 
   it('works when directories do not exist', async () => {
     rmSync(globalPolicyDir, { recursive: true });
-    rmSync(agentPolicyDir, { recursive: true });
+    rmSync(configPolicyDir, { recursive: true });
     rmSync(projectPolicyDir, { recursive: true });
 
     const { loadPiPolicyProfiles } = await import('../../src/settings.js');
-    const result = loadPiPolicyProfiles({ agentDir, cwd: projectDir });
+    const result = loadPiPolicyProfiles({ configDir, cwd: projectDir });
     expect(result).toEqual({});
   });
 });
