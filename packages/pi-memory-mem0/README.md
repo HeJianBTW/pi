@@ -1,23 +1,23 @@
 # @amaster.ai/pi-memory-mem0
 
-Mem0 被动语义记忆扩展 — 支持 Platform (云端) 和 Open-Source (本地 SQLite) 双模式。
+Passive semantic memory extension powered by [Mem0](https://mem0.ai) — supports both Platform (cloud) and Open-Source (local SQLite) modes.
 
-## 工作原理
+## How It Works
 
-每轮对话结束后，自动将 user + assistant 消息对发送给 Mem0 进行事实提取和向量化存储。下一轮开始前，自动用语义搜索召回相关记忆并注入 system prompt。
+After each conversation turn, user + assistant messages are automatically sent to Mem0 for fact extraction and vector storage. Before the next turn, relevant memories are recalled via semantic search and injected into the system prompt.
 
-**你不需要做任何事** — 记忆的存储和召回完全自动。
+**Zero effort required** — memory storage and recall are fully automatic.
 
-## 两种模式
+## Two Modes
 
-| 模式 | 存储位置 | 依赖 | 适用场景 |
-|------|---------|------|---------|
-| `platform` | Mem0 Cloud | MEM0_API_KEY | 快速上手，多设备同步 |
-| `open-source` | 本地 SQLite (`~/.mem0/vector_store.db`) | LLM + Embedding API | 数据私有，零外部服务 |
+| Mode | Storage | Dependencies | Use Case |
+|------|---------|--------------|----------|
+| `platform` | Mem0 Cloud | `MEM0_API_KEY` | Quick start, multi-device sync |
+| `open-source` | Local SQLite (`~/.pi/agent/memories/mem0.db`) | LLM + Embedding API | Data privacy, no external services |
 
-## 快速开始
+## Quick Start
 
-### Platform 模式
+### Platform Mode
 
 ```json
 {
@@ -29,9 +29,9 @@ Mem0 被动语义记忆扩展 — 支持 Platform (云端) 和 Open-Source (本�
 }
 ```
 
-### Open-Source 模式 (推荐)
+### Open-Source Mode (Recommended)
 
-默认复用 pi 已配置的 model provider API key，**不需要额外设置环境变量**。
+Reuses API keys from pi's configured model providers by default — **no extra environment variables needed**.
 
 ```json
 {
@@ -42,9 +42,9 @@ Mem0 被动语义记忆扩展 — 支持 Platform (云端) 和 Open-Source (本�
 }
 ```
 
-默认使用 OpenAI `text-embedding-3-small` (embedding) + `gpt-4.1-nano` (提取)。API key 自动从 pi model registry 获取。
+Defaults to OpenAI `text-embedding-3-small` (embedding) + `gpt-4.1-nano` (extraction). API keys are automatically resolved from pi's model registry.
 
-### 自定义 LLM / Embedding
+### Custom LLM / Embedding
 
 ```json
 {
@@ -65,7 +65,7 @@ Mem0 被动语义记忆扩展 — 支持 Platform (云端) 和 Open-Source (本�
 }
 ```
 
-### 纯本地 (Ollama)
+### Fully Local (Ollama)
 
 ```json
 {
@@ -87,43 +87,63 @@ Mem0 被动语义记忆扩展 — 支持 Platform (云端) 和 Open-Source (本�
 }
 ```
 
-## 配置参考
+## Configuration Reference
 
-| 字段 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `mode` | `"platform"` \| `"open-source"` | `"platform"` | 运行模式 |
-| `apiKey` | string | — | Platform 模式必须。支持 `${MEM0_API_KEY}` |
-| `baseUrl` | string | `https://api.mem0.ai` | Platform 自定义端点 |
-| `userId` | string | `$USER` 或 `"default-user"` | 记忆作用域 |
-| `topK` | number | `5` | 每轮最多召回条数 |
-| `useRegistryKeys` | boolean | `true` | OSS 模式是否从 pi registry 取 API key |
-| `oss.llm` | object | OpenAI gpt-4.1-nano | OSS 提取模型 |
-| `oss.embedder` | object | OpenAI text-embedding-3-small | OSS embedding 模型 |
-| `oss.vectorStore` | object | SQLite (默认) | 自定义向量存储 |
-| `oss.disableHistory` | boolean | `false` | 禁用操作历史记录 |
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `mode` | `"platform"` \| `"open-source"` | `"platform"` | Operating mode |
+| `apiKey` | string | — | Required for platform mode. Supports `${MEM0_API_KEY}` |
+| `baseUrl` | string | `https://api.mem0.ai` | Custom platform endpoint |
+| `userId` | string | `$USER` or `"default-user"` | Memory scoping identifier |
+| `topK` | number | `5` | Max recalled memories per turn |
+| `useRegistryKeys` | boolean | `true` | Whether OSS mode resolves keys from pi registry |
+| `oss.llm` | object | OpenAI gpt-4.1-nano | OSS extraction model |
+| `oss.embedder` | object | OpenAI text-embedding-3-small | OSS embedding model |
+| `oss.vectorStore` | object | SQLite (default) | Custom vector store |
+| `oss.disableHistory` | boolean | `false` | Disable operation history |
 
-## 数据存储位置
+## Installation Notes
 
-| 模式 | 位置 |
-|------|------|
+Open-Source mode depends on `better-sqlite3` (native addon, transitive dependency of `mem0ai`).
+
+**For pi-agent users**: pi-agent's `package.json` includes `better-sqlite3` in `pnpm.onlyBuiltDependencies` — it compiles automatically during `pnpm install`. No extra steps needed.
+
+**For standalone users**: If your project's pnpm config blocks build scripts, add to your root `package.json`:
+
+```json
+{
+  "pnpm": {
+    "onlyBuiltDependencies": ["better-sqlite3"]
+  }
+}
+```
+
+Or run `pnpm approve-builds` to approve manually.
+
+**System requirements**: Node.js >= 22, build toolchain (macOS: Xcode CLI Tools, Linux: `build-essential`, Windows: `windows-build-tools`). In most cases, `better-sqlite3` downloads a prebuilt binary and does not require local compilation.
+
+## Data Storage Location
+
+| Mode | Location |
+|------|----------|
 | Platform | Mem0 Cloud (api.mem0.ai) |
-| Open-Source | `~/.pi/agent/memories/mem0.db` (SQLite，和 pi-memory 的 MEMORY.md/USER.md 同目录) |
+| Open-Source | `~/.pi/agent/memories/mem0.db` (SQLite, alongside pi-memory's MEMORY.md/USER.md) |
 
-可通过 `oss.vectorStore.config.dbPath` 自定义路径。`PI_AGENT_HOME` 环境变量会改变默认目录。
+Customizable via `oss.vectorStore.config.dbPath`. The `PI_AGENT_HOME` environment variable changes the default directory.
 
-## API Key 解析顺序 (OSS 模式)
+## API Key Resolution (OSS Mode)
 
-LLM 和 Embedder 的 API key **各自独立解析**，按以下顺序：
+LLM and Embedder API keys are **resolved independently**, in this order:
 
-1. settings.json 的 `oss.llm.config.apiKey` / `oss.embedder.config.apiKey` (显式配置)
-2. pi model registry 的对应 provider key (`useRegistryKeys: true` 时)
-3. 环境变量 (`OPENAI_API_KEY`, `DEEPSEEK_API_KEY` 等，mem0 SDK 内部读取)
+1. Explicit config in `oss.llm.config.apiKey` / `oss.embedder.config.apiKey`
+2. Pi model registry key for the corresponding provider (when `useRegistryKeys: true`)
+3. Environment variables (`OPENAI_API_KEY`, `DEEPSEEK_API_KEY`, etc. — read by mem0 SDK internally)
 
-例如配置 `"llm": { "provider": "deepseek" }` + `"embedder": { "provider": "openai" }`，会分别从 pi registry 拿 deepseek 的 key 给 LLM，拿 openai 的 key 给 embedder。
+For example, `"llm": { "provider": "deepseek" }` + `"embedder": { "provider": "openai" }` resolves the deepseek key for LLM and the openai key for embedder, each from pi's registry.
 
-### 通过代理 API 调用 (如 amaster)
+### Proxy API Calls (e.g. amaster)
 
-如果你的 embedding/LLM 走统一代理（如 amaster credits），可以配 `baseUrl` 转发：
+If your embedding/LLM goes through a unified proxy (like amaster credits), configure `baseUrl` forwarding:
 
 ```json
 {
@@ -143,29 +163,29 @@ LLM 和 Embedder 的 API key **各自独立解析**，按以下顺序：
 }
 ```
 
-这样 key 从 pi registry 的 `openai` provider 解析，但实际请求发到 amaster 的端点。
+Keys resolve from pi registry's `openai` provider, but requests are sent to the amaster endpoint.
 
-## 提供的工具
+## Tools
 
-| 工具 | 说明 |
-|------|------|
-| `mem0_search` | 语义搜索长期记忆 |
-| `mem0_profile` | 列出用户所有记忆 |
-| `mem0_save` | 手动存储一条事实（不经过 LLM 提取） |
+| Tool | Description |
+|------|-------------|
+| `mem0_search` | Semantic search over long-term memories |
+| `mem0_profile` | List all stored memories |
+| `mem0_save` | Store a fact verbatim (bypasses LLM extraction) |
 
-## 命令
+## Commands
 
 ```
-/mem0 status          # 查看状态
-/mem0 search <query>  # 语义搜索
-/mem0 profile         # 列出所有记忆
+/mem0 status          # Show current status
+/mem0 search <query>  # Semantic search
+/mem0 profile         # List all memories
 ```
 
-## 与 pi-memory 的关系
+## Relationship with pi-memory
 
-`pi-memory-mem0` 和 `pi-memory` 是**独立并行运行**的两个扩展：
+`pi-memory-mem0` and `pi-memory` run **independently in parallel** as separate extensions:
 
-- `pi-memory`：主动记忆，agent 通过工具显式管理，本地 `.md` 文件，有 char limit
-- `pi-memory-mem0`：被动记忆，自动提取存储，语义检索，无容量限制
+- `pi-memory`: Active memory — agent explicitly manages via tools, local `.md` files, hard char limits
+- `pi-memory-mem0`: Passive memory — automatic extraction and storage, semantic retrieval, no capacity limits
 
-两者互不干扰，各自注入 system prompt。
+They do not interfere with each other and each injects into the system prompt separately.
