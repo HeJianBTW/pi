@@ -45,6 +45,7 @@ export type ScheduledTask = {
   lastRunAt?: string;
   nextRunAt?: string;
   runCount: number;
+  timeoutMs?: number;
   lastStatus?: ScheduledTaskStatus;
   lastError?: string;
   runHistory?: ScheduledTaskRunHistoryEntry[];
@@ -320,7 +321,33 @@ export class PersistentTaskScheduler implements TaskScheduler {
     this.startLockHeartbeat();
     const tasks = await this.options.store.list();
     for (const task of tasks) {
-      this.schedule(task);
+      if (task.lastStatus === 'running') {
+        const fixedAt = new Date().toISOString();
+        const fixedTask = withNextRun({
+          ...task,
+          lastStatus: 'error' as const,
+          lastError: 'Process was interrupted while task was running',
+          runHistory: updateTaskHistoryEntry(
+            task.runHistory,
+            findLastRunningEntryId(task.runHistory),
+            {
+              status: 'error',
+              message: 'Process was interrupted while task was running',
+            },
+          ),
+          updatedAt: fixedAt,
+        });
+        await this.options.store.update(task.id, fixedTask).catch(() => undefined);
+        this.schedule(fixedTask);
+      } else {
+        const refreshed = withNextRun(task);
+        if (refreshed.nextRunAt !== task.nextRunAt) {
+          await this.options.store.update(task.id, refreshed).catch(() => undefined);
+          this.schedule(refreshed);
+        } else {
+          this.schedule(task);
+        }
+      }
     }
     await this.emitSchedulerStarted();
   }
@@ -354,7 +381,7 @@ export class PersistentTaskScheduler implements TaskScheduler {
           void this.execute(task.id);
         });
         this.crons.set(task.id, cron);
-        void this.refreshNextRun(task.id, cron.nextRun()?.toISOString());
+        void this.refreshNextRun(task.id, cron.nextRun()?.toISOString(), task);
       } catch (error) {
         void this.markScheduleError(
           task.id,
@@ -375,7 +402,7 @@ export class PersistentTaskScheduler implements TaskScheduler {
       }, delayMs);
       timer.unref();
       this.timers.set(task.id, timer);
-      void this.refreshNextRun(task.id, target.toISOString());
+      void this.refreshNextRun(task.id, target.toISOString(), task);
       return;
     }
     const timer = setInterval(() => {
@@ -386,6 +413,7 @@ export class PersistentTaskScheduler implements TaskScheduler {
     void this.refreshNextRun(
       task.id,
       new Date(Date.now() + task.intervalSeconds * 1000).toISOString(),
+      task,
     );
   }
 
@@ -483,8 +511,12 @@ export class PersistentTaskScheduler implements TaskScheduler {
     }
   }
 
-  private async refreshNextRun(taskId: string, nextRunAt: string | undefined): Promise<void> {
-    const task = await this.options.store.get(taskId);
+  private async refreshNextRun(
+    taskId: string,
+    nextRunAt: string | undefined,
+    knownTask?: ScheduledTask,
+  ): Promise<void> {
+    const task = knownTask ?? (await this.options.store.get(taskId));
     if (!task || nextRunAt === task.nextRunAt) {
       return;
     }
@@ -616,6 +648,7 @@ export function normalizeScheduledTask(rawTask: ScheduledTask): ScheduledTask {
     workspaceDir?: unknown;
     runCount?: unknown;
     runHistory?: unknown;
+    timeoutMs?: unknown;
   };
   const type = isScheduledTaskType(raw.type) ? raw.type : 'interval';
   const intervalSeconds =
@@ -646,6 +679,11 @@ export function normalizeScheduledTask(rawTask: ScheduledTask): ScheduledTask {
     task.workspaceDir = raw.workspaceDir.trim();
   } else {
     delete task.workspaceDir;
+  }
+  if (typeof raw.timeoutMs === 'number' && Number.isFinite(raw.timeoutMs) && raw.timeoutMs > 0) {
+    task.timeoutMs = Math.floor(raw.timeoutMs);
+  } else {
+    delete task.timeoutMs;
   }
   const nextRunAt = computeNextRunAt(task);
   if (nextRunAt) {
@@ -710,6 +748,17 @@ export function updateTaskHistoryEntry(
   return (history ?? [])
     .map((entry) => (entry.id === entryId ? { ...entry, ...patch } : entry))
     .slice(-25);
+}
+
+function findLastRunningEntryId(history: ScheduledTaskRunHistoryEntry[] | undefined): string {
+  const entries = history ?? [];
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i];
+    if (entry?.status === 'running') {
+      return entry.id;
+    }
+  }
+  return '';
 }
 
 export function createScheduledTaskRunSessionId(): string {

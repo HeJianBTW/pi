@@ -62,6 +62,11 @@ export function createSchedulerTools(scheduler: TaskScheduler): ToolDefinition[]
         enabled: Type.Optional(
           Type.Boolean({ description: 'Whether this scheduled prompt is enabled. Default true.' }),
         ),
+        timeoutMs: Type.Optional(
+          Type.Number({
+            description: 'Maximum execution time in milliseconds. Defaults to 30 minutes.',
+          }),
+        ),
       }),
       async execute(
         _toolCallId: string,
@@ -80,13 +85,16 @@ export function createSchedulerTools(scheduler: TaskScheduler): ToolDefinition[]
             prompt: params.prompt as string,
             sessionId: ctx.sessionManager?.getSessionId?.() ?? 'unknown',
             model: {
-              provider: 'anthropic',
+              provider: ctx.model?.provider ?? 'anthropic',
               model: ctx.model?.id ?? 'unknown',
             },
             toolPolicyProfile: 'default',
             enabled: params.enabled !== false,
             ...(params.name ? { name: params.name as string } : {}),
             ...(params.description ? { description: params.description as string } : {}),
+            ...(typeof params.timeoutMs === 'number'
+              ? { timeoutMs: params.timeoutMs as number }
+              : {}),
           };
           const task = await scheduler.create(input);
           return textResult(JSON.stringify(formatTaskSummary(task), null, 2));
