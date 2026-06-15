@@ -49,7 +49,13 @@ describe('MulticaAdapter', () => {
         return { stdout: '[]', stderr: '', code: 0 };
       };
       const adapter = new MulticaAdapter({}, exec);
-      await adapter.listIssues({ status: 'todo', assignee: 'alice', project: 'P1', limit: 5 });
+      await adapter.listIssues({
+        workspaceId: 'ws-1',
+        status: 'todo',
+        assignee: 'alice',
+        project: 'P1',
+        limit: 5,
+      });
       expect(calls[0]).toContain('--status');
       expect(calls[0]).toContain('todo');
       expect(calls[0]).toContain('--assignee');
@@ -107,7 +113,12 @@ describe('MulticaAdapter', () => {
         };
       };
       const adapter = new MulticaAdapter({}, exec);
-      const result = await adapter.createIssue({ title: 'New', priority: 'high', assignee: 'bob' });
+      const result = await adapter.createIssue({
+        workspaceId: 'ws-1',
+        title: 'New',
+        priority: 'high',
+        assignee: 'bob',
+      });
       expect(result).toMatchObject({ id: 'ISS-NEW', title: 'New' });
       expect(calls[0]).toContain('--title');
       expect(calls[0]).toContain('New');
@@ -119,7 +130,7 @@ describe('MulticaAdapter', () => {
 
     it('returns fallback issue on invalid JSON response', async () => {
       const adapter = new MulticaAdapter({}, successExec('ok'));
-      const result = await adapter.createIssue({ title: 'Fallback' });
+      const result = await adapter.createIssue({ workspaceId: 'ws-1', title: 'Fallback' });
       expect(result).toMatchObject({ id: 'unknown', title: 'Fallback', status: 'todo' });
     });
   });
@@ -246,8 +257,8 @@ describe('initMulticaProvider', () => {
     };
     await initMulticaProvider({ token: 'my-token' }, exec);
     expect(calls[0]).toEqual(['--version']);
-    expect(calls[1]).toEqual(['login', '--token', 'my-token']);
-    expect(calls[2]).toEqual(['daemon', 'start']);
+    expect(calls[1]).toEqual(['daemon', 'start']);
+    expect(calls[2]).toEqual(['login', '--token', 'my-token']);
   });
 
   it('skips login when no token', async () => {
@@ -299,28 +310,44 @@ describe('initMulticaProvider', () => {
     expect(calls[0]).toEqual(['daemon', 'start']);
   });
 
-  it('runs setup self-host when serverUrl is configured', async () => {
+  it('sets server_url and app_url via config when serverUrl and appUrl are configured', async () => {
+    const calls: string[][] = [];
+    const exec: ExecFn = async (_cmd, args) => {
+      calls.push(args);
+      return { stdout: '', stderr: '', code: 0 };
+    };
+    await initMulticaProvider(
+      { serverUrl: 'https://api.example.com', appUrl: 'https://example.com' },
+      exec,
+    );
+    expect(calls).toContainEqual(['config', 'set', 'server_url', 'https://api.example.com']);
+    expect(calls).toContainEqual(['config', 'set', 'app_url', 'https://example.com']);
+  });
+
+  it('sets only server_url when appUrl is not configured', async () => {
     const calls: string[][] = [];
     const exec: ExecFn = async (_cmd, args) => {
       calls.push(args);
       return { stdout: '', stderr: '', code: 0 };
     };
     await initMulticaProvider({ serverUrl: 'https://api.example.com' }, exec);
-    expect(calls).toContainEqual(['setup', 'self-host', '--server-url', 'https://api.example.com']);
+    expect(calls).toContainEqual(['config', 'set', 'server_url', 'https://api.example.com']);
+    expect(calls.some((a) => a.includes('app_url'))).toBe(false);
   });
 
-  it('runs setup self-host before login when both serverUrl and token are configured', async () => {
+  it('sets config before login when both serverUrl and token are configured', async () => {
     const calls: string[][] = [];
     const exec: ExecFn = async (_cmd, args) => {
       calls.push(args);
       return { stdout: '', stderr: '', code: 0 };
     };
     await initMulticaProvider({ serverUrl: 'https://api.example.com', token: 'my-token' }, exec);
-    const setupIdx = calls.findIndex((a) => a[0] === 'setup');
+    const configIdx = calls.findIndex((a) => a[0] === 'config');
+    const daemonIdx = calls.findIndex((a) => a.includes('start'));
     const loginIdx = calls.findIndex((a) => a[0] === 'login');
-    expect(setupIdx).toBeGreaterThan(-1);
-    expect(loginIdx).toBeGreaterThan(-1);
-    expect(setupIdx).toBeLessThan(loginIdx);
+    expect(configIdx).toBeGreaterThan(-1);
+    expect(daemonIdx).toBeGreaterThan(configIdx);
+    expect(loginIdx).toBeGreaterThan(daemonIdx);
   });
 
   it('continues even if setup self-host fails', async () => {

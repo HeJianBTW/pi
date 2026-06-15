@@ -25,12 +25,16 @@ export default function piTeamworkExtension(pi: ExtensionAPI): void {
   let provider: TeamworkProvider | undefined;
   let readyPromise: Promise<void> | undefined;
 
-  const exec: ExecFn = async (command, args) => {
-    const result = await pi.exec(command, args);
-    return { stdout: result.stdout, stderr: result.stderr, code: result.code };
-  };
+  async function ensureReady(): Promise<string | undefined> {
+    if (readyPromise) await readyPromise;
+    if (!provider) return 'Teamwork provider is not initialized.';
+    return undefined;
+  }
 
   pi.on('session_start', async (_event, ctx) => {
+    provider = undefined;
+    readyPromise = undefined;
+
     const config = loadConfig(ctx.cwd);
     if (config.enabled === false) {
       ctx.ui.setStatus(STATUS_KEY, 'teamwork: disabled');
@@ -38,36 +42,54 @@ export default function piTeamworkExtension(pi: ExtensionAPI): void {
     }
 
     const providerName = config.provider ?? 'multica';
-    if (providerName === 'multica') {
-      readyPromise = (async () => {
-        const { adapter, installResult } = await initMulticaProvider(config.multica ?? {}, exec);
-        provider = adapter;
-
-        if (!installResult.installed) {
-          ctx.ui.notify(
-            `multica CLI could not be installed: ${installResult.error ?? 'unknown error'}. Run "multica setup" manually.`,
-            'warning',
-          );
-          ctx.ui.setStatus(STATUS_KEY, 'teamwork: multica (not installed)');
-          return;
-        }
-
-        if (!installResult.alreadyPresent) {
-          ctx.ui.notify('multica CLI was auto-installed successfully.', 'info');
-        }
-
-        if (!config.multica?.token && !config.multica?.serverUrl) {
-          ctx.ui.notify(
-            'No multica token or serverUrl configured. Run "multica setup" to authenticate.',
-            'warning',
-          );
-        }
-
-        ctx.ui.setStatus(STATUS_KEY, 'teamwork: multica');
-      })();
-    } else {
+    if (providerName !== 'multica') {
       ctx.ui.setStatus(STATUS_KEY, `teamwork: unknown provider "${providerName}"`);
+      return;
     }
+
+    const exec: ExecFn = async (command, args) => {
+      const result = await pi.exec(command, args);
+      return { stdout: result.stdout, stderr: result.stderr, code: result.code };
+    };
+
+    readyPromise = (async () => {
+      const { adapter, installResult } = await initMulticaProvider(config.multica ?? {}, exec);
+      provider = adapter;
+
+      if (!installResult.installed) {
+        ctx.ui.notify(
+          `multica CLI could not be installed: ${installResult.error ?? 'unknown error'}. Run "multica setup" manually.`,
+          'warning',
+        );
+        ctx.ui.setStatus(STATUS_KEY, 'teamwork: multica (not installed)');
+        return;
+      }
+
+      if (!installResult.alreadyPresent) {
+        ctx.ui.notify('multica CLI was auto-installed successfully.', 'info');
+      }
+
+      if (!config.multica?.token && !config.multica?.serverUrl) {
+        ctx.ui.notify(
+          'No multica token or serverUrl configured. Run "multica setup" to authenticate.',
+          'warning',
+        );
+      }
+
+      if (config.multica?.serverUrl && !config.multica?.appUrl) {
+        ctx.ui.notify(
+          'multica serverUrl is set but appUrl is missing. Remote servers require both.',
+          'warning',
+        );
+      }
+
+      ctx.ui.setStatus(STATUS_KEY, 'teamwork: multica');
+    })().catch((err) => {
+      ctx.ui.setStatus(
+        STATUS_KEY,
+        `teamwork: multica (error: ${err instanceof Error ? err.message : String(err)})`,
+      );
+    });
   });
 
   pi.on('session_shutdown', async () => {
@@ -76,6 +98,7 @@ export default function piTeamworkExtension(pi: ExtensionAPI): void {
   });
 
   pi.on('before_agent_start', async (event) => {
+    if (readyPromise) await readyPromise;
     if (!provider) return;
     return {
       systemPrompt: event.systemPrompt
@@ -101,13 +124,27 @@ export default function piTeamworkExtension(pi: ExtensionAPI): void {
     },
   });
 
-  // --- LLM-callable tools ---
+  // --- LLM-callable tools (registered once, use latest provider via closure) ---
 
-  async function ensureReady(): Promise<string | undefined> {
-    if (readyPromise) await readyPromise;
-    if (!provider) return 'Teamwork provider is not initialized.';
-    return undefined;
-  }
+  pi.registerTool({
+    name: 'workspace_list',
+    label: 'Teamwork',
+    description:
+      'List all workspaces you belong to. Call this first to get a workspace ID before using other teamwork tools.',
+    promptSnippet: 'List workspaces in the shared project tracker.',
+    parameters: Type.Object({}),
+    async execute() {
+      const err = await ensureReady();
+      if (err) return textResult(err);
+      try {
+        const workspaces = await provider!.listWorkspaces();
+        if (workspaces.length === 0) return textResult('No workspaces found.');
+        return textResult(JSON.stringify(workspaces, null, 2));
+      } catch (error) {
+        return textResult(`Error: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    },
+  });
 
   pi.registerTool({
     name: 'issue_list',
@@ -116,6 +153,7 @@ export default function piTeamworkExtension(pi: ExtensionAPI): void {
       'List issues from a shared project tracker. Issues are work items that humans or other agents collaborate on. Supports filtering by status, assignee, and project.',
     promptSnippet: 'List issues from a shared project tracker where humans and agents collaborate.',
     parameters: Type.Object({
+      workspaceId: Type.String({ description: 'Workspace ID (get from workspace_list).' }),
       status: Type.Optional(
         Type.String({ description: 'Filter by status (e.g. todo, in_progress, done, blocked).' }),
       ),
@@ -142,13 +180,14 @@ export default function piTeamworkExtension(pi: ExtensionAPI): void {
     description:
       'Get detailed information about a specific issue (a work item in the shared project tracker).',
     parameters: Type.Object({
+      workspaceId: Type.String({ description: 'Workspace ID (get from workspace_list).' }),
       id: Type.String({ description: 'The issue ID.' }),
     }),
     async execute(_toolCallId, params) {
       const err = await ensureReady();
       if (err) return textResult(err);
       try {
-        const issue = await provider!.getIssue(params.id);
+        const issue = await provider!.getIssue(params.id, params.workspaceId);
         if (!issue) return textResult(`Issue not found: ${params.id}`);
         return textResult(JSON.stringify(issue, null, 2));
       } catch (error) {
@@ -165,6 +204,7 @@ export default function piTeamworkExtension(pi: ExtensionAPI): void {
     promptSnippet:
       'Create issues / tickets in a shared project tracker for humans or agents to collaborate on.',
     parameters: Type.Object({
+      workspaceId: Type.String({ description: 'Workspace ID (get from workspace_list).' }),
       title: Type.String({ description: 'Issue title.' }),
       description: Type.Optional(Type.String({ description: 'Issue description.' })),
       priority: Type.Optional(
@@ -191,6 +231,7 @@ export default function piTeamworkExtension(pi: ExtensionAPI): void {
     description:
       'Update an existing issue in the shared project tracker. Can change title, description, status, priority, or assignee.',
     parameters: Type.Object({
+      workspaceId: Type.String({ description: 'Workspace ID (get from workspace_list).' }),
       id: Type.String({ description: 'The issue ID to update.' }),
       title: Type.Optional(Type.String({ description: 'New title.' })),
       description: Type.Optional(Type.String({ description: 'New description.' })),
@@ -205,9 +246,9 @@ export default function piTeamworkExtension(pi: ExtensionAPI): void {
     async execute(_toolCallId, params) {
       const err = await ensureReady();
       if (err) return textResult(err);
-      const { id, ...input } = params;
+      const { id, workspaceId, ...input } = params;
       try {
-        const issue = await provider!.updateIssue(id, input);
+        const issue = await provider!.updateIssue(id, input, workspaceId);
         if (!issue) return textResult(`Issue not found: ${id}`);
         return textResult(JSON.stringify(issue, null, 2));
       } catch (error) {
@@ -222,6 +263,7 @@ export default function piTeamworkExtension(pi: ExtensionAPI): void {
     description:
       'Add a comment to an issue in the shared project tracker. Use for progress updates, questions, or blockers visible to other collaborators (humans or agents).',
     parameters: Type.Object({
+      workspaceId: Type.String({ description: 'Workspace ID (get from workspace_list).' }),
       issueId: Type.String({ description: 'The issue ID to comment on.' }),
       content: Type.String({ description: 'Comment content.' }),
       parentId: Type.Optional(
@@ -232,7 +274,12 @@ export default function piTeamworkExtension(pi: ExtensionAPI): void {
       const err = await ensureReady();
       if (err) return textResult(err);
       try {
-        const comment = await provider!.addComment(params.issueId, params.content, params.parentId);
+        const comment = await provider!.addComment(
+          params.issueId,
+          params.content,
+          params.parentId,
+          params.workspaceId,
+        );
         return textResult(JSON.stringify(comment, null, 2));
       } catch (error) {
         return textResult(`Error: ${error instanceof Error ? error.message : String(error)}`);
@@ -243,13 +290,15 @@ export default function piTeamworkExtension(pi: ExtensionAPI): void {
   pi.registerTool({
     name: 'project_list',
     label: 'Teamwork',
-    description: 'List all projects in the shared collaboration workspace.',
-    parameters: Type.Object({}),
-    async execute() {
+    description: 'List all projects in a workspace.',
+    parameters: Type.Object({
+      workspaceId: Type.String({ description: 'Workspace ID (get from workspace_list).' }),
+    }),
+    async execute(_toolCallId, params) {
       const err = await ensureReady();
       if (err) return textResult(err);
       try {
-        const projects = await provider!.listProjects();
+        const projects = await provider!.listProjects(params.workspaceId);
         if (projects.length === 0) return textResult('No projects found.');
         return textResult(JSON.stringify(projects, null, 2));
       } catch (error) {

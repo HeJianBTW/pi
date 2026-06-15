@@ -21,7 +21,7 @@ Set `autoInstall: false` to disable this behavior.
 
 ### Mode 1 — Self-hosted server
 
-For teams running their own Multica server. The extension runs `multica setup self-host` with the provided URL, then authenticates with the token:
+For teams running their own Multica server. The extension runs `multica setup self-host` with the provided URLs, then authenticates with the token:
 
 ```json
 {
@@ -30,6 +30,7 @@ For teams running their own Multica server. The extension runs `multica setup se
     "provider": "multica",
     "multica": {
       "serverUrl": "https://api.your-server.com",
+      "appUrl": "https://your-server.com",
       "token": "<token-from-multica-server>"
     }
   }
@@ -78,6 +79,7 @@ For CI or non-interactive environments where you can't run `multica setup`. The 
 | `multica.workspace` | Workspace ID override; leave empty to use multica's default |
 | `multica.token` | Headless-login token. Omit when multica is already logged in on the machine |
 | `multica.serverUrl` | Self-hosted server API URL. Triggers `multica setup self-host --server-url` on start |
+| `multica.appUrl` | Self-hosted server frontend URL. Required when `serverUrl` is a remote address |
 | `multica.autoInstall` | Auto-install multica CLI if missing (default: `true`) |
 
 ## Tools
