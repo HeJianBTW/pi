@@ -1,0 +1,70 @@
+{
+  "name": "@amaster.ai/pi-lark",
+  "version": "0.1.0",
+  "description": "Pi extension for Lark/Feishu workspace — calendar, docs, drive, sheets, tasks, mail and more via lark-cli.",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "extension",
+    "lark",
+    "feishu"
+  ],
+  "license": "Apache-2.0",
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": {
+      "default": "./package.json"
+    }
+  },
+  "files": [
+    "dist",
+    "skills"
+  ],
+  "pi": {
+    "extensions": [
+      "./dist/index.js"
+    ]
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TGYD-helige/pi.git",
+    "directory": "packages/pi-lark"
+  },
+  "scripts": {
+    "fetch-skills": "node scripts/fetch-skills.mjs",
+    "prebuild": "node scripts/fetch-skills.mjs",
+    "build": "tsc -b",
+    "typecheck": "tsc -b --pretty false",
+    "test": "vitest run src"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=0.74.0",
+    "typebox": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    },
+    "typebox": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "0.74.0",
+    "typebox": "*",
+    "vitest": "^4.0.0"
+  },
+  "dependencies": {
+    "@amaster.ai/pi-shared": "workspace:*"
+  }
+}

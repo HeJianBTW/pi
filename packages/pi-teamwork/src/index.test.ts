@@ -575,7 +575,7 @@ describe('ensureMulticaBinary', () => {
     };
     await ensureMulticaBinary('multica', exec);
     expect(calls).toHaveLength(1);
-    expect(calls[0].args).toEqual(['--version']);
+    expect(calls[0]!.args).toEqual(['--version']);
   });
 
   it('handles brew exec throwing exception and falls back to curl', async () => {
