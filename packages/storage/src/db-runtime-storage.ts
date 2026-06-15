@@ -226,10 +226,15 @@ class DbRuntimeSessionStore implements RuntimeSessionStore {
     });
   }
 
-  async listRuntimeSessions(scope: RuntimeScope): Promise<RuntimeSession[]> {
+  async listRuntimeSessions(
+    scope: RuntimeScope,
+    options?: { limit?: number; offset?: number },
+  ): Promise<RuntimeSession[]> {
     const rows = await this.db.prisma.piAgentSession.findMany({
       where: { deletedAt: null, ...sessionScopeWhere(scope) },
       orderBy: [{ lastMessageAt: 'desc' }, { updatedAt: 'desc' }],
+      ...(options?.limit !== undefined ? { take: options.limit } : {}),
+      ...(options?.offset !== undefined ? { skip: options.offset } : {}),
     });
     return rows.map(sessionFromPrisma);
   }

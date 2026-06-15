@@ -116,6 +116,45 @@ describe('JsonFileTranscriptStore', () => {
     });
   });
 
+  it('listRuntimeSessions returns sessions sorted by sessionId descending (newest first)', async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), 'pi-history-'));
+    tmpDirs.push(dir);
+    const filePath = path.join(dir, 'sessions.json');
+    const store = new JsonFileConversationStore(filePath);
+
+    await store.saveRuntimeSession({
+      sessionId: 'web-2024-01-01-aaa',
+      conversationId: 'web-2024-01-01-aaa',
+      tenantId: 'default',
+      model: model(),
+      sandboxStatus: 'running',
+      toolPolicyProfile: 'default',
+    });
+    await store.saveRuntimeSession({
+      sessionId: 'web-2024-06-15-zzz',
+      conversationId: 'web-2024-06-15-zzz',
+      tenantId: 'default',
+      model: model(),
+      sandboxStatus: 'running',
+      toolPolicyProfile: 'default',
+    });
+    await store.saveRuntimeSession({
+      sessionId: 'web-2024-03-10-mmm',
+      conversationId: 'web-2024-03-10-mmm',
+      tenantId: 'default',
+      model: model(),
+      sandboxStatus: 'running',
+      toolPolicyProfile: 'default',
+    });
+
+    const sessions = await store.listRuntimeSessions({ tenantId: 'default' });
+    expect(sessions.map((s) => s.sessionId)).toEqual([
+      'web-2024-06-15-zzz',
+      'web-2024-03-10-mmm',
+      'web-2024-01-01-aaa',
+    ]);
+  });
+
   it('treats legacy JSON sessions without tenantId as default tenant sessions', async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'pi-history-'));
     tmpDirs.push(dir);
