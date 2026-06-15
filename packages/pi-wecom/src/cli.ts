@@ -1,55 +1,75 @@
-import { exec, execSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { exec } from 'node:child_process';
+import { existsSync, mkdirSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 const NPM_PACKAGE = '@wecom/cli';
+const INSTALL_DIR = join(homedir(), '.wecom-cli');
+const BIN_PATH = join(INSTALL_DIR, 'node_modules', '.bin', 'wecom-cli');
 
-export function isWeComCliInstalled(): boolean {
-  try {
-    execSync('wecom-cli --version', { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
-}
+let installAttempted = false;
+let cliAvailable: boolean | undefined;
 
-export function installWeComCli(): Promise<void> {
+function execAsync(command: string): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    exec(`npm install -g ${NPM_PACKAGE}@latest`, (error) => {
-      if (error) reject(new Error(`Failed to install ${NPM_PACKAGE}: ${error.message}`));
-      else resolve();
+    exec(command, (error, stdout, stderr) => {
+      if (error) reject(error);
+      else resolve({ stdout, stderr });
     });
   });
 }
 
+function wecomCliBin(): string {
+  if (existsSync(BIN_PATH)) return BIN_PATH;
+  return 'wecom-cli';
+}
+
+export async function isWeComCliInstalled(): Promise<boolean> {
+  if (cliAvailable !== undefined) return cliAvailable;
+  try {
+    await execAsync(`"${wecomCliBin()}" --version`);
+    cliAvailable = true;
+    return true;
+  } catch {
+    cliAvailable = false;
+    return false;
+  }
+}
+
+export async function installWeComCli(): Promise<void> {
+  if (installAttempted) return;
+  installAttempted = true;
+  mkdirSync(INSTALL_DIR, { recursive: true });
+  await execAsync(`npm install --prefix "${INSTALL_DIR}" ${NPM_PACKAGE}@latest`);
+  cliAvailable = undefined;
+}
+
 export async function ensureWeComCli(): Promise<boolean> {
-  if (isWeComCliInstalled()) return true;
+  if (await isWeComCliInstalled()) return true;
   await installWeComCli();
   return isWeComCliInstalled();
 }
 
-export function isWeComCliAuthenticated(): boolean {
+export async function isWeComCliAuthenticated(): Promise<boolean> {
   try {
-    const output = execSync('wecom-cli auth status', {
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'ignore'],
-    });
-    return !output.includes('not authenticated') && !output.includes('未认证');
+    const { stdout } = await execAsync(`"${wecomCliBin()}" auth status`);
+    return !stdout.includes('not authenticated') && !stdout.includes('未认证');
   } catch {
     return false;
   }
 }
 
-export function getWeComCliSkillsDir(): string | undefined {
+export async function getWeComCliSkillsDir(): Promise<string | undefined> {
+  const localSkills = join(INSTALL_DIR, 'node_modules', '@wecom', 'cli', 'skills');
+  if (existsSync(localSkills)) return localSkills;
+
   try {
-    const npmRoot = execSync('npm root -g', {
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'ignore'],
-    }).trim();
-    const skillsPath = join(npmRoot, '@wecom', 'cli', 'skills');
+    const { stdout } = await execAsync('npm root -g');
+    const skillsPath = join(stdout.trim(), '@wecom', 'cli', 'skills');
     if (existsSync(skillsPath)) return skillsPath;
   } catch {
     // ignore
   }
+
   return undefined;
 }
