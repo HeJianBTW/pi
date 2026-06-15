@@ -9,12 +9,37 @@ import type {
   Project,
   TeamworkProvider,
 } from '../types.js';
+import { ensureMulticaBinary, type InstallResult } from './multica-installer.js';
+
+export type InitMulticaResult = {
+  adapter: MulticaAdapter;
+  installResult: InstallResult;
+};
 
 export async function initMulticaProvider(
   config: MulticaAdapterConfig,
   exec: ExecFn,
-): Promise<MulticaAdapter> {
+): Promise<InitMulticaResult> {
   const binary = config.binary?.trim() || 'multica';
+  const autoInstall = config.autoInstall !== false;
+
+  let installResult: InstallResult = { installed: true, alreadyPresent: true };
+
+  if (autoInstall) {
+    installResult = await ensureMulticaBinary(binary, exec);
+    if (!installResult.installed) {
+      return { adapter: new MulticaAdapter(config, exec), installResult };
+    }
+  }
+
+  if (config.serverUrl) {
+    const setupArgs = ['setup', 'self-host', '--server-url', config.serverUrl];
+    try {
+      await exec(binary, setupArgs);
+    } catch {
+      // Setup may already be done
+    }
+  }
 
   if (config.token) {
     try {
@@ -30,7 +55,7 @@ export async function initMulticaProvider(
     // Daemon may already be running
   }
 
-  return new MulticaAdapter(config, exec);
+  return { adapter: new MulticaAdapter(config, exec), installResult };
 }
 
 export class MulticaAdapter implements TeamworkProvider {

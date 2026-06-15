@@ -10,11 +10,35 @@ Pi extension for team collaboration and project management. Provides LLM-callabl
 
 ## Configuration
 
-This extension does **not** manage multica's setup or credentials — those live with the multica CLI itself. Pick one of two modes:
+### Auto-Install
 
-### Mode 1 — Pre-configured environment (recommended)
+When the extension starts and `multica` is not found on `$PATH`, it will automatically install the CLI:
 
-Run `multica setup` once on the machine and finish login through multica's normal flow. The extension will reuse that state, and you can leave the auth fields empty:
+- **macOS / Linux**: Homebrew (`brew install multica-ai/tap/multica`) with a fallback to the install script (`curl -fsSL ... | bash`)
+- **Windows**: PowerShell install script (`irm ... | iex`)
+
+Set `autoInstall: false` to disable this behavior.
+
+### Mode 1 — Self-hosted server
+
+For teams running their own Multica server. The extension runs `multica setup self-host` with the provided URL, then authenticates with the token:
+
+```json
+{
+  "pi-teamwork": {
+    "enabled": true,
+    "provider": "multica",
+    "multica": {
+      "serverUrl": "https://api.your-server.com",
+      "token": "<token-from-multica-server>"
+    }
+  }
+}
+```
+
+### Mode 2 — Pre-configured environment
+
+Run `multica setup` once on the machine and finish login through multica's normal flow. The extension will reuse that state:
 
 ```json
 {
@@ -28,9 +52,9 @@ Run `multica setup` once on the machine and finish login through multica's norma
 }
 ```
 
-### Mode 2 — Headless token
+### Mode 3 — Headless token (Multica Cloud)
 
-For CI or non-interactive environments where you can't run `multica setup`. Issue a long-lived token from your multica server, and the extension will run `multica login --token <token>` on every `session_start`:
+For CI or non-interactive environments where you can't run `multica setup`. The extension will run `multica login --token <token>` on every `session_start`:
 
 ```json
 {
@@ -52,7 +76,9 @@ For CI or non-interactive environments where you can't run `multica setup`. Issu
 | `provider` | Provider name (currently only `multica`) |
 | `multica.binary` | Path to multica binary (default: `multica`) |
 | `multica.workspace` | Workspace ID override; leave empty to use multica's default |
-| `multica.token` | Headless-login token. Only set in mode 2; omit when multica is already logged in on the machine |
+| `multica.token` | Headless-login token. Omit when multica is already logged in on the machine |
+| `multica.serverUrl` | Self-hosted server API URL. Triggers `multica setup self-host --server-url` on start |
+| `multica.autoInstall` | Auto-install multica CLI if missing (default: `true`) |
 
 ## Tools
 
@@ -77,7 +103,8 @@ src/
 ├── index.ts              # Generic tool layer (provider-agnostic)
 ├── types.ts              # TeamworkProvider interface + shared types
 └── adapters/
-    └── multica.ts        # Multica CLI adapter + initialization
+    ├── multica.ts        # Multica CLI adapter + initialization
+    └── multica-installer.ts  # Auto-detect & install multica CLI
 ```
 
 The extension uses a provider pattern — `index.ts` registers tools that delegate to a `TeamworkProvider` interface. Adding a new provider (Linear, Jira, etc.) only requires implementing the interface and adding a factory branch in `session_start`.

@@ -8,8 +8,7 @@ const SETTINGS_KEY = 'pi-teamwork';
 const STATUS_KEY = 'pi-teamwork';
 
 const TEAMWORK_GUIDANCE = [
-  '# Teamwork Guidance',
-  '',
+  '<teamwork-guidance>',
   'You are working in a shared project tracker (teamwork) where humans and other agents collaborate. Use the issue_* and project_* tools to keep that shared space in sync.',
   '',
   'Before starting non-trivial work, check whether a relevant issue already exists (issue_list / issue_get) — to avoid duplicating work another collaborator has picked up.',
@@ -19,10 +18,12 @@ const TEAMWORK_GUIDANCE = [
   'When you finish work that an issue describes, update its status (issue_update). An issue left in an outdated state misleads other collaborators.',
   '',
   'The tracker is for cross-collaborator coordination, not for tracking your own session-local TODOs. Do not file an issue just to remind yourself of something within the current conversation.',
+  '</teamwork-guidance>',
 ].join('\n');
 
 export default function piTeamworkExtension(pi: ExtensionAPI): void {
   let provider: TeamworkProvider | undefined;
+  let readyPromise: Promise<void> | undefined;
 
   const exec: ExecFn = async (command, args) => {
     const result = await pi.exec(command, args);
@@ -38,8 +39,32 @@ export default function piTeamworkExtension(pi: ExtensionAPI): void {
 
     const providerName = config.provider ?? 'multica';
     if (providerName === 'multica') {
-      provider = await initMulticaProvider(config.multica ?? {}, exec);
-      ctx.ui.setStatus(STATUS_KEY, 'teamwork: multica');
+      readyPromise = (async () => {
+        const { adapter, installResult } = await initMulticaProvider(config.multica ?? {}, exec);
+        provider = adapter;
+
+        if (!installResult.installed) {
+          ctx.ui.notify(
+            `multica CLI could not be installed: ${installResult.error ?? 'unknown error'}. Run "multica setup" manually.`,
+            'warning',
+          );
+          ctx.ui.setStatus(STATUS_KEY, 'teamwork: multica (not installed)');
+          return;
+        }
+
+        if (!installResult.alreadyPresent) {
+          ctx.ui.notify('multica CLI was auto-installed successfully.', 'info');
+        }
+
+        if (!config.multica?.token && !config.multica?.serverUrl) {
+          ctx.ui.notify(
+            'No multica token or serverUrl configured. Run "multica setup" to authenticate.',
+            'warning',
+          );
+        }
+
+        ctx.ui.setStatus(STATUS_KEY, 'teamwork: multica');
+      })();
     } else {
       ctx.ui.setStatus(STATUS_KEY, `teamwork: unknown provider "${providerName}"`);
     }
@@ -47,6 +72,7 @@ export default function piTeamworkExtension(pi: ExtensionAPI): void {
 
   pi.on('session_shutdown', async () => {
     provider = undefined;
+    readyPromise = undefined;
   });
 
   pi.on('before_agent_start', async (event) => {
@@ -61,6 +87,7 @@ export default function piTeamworkExtension(pi: ExtensionAPI): void {
   pi.registerCommand('teamwork-status', {
     description: 'Show teamwork provider status.',
     handler: async (_args, ctx) => {
+      if (readyPromise) await readyPromise;
       if (!provider) {
         ctx.ui.notify('Teamwork provider is not initialized.', 'warning');
         return;
@@ -75,6 +102,12 @@ export default function piTeamworkExtension(pi: ExtensionAPI): void {
   });
 
   // --- LLM-callable tools ---
+
+  async function ensureReady(): Promise<string | undefined> {
+    if (readyPromise) await readyPromise;
+    if (!provider) return 'Teamwork provider is not initialized.';
+    return undefined;
+  }
 
   pi.registerTool({
     name: 'issue_list',
@@ -91,9 +124,10 @@ export default function piTeamworkExtension(pi: ExtensionAPI): void {
       limit: Type.Optional(Type.Number({ description: 'Max number of results.' })),
     }),
     async execute(_toolCallId, params) {
-      if (!provider) return textResult('Teamwork provider is not initialized.');
+      const err = await ensureReady();
+      if (err) return textResult(err);
       try {
-        const issues = await provider.listIssues(params);
+        const issues = await provider!.listIssues(params);
         if (issues.length === 0) return textResult('No issues found.');
         return textResult(JSON.stringify(issues, null, 2));
       } catch (error) {
@@ -111,9 +145,10 @@ export default function piTeamworkExtension(pi: ExtensionAPI): void {
       id: Type.String({ description: 'The issue ID.' }),
     }),
     async execute(_toolCallId, params) {
-      if (!provider) return textResult('Teamwork provider is not initialized.');
+      const err = await ensureReady();
+      if (err) return textResult(err);
       try {
-        const issue = await provider.getIssue(params.id);
+        const issue = await provider!.getIssue(params.id);
         if (!issue) return textResult(`Issue not found: ${params.id}`);
         return textResult(JSON.stringify(issue, null, 2));
       } catch (error) {
@@ -139,9 +174,10 @@ export default function piTeamworkExtension(pi: ExtensionAPI): void {
       project: Type.Optional(Type.String({ description: 'Project ID to associate with.' })),
     }),
     async execute(_toolCallId, params) {
-      if (!provider) return textResult('Teamwork provider is not initialized.');
+      const err = await ensureReady();
+      if (err) return textResult(err);
       try {
-        const issue = await provider.createIssue(params);
+        const issue = await provider!.createIssue(params);
         return textResult(JSON.stringify(issue, null, 2));
       } catch (error) {
         return textResult(`Error: ${error instanceof Error ? error.message : String(error)}`);
@@ -167,10 +203,11 @@ export default function piTeamworkExtension(pi: ExtensionAPI): void {
       assignee: Type.Optional(Type.String({ description: 'New assignee name.' })),
     }),
     async execute(_toolCallId, params) {
-      if (!provider) return textResult('Teamwork provider is not initialized.');
+      const err = await ensureReady();
+      if (err) return textResult(err);
       const { id, ...input } = params;
       try {
-        const issue = await provider.updateIssue(id, input);
+        const issue = await provider!.updateIssue(id, input);
         if (!issue) return textResult(`Issue not found: ${id}`);
         return textResult(JSON.stringify(issue, null, 2));
       } catch (error) {
@@ -192,9 +229,10 @@ export default function piTeamworkExtension(pi: ExtensionAPI): void {
       ),
     }),
     async execute(_toolCallId, params) {
-      if (!provider) return textResult('Teamwork provider is not initialized.');
+      const err = await ensureReady();
+      if (err) return textResult(err);
       try {
-        const comment = await provider.addComment(params.issueId, params.content, params.parentId);
+        const comment = await provider!.addComment(params.issueId, params.content, params.parentId);
         return textResult(JSON.stringify(comment, null, 2));
       } catch (error) {
         return textResult(`Error: ${error instanceof Error ? error.message : String(error)}`);
@@ -208,9 +246,10 @@ export default function piTeamworkExtension(pi: ExtensionAPI): void {
     description: 'List all projects in the shared collaboration workspace.',
     parameters: Type.Object({}),
     async execute() {
-      if (!provider) return textResult('Teamwork provider is not initialized.');
+      const err = await ensureReady();
+      if (err) return textResult(err);
       try {
-        const projects = await provider.listProjects();
+        const projects = await provider!.listProjects();
         if (projects.length === 0) return textResult('No projects found.');
         return textResult(JSON.stringify(projects, null, 2));
       } catch (error) {
@@ -226,9 +265,10 @@ export default function piTeamworkExtension(pi: ExtensionAPI): void {
       'Check the status of the teamwork collaboration provider (daemon status, connected agents, etc.).',
     parameters: Type.Object({}),
     async execute() {
-      if (!provider) return textResult('Teamwork provider is not initialized.');
+      const err = await ensureReady();
+      if (err) return textResult(err);
       try {
-        const s = await provider.status();
+        const s = await provider!.status();
         return textResult(JSON.stringify(s, null, 2));
       } catch (error) {
         return textResult(`Error: ${error instanceof Error ? error.message : String(error)}`);

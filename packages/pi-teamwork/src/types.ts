@@ -72,6 +72,8 @@ export type MulticaAdapterConfig = {
   binary?: string;
   workspace?: string;
   token?: string;
+  autoInstall?: boolean;
+  serverUrl?: string;
 };
 
 export type TeamworkConfig = {
