@@ -12,6 +12,7 @@ export type Issue = {
 };
 
 export type IssueCreateInput = {
+  workspaceId: string;
   title: string;
   description?: string;
   priority?: string;
@@ -28,6 +29,7 @@ export type IssueUpdateInput = {
 };
 
 export type IssueListFilter = {
+  workspaceId: string;
   status?: string;
   assignee?: string;
   project?: string;
@@ -51,15 +53,30 @@ export type Project = {
   lead?: string;
 };
 
+export type Workspace = {
+  id: string;
+  name: string;
+};
+
 export interface TeamworkProvider {
   name: string;
+  listWorkspaces(): Promise<Workspace[]>;
   listIssues(filter?: IssueListFilter): Promise<Issue[]>;
-  getIssue(id: string): Promise<Issue | undefined>;
+  getIssue(id: string, workspaceId?: string): Promise<Issue | undefined>;
   createIssue(input: IssueCreateInput): Promise<Issue>;
-  updateIssue(id: string, input: IssueUpdateInput): Promise<Issue | undefined>;
-  addComment(issueId: string, content: string, parentId?: string): Promise<Comment>;
-  listComments(issueId: string): Promise<Comment[]>;
-  listProjects(): Promise<Project[]>;
+  updateIssue(
+    id: string,
+    input: IssueUpdateInput,
+    workspaceId?: string,
+  ): Promise<Issue | undefined>;
+  addComment(
+    issueId: string,
+    content: string,
+    parentId?: string,
+    workspaceId?: string,
+  ): Promise<Comment>;
+  listComments(issueId: string, workspaceId?: string): Promise<Comment[]>;
+  listProjects(workspaceId?: string): Promise<Project[]>;
   status(): Promise<Record<string, unknown>>;
 }
 
@@ -72,6 +89,9 @@ export type MulticaAdapterConfig = {
   binary?: string;
   workspace?: string;
   token?: string;
+  autoInstall?: boolean;
+  serverUrl?: string;
+  appUrl?: string;
 };
 
 export type TeamworkConfig = {
