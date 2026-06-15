@@ -51,9 +51,21 @@ export class JsonFileConversationStore implements RuntimeSessionStore {
     });
   }
 
-  async listRuntimeSessions(scope: RuntimeScope): Promise<RuntimeSession[]> {
+  async listRuntimeSessions(
+    scope: RuntimeScope,
+    options?: { limit?: number; offset?: number },
+  ): Promise<RuntimeSession[]> {
     await this.load();
-    return [...this.sessions.values()].filter((session) => sessionMatchesScope(session, scope));
+    const filtered = [...this.sessions.values()].filter((session) =>
+      sessionMatchesScope(session, scope),
+    );
+    // RuntimeSession 不含 updatedAt，按 sessionId（含日期前缀）降序即按创建时间排序。
+    const sorted = filtered.sort((a, b) => b.sessionId.localeCompare(a.sessionId));
+    const offset = options?.offset ?? 0;
+    if (options?.limit !== undefined) {
+      return sorted.slice(offset, offset + options.limit);
+    }
+    return offset > 0 ? sorted.slice(offset) : sorted;
   }
 
   private async load(): Promise<void> {

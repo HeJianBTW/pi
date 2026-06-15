@@ -104,7 +104,10 @@ export type ConversationHistoryStore = {
 
 export type RuntimeSessionStore = Omit<ConversationStore, 'getRuntimeSession'> & {
   getRuntimeSession(scope: RuntimeScope, sessionId: string): Promise<RuntimeSession | undefined>;
-  listRuntimeSessions(scope: RuntimeScope): Promise<RuntimeSession[]>;
+  listRuntimeSessions(
+    scope: RuntimeScope,
+    options?: { limit?: number; offset?: number },
+  ): Promise<RuntimeSession[]>;
 };
 
 export type TranscriptStore = ConversationHistoryStore;
