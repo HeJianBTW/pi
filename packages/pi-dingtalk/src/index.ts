@@ -2,14 +2,14 @@ import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
-import { ensureDws, getDwsSkillsDir, initDws, isDwsInstalled } from './cli.js';
+import { ensureDws, getDwsSkillsDir, initDws } from './cli.js';
 import { loadDingTalkConfig } from './config.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const BUNDLED_SKILLS_DIR = join(__dirname, '..', 'skills');
 
-function resolveSkillsDir(): string | undefined {
-  const cliSkills = getDwsSkillsDir();
+async function resolveSkillsDir(): Promise<string | undefined> {
+  const cliSkills = await getDwsSkillsDir();
   if (cliSkills) return cliSkills;
   if (existsSync(BUNDLED_SKILLS_DIR)) return BUNDLED_SKILLS_DIR;
   return undefined;
@@ -26,33 +26,18 @@ export default function piDingTalkExtension(pi: ExtensionAPI): void {
       skillsDir = BUNDLED_SKILLS_DIR;
     }
 
-    if (isDwsInstalled()) {
-      try {
-        initDws(config);
-        skillsDir = resolveSkillsDir();
+    try {
+      const installed = await ensureDws();
+      if (installed) {
+        await initDws(config);
+        skillsDir = await resolveSkillsDir();
         ctx.ui.setStatus?.('pi-dingtalk', 'dws: ready');
-      } catch (err) {
-        ctx.ui.notify(
-          `pi-dingtalk: 初始化失败 — ${err instanceof Error ? err.message : String(err)}`,
-          'warning',
-        );
       }
-    } else {
-      ctx.ui.setStatus?.('pi-dingtalk', 'installing dws...');
-      ensureDws()
-        .then((installed) => {
-          if (installed) {
-            initDws(config);
-            skillsDir = resolveSkillsDir();
-            ctx.ui.setStatus?.('pi-dingtalk', 'dws: ready');
-          }
-        })
-        .catch((err) => {
-          ctx.ui.notify(
-            `pi-dingtalk: 安装失败 — ${err instanceof Error ? err.message : String(err)}`,
-            'warning',
-          );
-        });
+    } catch (err) {
+      ctx.ui.notify(
+        `pi-dingtalk: 初始化失败 — ${err instanceof Error ? err.message : String(err)}`,
+        'warning',
+      );
     }
   });
 
