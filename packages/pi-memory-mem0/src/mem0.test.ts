@@ -1,7 +1,10 @@
-import { describe, expect, it, vi } from 'vitest';
+import { existsSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Prefetch } from './prefetch.js';
-import type { KeyResolver, Mem0Provider } from './provider.js';
-import { TurnSync } from './sync.js';
+import type { KeyResolver, Mem0Provider, ProviderResolver } from './provider.js';
+import { mapApiToMem0Provider, SqliteSnapshotStore } from './provider.js';
 import { createMem0Tools } from './tools.js';
 
 // ---------------------------------------------------------------------------
@@ -16,97 +19,6 @@ function mockProvider(overrides: Partial<Mem0Provider> = {}): Mem0Provider {
     ...overrides,
   };
 }
-
-// ---------------------------------------------------------------------------
-// TurnSync
-// ---------------------------------------------------------------------------
-
-describe('TurnSync', () => {
-  it('syncs user+assistant pairs', async () => {
-    const provider = mockProvider();
-    const sync = new TurnSync(provider, 'user-1');
-
-    sync.onMessage('user', 'hello');
-    sync.onMessage('assistant', 'hi there');
-
-    await new Promise((r) => setTimeout(r, 50));
-
-    expect(provider.add).toHaveBeenCalledWith(
-      [
-        { role: 'user', content: 'hello' },
-        { role: 'assistant', content: 'hi there' },
-      ],
-      { userId: 'user-1' },
-    );
-  });
-
-  it('does not sync assistant without preceding user message', async () => {
-    const provider = mockProvider();
-    const sync = new TurnSync(provider, 'u');
-
-    sync.onMessage('assistant', 'unprompted');
-
-    await new Promise((r) => setTimeout(r, 50));
-    expect(provider.add).not.toHaveBeenCalled();
-  });
-
-  it('drops concurrent syncs', async () => {
-    let resolveFirst!: () => void;
-    const first = new Promise<void>((r) => {
-      resolveFirst = r;
-    });
-    const provider = mockProvider({
-      add: vi.fn().mockImplementationOnce(async () => {
-        await first;
-        return { results: [] };
-      }),
-    });
-    const sync = new TurnSync(provider, 'u');
-
-    sync.onMessage('user', 'a');
-    sync.onMessage('assistant', 'b');
-    sync.onMessage('user', 'c');
-    sync.onMessage('assistant', 'd');
-
-    resolveFirst();
-    await new Promise((r) => setTimeout(r, 50));
-
-    expect(provider.add).toHaveBeenCalledTimes(1);
-  });
-
-  it('syncs again after first completes', async () => {
-    const provider = mockProvider();
-    const sync = new TurnSync(provider, 'u');
-
-    sync.onMessage('user', 'a');
-    sync.onMessage('assistant', 'b');
-    await new Promise((r) => setTimeout(r, 50));
-
-    sync.onMessage('user', 'c');
-    sync.onMessage('assistant', 'd');
-    await new Promise((r) => setTimeout(r, 50));
-
-    expect(provider.add).toHaveBeenCalledTimes(2);
-  });
-
-  it('handles provider errors gracefully', async () => {
-    const provider = mockProvider({
-      add: vi.fn().mockRejectedValue(new Error('network')),
-    });
-    const sync = new TurnSync(provider, 'u');
-
-    sync.onMessage('user', 'a');
-    sync.onMessage('assistant', 'b');
-    await new Promise((r) => setTimeout(r, 50));
-
-    // Should not throw, inflight resets
-    sync.onMessage('user', 'c');
-    sync.onMessage('assistant', 'd');
-    await new Promise((r) => setTimeout(r, 50));
-
-    expect(provider.add).toHaveBeenCalledTimes(2);
-  });
-});
 
 // ---------------------------------------------------------------------------
 // Prefetch
@@ -309,5 +221,447 @@ describe('KeyResolver', () => {
       return undefined;
     };
     expect(resolver).toBeDefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// mapApiToMem0Provider
+// ---------------------------------------------------------------------------
+
+describe('mapApiToMem0Provider', () => {
+  it('maps openai-completions to openai', () => {
+    expect(mapApiToMem0Provider('openai-completions', 'fallback')).toBe('openai');
+  });
+
+  it('maps openai-responses to openai', () => {
+    expect(mapApiToMem0Provider('openai-responses', 'fallback')).toBe('openai');
+  });
+
+  it('maps anthropic-messages to anthropic', () => {
+    expect(mapApiToMem0Provider('anthropic-messages', 'fallback')).toBe('anthropic');
+  });
+
+  it('maps azure-openai to azure_openai', () => {
+    expect(mapApiToMem0Provider('azure-openai', 'fallback')).toBe('azure_openai');
+  });
+
+  it('maps google to gemini', () => {
+    expect(mapApiToMem0Provider('google-ai', 'fallback')).toBe('gemini');
+  });
+
+  it('maps gemini to gemini', () => {
+    expect(mapApiToMem0Provider('gemini-something', 'fallback')).toBe('gemini');
+  });
+
+  it('returns fallback for undefined api', () => {
+    expect(mapApiToMem0Provider(undefined, 'ollama')).toBe('ollama');
+  });
+
+  it('returns fallback for unknown api', () => {
+    expect(mapApiToMem0Provider('some-unknown-api', 'myProvider')).toBe('myProvider');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ProviderResolver integration
+// ---------------------------------------------------------------------------
+
+describe('ProviderResolver', () => {
+  it('type accepts async full provider resolver', () => {
+    const resolver: ProviderResolver = async (provider: string) => {
+      if (provider === 'amaster') {
+        return {
+          apiKey: 'sk-test',
+          baseUrl: 'https://credits.amaster.ai/v1',
+          api: 'openai-completions',
+        };
+      }
+      return undefined;
+    };
+    expect(resolver).toBeDefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// OSSProvider._buildConfig via createMem0Provider (integration)
+// ---------------------------------------------------------------------------
+
+let __capturedMem0Config: Record<string, unknown> | undefined;
+
+vi.mock('mem0ai/oss', () => ({
+  Memory: class MockMemory {
+    constructor(config: Record<string, unknown>) {
+      __capturedMem0Config = config;
+    }
+    async getAll() {
+      return [];
+    }
+  },
+}));
+
+describe('createMem0Provider with resolveProvider', () => {
+  beforeEach(() => {
+    __capturedMem0Config = undefined;
+  });
+
+  it('maps custom provider to openai and injects baseURL', async () => {
+    const { createMem0Provider: create } = await import('./provider.js');
+
+    await create({
+      config: {
+        mode: 'open-source',
+        oss: {
+          embedder: { provider: 'amaster', config: { model: 'text-embedding-v4' } },
+          llm: { provider: 'amaster', config: { model: 'deepseek-v4-pro' } },
+        },
+      },
+      resolveProvider: async (providerName) => {
+        if (providerName === 'amaster') {
+          return {
+            apiKey: 'sk-amaster-key',
+            baseUrl: 'https://credits.amaster.ai/v1',
+            api: 'openai-completions',
+          };
+        }
+        return undefined;
+      },
+    });
+
+    expect(__capturedMem0Config).toBeDefined();
+
+    const embedder = __capturedMem0Config!.embedder as {
+      provider: string;
+      config: Record<string, unknown>;
+    };
+    expect(embedder.provider).toBe('openai');
+    expect(embedder.config.apiKey).toBe('sk-amaster-key');
+    expect(embedder.config.baseURL).toBe('https://credits.amaster.ai/v1');
+    expect(embedder.config.model).toBe('text-embedding-v4');
+
+    const llm = __capturedMem0Config!.llm as { provider: string; config: Record<string, unknown> };
+    expect(llm.provider).toBe('openai');
+    expect(llm.config.apiKey).toBe('sk-amaster-key');
+    expect(llm.config.baseURL).toBe('https://credits.amaster.ai/v1');
+    expect(llm.config.model).toBe('deepseek-v4-pro');
+  });
+
+  it('falls back to resolveKey when resolveProvider is not provided', async () => {
+    const { createMem0Provider: create } = await import('./provider.js');
+
+    await create({
+      config: {
+        mode: 'open-source',
+        oss: {
+          embedder: { provider: 'openai', config: { model: 'text-embedding-3-small' } },
+        },
+      },
+      resolveKey: async (providerName) => {
+        if (providerName === 'openai') return 'sk-legacy-key';
+        return undefined;
+      },
+    });
+
+    expect(__capturedMem0Config).toBeDefined();
+    const embedder = __capturedMem0Config!.embedder as {
+      provider: string;
+      config: Record<string, unknown>;
+    };
+    expect(embedder.provider).toBe('openai');
+    expect(embedder.config.apiKey).toBe('sk-legacy-key');
+    expect(embedder.config.baseURL).toBeUndefined();
+  });
+
+  it('keeps original provider name when resolveProvider returns undefined', async () => {
+    const { createMem0Provider: create } = await import('./provider.js');
+
+    await create({
+      config: {
+        mode: 'open-source',
+        oss: {
+          embedder: { provider: 'ollama', config: { model: 'nomic-embed' } },
+        },
+      },
+      resolveProvider: async () => undefined,
+    });
+
+    expect(__capturedMem0Config).toBeDefined();
+    const embedder = __capturedMem0Config!.embedder as {
+      provider: string;
+      config: Record<string, unknown>;
+    };
+    expect(embedder.provider).toBe('ollama');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SqliteSnapshotStore
+// ---------------------------------------------------------------------------
+
+// These tests require better-sqlite3 native binding compiled for the current Node version.
+// Skip if the binding is unavailable (e.g. compiled for a different Node/Electron version).
+const canUseSqlite = (() => {
+  try {
+    const { createRequire } = require('node:module');
+    const req = createRequire(import.meta.url);
+    const BS3 = req('better-sqlite3');
+    const db = new BS3(':memory:');
+    db.close();
+    return true;
+  } catch {
+    return false;
+  }
+})();
+
+describe.skipIf(!canUseSqlite)('SqliteSnapshotStore', () => {
+  let dbPath: string;
+  let store: SqliteSnapshotStore;
+
+  beforeEach(() => {
+    dbPath = join(tmpdir(), `mem0-test-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
+    store = new SqliteSnapshotStore(dbPath);
+  });
+
+  afterEach(() => {
+    store.close();
+    if (existsSync(dbPath)) rmSync(dbPath);
+    if (existsSync(`${dbPath}-wal`)) rmSync(`${dbPath}-wal`);
+    if (existsSync(`${dbPath}-shm`)) rmSync(`${dbPath}-shm`);
+  });
+
+  it('creates db file and table', () => {
+    expect(existsSync(dbPath)).toBe(true);
+  });
+
+  it('loadAll returns empty for new user', () => {
+    const items = store.loadAll('user-1');
+    expect(items).toEqual([]);
+  });
+
+  it('replaceAll stores and loadAll retrieves memories', () => {
+    store.replaceAll('user-1', [
+      {
+        id: 'a',
+        memory: 'likes cats',
+        score: undefined,
+        created_at: '2026-01-01',
+        updated_at: '2026-01-02',
+      },
+      {
+        id: 'b',
+        memory: 'uses vim',
+        score: undefined,
+        created_at: '2026-01-01',
+        updated_at: undefined,
+      },
+    ]);
+
+    const items = store.loadAll('user-1');
+    expect(items).toHaveLength(2);
+    expect(items[0]!.memory).toBe('likes cats');
+    expect(items[1]!.memory).toBe('uses vim');
+  });
+
+  it('replaceAll overwrites previous data', () => {
+    store.replaceAll('user-1', [{ id: 'a', memory: 'old fact', score: undefined }]);
+    store.replaceAll('user-1', [{ id: 'b', memory: 'new fact', score: undefined }]);
+
+    const items = store.loadAll('user-1');
+    expect(items).toHaveLength(1);
+    expect(items[0]!.id).toBe('b');
+    expect(items[0]!.memory).toBe('new fact');
+  });
+
+  it('isolates data by userId', () => {
+    store.replaceAll('user-1', [{ id: 'a', memory: 'fact A', score: undefined }]);
+    store.replaceAll('user-2', [{ id: 'b', memory: 'fact B', score: undefined }]);
+
+    expect(store.loadAll('user-1')).toHaveLength(1);
+    expect(store.loadAll('user-2')).toHaveLength(1);
+    expect(store.loadAll('user-1')[0]!.memory).toBe('fact A');
+    expect(store.loadAll('user-2')[0]!.memory).toBe('fact B');
+  });
+
+  it('tryCreate returns null on invalid path', () => {
+    const result = SqliteSnapshotStore.tryCreate('/dev/null/impossible/path.db');
+    expect(result).toBeNull();
+  });
+
+  it('tryCreate returns instance on valid path', () => {
+    const validPath = join(tmpdir(), `mem0-try-${Date.now()}.db`);
+    const instance = SqliteSnapshotStore.tryCreate(validPath);
+    expect(instance).toBeInstanceOf(SqliteSnapshotStore);
+    instance?.close();
+    if (existsSync(validPath)) rmSync(validPath);
+  });
+
+  it('loadAllUsers groups by userId', () => {
+    store.replaceAll('alice', [
+      { id: '1', memory: 'alice fact 1', score: undefined },
+      { id: '2', memory: 'alice fact 2', score: undefined },
+    ]);
+    store.replaceAll('bob', [{ id: '3', memory: 'bob fact', score: undefined }]);
+
+    const result = store.loadAllUsers();
+    expect(result).toHaveLength(2);
+
+    const alice = result.find((r) => r.userId === 'alice');
+    const bob = result.find((r) => r.userId === 'bob');
+    expect(alice?.items).toHaveLength(2);
+    expect(bob?.items).toHaveLength(1);
+    expect(bob!.items[0]!.memory).toBe('bob fact');
+  });
+
+  it('loadAllUsers returns empty when no data', () => {
+    const result = store.loadAllUsers();
+    expect(result).toEqual([]);
+  });
+
+  it('replaceAll handles empty items array (clears user data)', () => {
+    store.replaceAll('user-1', [{ id: 'a', memory: 'fact', score: undefined }]);
+    store.replaceAll('user-1', []);
+
+    expect(store.loadAll('user-1')).toEqual([]);
+  });
+
+  it('handles concurrent replaceAll for different users', () => {
+    store.replaceAll('user-1', [{ id: 'a', memory: 'A', score: undefined }]);
+    store.replaceAll('user-2', [{ id: 'b', memory: 'B', score: undefined }]);
+    store.replaceAll('user-1', [{ id: 'c', memory: 'C', score: undefined }]);
+
+    expect(store.loadAll('user-1')).toHaveLength(1);
+    expect(store.loadAll('user-1')[0]!.memory).toBe('C');
+    expect(store.loadAll('user-2')).toHaveLength(1);
+    expect(store.loadAll('user-2')[0]!.memory).toBe('B');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// createMem0Provider — additional scenarios
+// ---------------------------------------------------------------------------
+
+describe('createMem0Provider additional scenarios', () => {
+  beforeEach(() => {
+    __capturedMem0Config = undefined;
+  });
+
+  it('uses default embedder and llm when oss config is empty', async () => {
+    const { createMem0Provider: create } = await import('./provider.js');
+
+    await create({
+      config: { mode: 'open-source' },
+    });
+
+    expect(__capturedMem0Config).toBeDefined();
+    const embedder = __capturedMem0Config!.embedder as {
+      provider: string;
+      config: Record<string, unknown>;
+    };
+    const llm = __capturedMem0Config!.llm as {
+      provider: string;
+      config: Record<string, unknown>;
+    };
+    expect(embedder.provider).toBe('openai');
+    expect(embedder.config.model).toBe('text-embedding-3-small');
+    expect(llm.provider).toBe('openai');
+    expect(llm.config.model).toBe('gpt-4.1-nano');
+  });
+
+  it('defaults vectorStore to memory provider', async () => {
+    const { createMem0Provider: create } = await import('./provider.js');
+
+    await create({
+      config: { mode: 'open-source' },
+    });
+
+    expect(__capturedMem0Config).toBeDefined();
+    const vs = __capturedMem0Config!.vectorStore as { provider: string };
+    expect(vs.provider).toBe('memory');
+  });
+
+  it('respects custom vectorStore config', async () => {
+    const { createMem0Provider: create } = await import('./provider.js');
+
+    await create({
+      config: {
+        mode: 'open-source',
+        oss: {
+          vectorStore: { provider: 'qdrant', config: { url: 'http://localhost:6333' } },
+        },
+      },
+    });
+
+    expect(__capturedMem0Config).toBeDefined();
+    const vs = __capturedMem0Config!.vectorStore as {
+      provider: string;
+      config: Record<string, unknown>;
+    };
+    expect(vs.provider).toBe('qdrant');
+    expect(vs.config.url).toBe('http://localhost:6333');
+  });
+
+  it('does not inject baseURL when resolveProvider returns no baseUrl', async () => {
+    const { createMem0Provider: create } = await import('./provider.js');
+
+    await create({
+      config: {
+        mode: 'open-source',
+        oss: {
+          embedder: { provider: 'custom' },
+        },
+      },
+      resolveProvider: async () => ({ apiKey: 'key123', api: 'openai-completions' }),
+    });
+
+    expect(__capturedMem0Config).toBeDefined();
+    const embedder = __capturedMem0Config!.embedder as {
+      provider: string;
+      config: Record<string, unknown>;
+    };
+    expect(embedder.provider).toBe('openai');
+    expect(embedder.config.apiKey).toBe('key123');
+    expect(embedder.config.baseURL).toBeUndefined();
+  });
+
+  it('does not override explicitly set apiKey in config', async () => {
+    const { createMem0Provider: create } = await import('./provider.js');
+
+    await create({
+      config: {
+        mode: 'open-source',
+        oss: {
+          embedder: { provider: 'openai', config: { apiKey: 'explicit-key' } },
+        },
+      },
+      resolveProvider: async () => ({ apiKey: 'registry-key', api: 'openai-completions' }),
+    });
+
+    expect(__capturedMem0Config).toBeDefined();
+    const embedder = __capturedMem0Config!.embedder as {
+      provider: string;
+      config: Record<string, unknown>;
+    };
+    expect(embedder.config.apiKey).toBe('explicit-key');
+  });
+
+  it('throws for platform mode without apiKey', async () => {
+    const { createMem0Provider: create } = await import('./provider.js');
+
+    await expect(create({ config: { mode: 'platform' } })).rejects.toThrow(
+      'Platform mode requires apiKey',
+    );
+  });
+
+  it('sets disableHistory when configured', async () => {
+    const { createMem0Provider: create } = await import('./provider.js');
+
+    await create({
+      config: {
+        mode: 'open-source',
+        oss: { disableHistory: true },
+      },
+    });
+
+    expect(__capturedMem0Config).toBeDefined();
+    expect(__capturedMem0Config!.disableHistory).toBe(true);
   });
 });

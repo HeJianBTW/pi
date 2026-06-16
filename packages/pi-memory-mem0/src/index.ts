@@ -9,11 +9,10 @@
  * Supports ${ENV_VAR:-fallback} in all string values.
  */
 
-import { loadPiSettings } from '@amaster.ai/pi-shared/settings';
+import { loadPiSettings, resolveHome } from '@amaster.ai/pi-shared/settings';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Prefetch } from './prefetch.js';
 import { createMem0Provider, type Mem0Provider } from './provider.js';
-import { TurnSync } from './sync.js';
 import { createMem0Tools } from './tools.js';
 import type { Mem0ExtensionConfig } from './types.js';
 
@@ -39,8 +38,10 @@ function resolveUserId(configUserId?: string): string {
 
 export default function mem0Extension(pi: ExtensionAPI): void {
   let provider: Mem0Provider | undefined;
-  let sync: TurnSync | undefined;
   let prefetch: Prefetch | undefined;
+  let userId = '';
+  let lastUserText = '';
+  let syncing = false;
 
   pi.on('session_start', async (_event, ctx) => {
     const config = loadConfig(ctx.cwd);
@@ -55,14 +56,30 @@ export default function mem0Extension(pi: ExtensionAPI): void {
     try {
       provider = await createMem0Provider({
         config,
-        resolveKey: async (providerName: string) => {
+        homeDir: resolveHome(),
+        resolveProvider: async (providerName: string) => {
           const registry = ctx.modelRegistry as {
+            find?: (
+              provider: string,
+              modelId: string,
+            ) => { baseUrl?: string; api?: string } | undefined;
+            getAll?: () => Array<{ provider: string; baseUrl?: string; api?: string }>;
             getApiKeyForProvider?: (p: string) => Promise<string | undefined>;
           };
-          if (registry.getApiKeyForProvider) {
-            return registry.getApiKeyForProvider(providerName);
+          if (!registry.getApiKeyForProvider) return undefined;
+
+          let model: { baseUrl?: string; api?: string } | undefined;
+          if (registry.getAll) {
+            model = registry.getAll().find((m) => m.provider === providerName);
           }
-          return undefined;
+
+          const apiKey = await registry.getApiKeyForProvider(providerName);
+          if (!apiKey && !model) return undefined;
+          const result: Record<string, string> = {};
+          if (apiKey) result.apiKey = apiKey;
+          if (model?.baseUrl) result.baseUrl = model.baseUrl;
+          if (model?.api) result.api = model.api as string;
+          return result;
         },
       });
     } catch (err) {
@@ -74,8 +91,7 @@ export default function mem0Extension(pi: ExtensionAPI): void {
       return;
     }
 
-    const userId = resolveUserId(config.userId);
-    sync = new TurnSync(provider, userId);
+    userId = resolveUserId(config.userId);
     prefetch = new Prefetch(provider, userId, {
       topK: config.topK ?? 5,
     });
@@ -87,19 +103,39 @@ export default function mem0Extension(pi: ExtensionAPI): void {
     }
   });
 
+  pi.on('input', async (event) => {
+    if (!prefetch) return;
+    const text = (event as { text?: string }).text ?? '';
+    if (text) {
+      prefetch.queue(text);
+      lastUserText = text;
+    }
+  });
+
   pi.on('turn_end', async (event) => {
-    if (!sync || !prefetch) return;
+    if (!provider || !lastUserText) return;
 
     const msg = event.message as { role?: string; content?: unknown };
     const text = extractText(msg);
-    if (!text) return;
+    if (!text || msg.role !== 'assistant') return;
 
-    if (msg.role === 'user') {
-      prefetch.queue(text);
+    if (!syncing) {
+      syncing = true;
+      const userText = lastUserText;
+      lastUserText = '';
+      provider
+        .add(
+          [
+            { role: 'user', content: userText },
+            { role: 'assistant', content: text },
+          ],
+          { userId },
+        )
+        .catch(() => {})
+        .finally(() => {
+          syncing = false;
+        });
     }
-
-    // Buffer messages for paired sync
-    sync.onMessage(msg.role ?? '', text);
   });
 
   pi.on('before_agent_start', async (event) => {
@@ -115,8 +151,9 @@ export default function mem0Extension(pi: ExtensionAPI): void {
 
   pi.on('session_shutdown', async () => {
     provider = undefined;
-    sync = undefined;
     prefetch = undefined;
+    lastUserText = '';
+    syncing = false;
   });
 
   pi.registerCommand('mem0', {

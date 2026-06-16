@@ -3,11 +3,16 @@
  *
  * Uses the `mem0ai` npm SDK which handles:
  * - Platform mode: REST API calls to api.mem0.ai
- * - OSS mode: local SQLite vector store + LLM extraction via configured provider
+ * - OSS mode: in-memory vector store + LLM extraction via configured provider
+ *
+ * In OSS mode, a SQLite snapshot layer persists memories to disk so they survive
+ * process restarts. On init, memories are restored from SQLite into the in-memory
+ * vector store. After each add(), a full snapshot is asynchronously written back.
  */
 
-import { join } from 'node:path';
-import { resolveHome } from '@amaster.ai/pi-shared/settings';
+import { mkdirSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
 import type { AddResult, Mem0ExtensionConfig, MemoryItem } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -114,19 +119,140 @@ class PlatformProvider implements Mem0Provider {
 }
 
 // ---------------------------------------------------------------------------
-// Open-Source Provider (local SQLite)
+// SQLite Snapshot Store — persists mem0 memories to disk for restart recovery
+// ---------------------------------------------------------------------------
+
+interface SqliteDatabase {
+  pragma(sql: string): void;
+  exec(sql: string): void;
+  prepare(sql: string): {
+    all(...args: unknown[]): any[];
+    run(...args: unknown[]): void;
+  };
+  transaction<T>(fn: () => T): () => T;
+  close(): void;
+}
+
+export class SqliteSnapshotStore {
+  private db: SqliteDatabase;
+
+  constructor(dbPath: string) {
+    mkdirSync(dirname(dbPath), { recursive: true });
+    const req = createRequire(import.meta.url);
+    const mem0OssPath = req.resolve('mem0ai/oss');
+    const reqFromMem0 = createRequire(mem0OssPath);
+    const BS3 = reqFromMem0('better-sqlite3');
+    this.db = new BS3(dbPath);
+    this.db.pragma('journal_mode = WAL');
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS memories (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        memory TEXT NOT NULL,
+        created_at TEXT,
+        updated_at TEXT
+      )
+    `);
+  }
+
+  loadAll(
+    userId: string,
+  ): Array<{ id: string; memory: string; created_at?: string; updated_at?: string }> {
+    return this.db
+      .prepare('SELECT id, memory, created_at, updated_at FROM memories WHERE user_id = ?')
+      .all(userId);
+  }
+
+  loadAllUsers(): Array<{ userId: string; items: Array<{ id: string; memory: string }> }> {
+    const rows: Array<{ user_id: string; id: string; memory: string }> = this.db
+      .prepare('SELECT user_id, id, memory FROM memories')
+      .all();
+    const grouped = new Map<string, Array<{ id: string; memory: string }>>();
+    for (const row of rows) {
+      let list = grouped.get(row.user_id);
+      if (!list) {
+        list = [];
+        grouped.set(row.user_id, list);
+      }
+      list.push({ id: row.id, memory: row.memory });
+    }
+    return Array.from(grouped.entries()).map(([userId, items]) => ({ userId, items }));
+  }
+
+  replaceAll(userId: string, items: MemoryItem[]): void {
+    const del = this.db.prepare('DELETE FROM memories WHERE user_id = ?');
+    const ins = this.db.prepare(
+      'INSERT OR REPLACE INTO memories (id, user_id, memory, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
+    );
+    const tx = this.db.transaction(() => {
+      del.run(userId);
+      for (const item of items) {
+        ins.run(item.id, userId, item.memory, item.created_at ?? null, item.updated_at ?? null);
+      }
+    });
+    tx();
+  }
+
+  close(): void {
+    try {
+      this.db.close();
+    } catch {
+      /* ignore */
+    }
+  }
+
+  static tryCreate(dbPath: string): SqliteSnapshotStore | null {
+    try {
+      return new SqliteSnapshotStore(dbPath);
+    } catch {
+      return null;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Open-Source Provider (in-memory vector store + SQLite snapshot persistence)
 // ---------------------------------------------------------------------------
 
 /** Optional key resolver — pulls API keys from pi's model registry. */
 export type KeyResolver = (provider: string) => Promise<string | undefined>;
 
+/** Resolved provider info from the model registry. */
+export interface ResolvedProviderInfo {
+  apiKey?: string;
+  baseUrl?: string;
+  /** API type from model registry, e.g. "openai-completions", "anthropic-messages" */
+  api?: string;
+}
+
+/** Full provider resolver — returns key, baseUrl, and api type from the model registry. */
+export type ProviderResolver = (provider: string) => Promise<ResolvedProviderInfo | undefined>;
+
+/**
+ * Maps a pi model registry `api` field to a mem0-compatible provider name.
+ * mem0ai supports: openai, ollama, lmstudio, google/gemini, azure_openai, langchain (embedder)
+ *                  openai, anthropic, groq, ollama, lmstudio, google/gemini, azure_openai, mistral, deepseek, langchain (llm)
+ */
+export function mapApiToMem0Provider(api: string | undefined, fallback: string): string {
+  if (!api) return fallback;
+  if (api.startsWith('openai')) return 'openai';
+  if (api.startsWith('anthropic')) return 'anthropic';
+  if (api.startsWith('azure')) return 'azure_openai';
+  if (api.startsWith('google') || api.startsWith('gemini')) return 'gemini';
+  return fallback;
+}
+
 class OSSProvider implements Mem0Provider {
   private memory: unknown;
   private initPromise: Promise<void> | null = null;
+  private snapshot: SqliteSnapshotStore | null = null;
+  private syncingSnapshot = false;
 
   constructor(
     private readonly ossConfig: Mem0ExtensionConfig['oss'] | undefined,
     private readonly resolveKey?: KeyResolver,
+    private readonly resolveProvider?: ProviderResolver,
+    private readonly snapshotDbPath?: string,
   ) {}
 
   private async ensureMemory(): Promise<void> {
@@ -142,20 +268,38 @@ class OSSProvider implements Mem0Provider {
     const defaultEmbedder = { provider: 'openai', config: { model: 'text-embedding-3-small' } };
     const defaultLlm = { provider: 'openai', config: { model: 'gpt-4.1-nano' } };
 
-    const embedderProvider = this.ossConfig?.embedder?.provider || defaultEmbedder.provider;
+    let embedderProvider = this.ossConfig?.embedder?.provider || defaultEmbedder.provider;
     const embedderCfg: Record<string, unknown> = {
       ...defaultEmbedder.config,
       ...(this.ossConfig?.embedder?.config ?? {}),
     };
 
-    const llmProvider = this.ossConfig?.llm?.provider || defaultLlm.provider;
+    let llmProvider = this.ossConfig?.llm?.provider || defaultLlm.provider;
     const llmCfg: Record<string, unknown> = {
       ...defaultLlm.config,
       ...(this.ossConfig?.llm?.config ?? {}),
     };
 
-    // Resolve API keys from pi model registry if not explicitly set
-    if (this.resolveKey) {
+    // Resolve provider info (apiKey + baseUrl + api) from pi model registry
+    if (this.resolveProvider) {
+      if (!embedderCfg.apiKey && !embedderCfg.api_key) {
+        const info = await this.resolveProvider(embedderProvider);
+        if (info) {
+          if (info.apiKey) embedderCfg.apiKey = info.apiKey;
+          if (info.baseUrl) embedderCfg.baseURL = info.baseUrl;
+          embedderProvider = mapApiToMem0Provider(info.api, embedderProvider);
+        }
+      }
+      if (!llmCfg.apiKey && !llmCfg.api_key) {
+        const info = await this.resolveProvider(llmProvider);
+        if (info) {
+          if (info.apiKey) llmCfg.apiKey = info.apiKey;
+          if (info.baseUrl) llmCfg.baseURL = info.baseUrl;
+          llmProvider = mapApiToMem0Provider(info.api, llmProvider);
+        }
+      }
+    } else if (this.resolveKey) {
+      // Legacy fallback: only resolve API keys
       if (!embedderCfg.apiKey && !embedderCfg.api_key) {
         const key = await this.resolveKey(embedderProvider);
         if (key) embedderCfg.apiKey = key;
@@ -172,10 +316,9 @@ class OSSProvider implements Mem0Provider {
     if (this.ossConfig?.vectorStore) {
       config.vectorStore = this.ossConfig.vectorStore;
     } else {
-      // Default: SQLite in <PI_AGENT_HOME>/memories/mem0.db (alongside pi-memory's files)
       config.vectorStore = {
-        provider: 'sqlite',
-        config: { dbPath: join(resolveHome(), 'memories', 'mem0.db') },
+        provider: 'memory',
+        config: { collectionName: 'pi_mem0' },
       };
     }
 
@@ -189,9 +332,79 @@ class OSSProvider implements Mem0Provider {
   private async _init(): Promise<void> {
     const mod = await import('mem0ai/oss');
     const Memory = (mod as any).Memory ?? (mod as any).default;
+
+    // Detect broken better-sqlite3 (Node version mismatch) — disable history if so
+    let sqliteOk = true;
+    if (!this.ossConfig?.disableHistory) {
+      try {
+        const req = createRequire(import.meta.url);
+        const mem0OssPath = req.resolve('mem0ai/oss');
+        const reqFromMem0 = createRequire(mem0OssPath);
+        const BS3 = reqFromMem0('better-sqlite3');
+        const testDb = new BS3(':memory:');
+        testDb.close();
+      } catch {
+        sqliteOk = false;
+      }
+    }
+
     const builtConfig = await this._buildConfig();
-    this.memory = new Memory(builtConfig);
-    await (this.memory as any).getAll({ filters: { user_id: '__warmup__' } });
+    if (!sqliteOk) builtConfig.disableHistory = true;
+
+    let mem: any;
+    try {
+      mem = new Memory(builtConfig);
+    } catch (err) {
+      if (sqliteOk && !this.ossConfig?.disableHistory) {
+        builtConfig.disableHistory = true;
+        mem = new Memory(builtConfig);
+      } else {
+        throw err;
+      }
+    }
+
+    this.memory = mem;
+
+    // Initialize SQLite snapshot store for persistence
+    if (this.snapshotDbPath && sqliteOk) {
+      this.snapshot = SqliteSnapshotStore.tryCreate(this.snapshotDbPath);
+    }
+
+    // Restore memories from snapshot into the in-memory vector store
+    if (this.snapshot) {
+      const allUsers = this.snapshot.loadAllUsers();
+      let totalRestored = 0;
+      for (const { userId: uid, items } of allUsers) {
+        for (const item of items) {
+          try {
+            await mem.add([{ role: 'user', content: item.memory }], { userId: uid, infer: false });
+            totalRestored++;
+          } catch {
+            /* skip failed restores */
+          }
+        }
+      }
+      if (totalRestored > 0) {
+        console.log(`[mem0] restored ${totalRestored} memories from snapshot`);
+      }
+    }
+
+    await mem.getAll({ filters: { user_id: '__warmup__' } });
+  }
+
+  private asyncSnapshotSync(userId: string): void {
+    if (!this.snapshot || this.syncingSnapshot) return;
+    this.syncingSnapshot = true;
+    (this.memory as any)
+      .getAll({ filters: { user_id: userId } })
+      .then((results: unknown) => {
+        const items = normalizeResults(results);
+        this.snapshot!.replaceAll(userId, items);
+      })
+      .catch(() => {})
+      .finally(() => {
+        this.syncingSnapshot = false;
+      });
   }
 
   async add(
@@ -202,6 +415,7 @@ class OSSProvider implements Mem0Provider {
     const addOpts: Record<string, unknown> = { userId: opts.userId };
     if (opts.infer === false) addOpts.infer = false;
     const result = await (this.memory as any).add(messages, addOpts);
+    this.asyncSnapshotSync(opts.userId);
     return result as AddResult;
   }
 
@@ -230,17 +444,29 @@ class OSSProvider implements Mem0Provider {
 
 export interface CreateProviderOptions {
   config: Mem0ExtensionConfig;
-  /** Resolve API key from pi model registry by provider name. */
+  /** Resolve API key from pi model registry by provider name. @deprecated Use resolveProvider instead. */
   resolveKey?: KeyResolver;
+  /** Full provider resolver — returns key, baseUrl, and api type from the model registry. */
+  resolveProvider?: ProviderResolver;
+  /** Home directory for default snapshot db path. Falls back to ~/.amaster */
+  homeDir?: string;
 }
 
 export async function createMem0Provider(opts: CreateProviderOptions): Promise<Mem0Provider> {
-  const { config, resolveKey } = opts;
+  const { config, resolveKey, resolveProvider, homeDir } = opts;
   const mode = config.mode ?? 'platform';
 
   if (mode === 'open-source') {
     const useRegistry = config.useRegistryKeys !== false;
-    const provider = new OSSProvider(config.oss, useRegistry ? resolveKey : undefined);
+    const snapshotDbPath =
+      config.oss?.snapshotDbPath ??
+      (homeDir ? join(homeDir, 'memories', 'mem0-snapshot.db') : undefined);
+    const provider = new OSSProvider(
+      config.oss,
+      useRegistry ? resolveKey : undefined,
+      useRegistry ? resolveProvider : undefined,
+      snapshotDbPath,
+    );
     await (provider as any).ensureMemory();
     return provider;
   }
