@@ -137,21 +137,39 @@ describe('Extension loading contract', () => {
 
     it('registers browser_ prefixed tools after session_start', { timeout: 15000 }, async () => {
       const mod = await import(join(EXTENSIONS_DIR, 'pi-browser-use', 'src', 'index.ts'));
+      const upstreamTools = [
+        { name: 'click', description: 'Click', inputSchema: { type: 'object' } },
+        { name: 'take_snapshot', description: 'Snapshot', inputSchema: { type: 'object' } },
+      ] as unknown as Awaited<ReturnType<typeof mod.DevToolsClient.prototype.listAllTools>>;
+      const connectSpy = vi
+        .spyOn(mod.DevToolsClient.prototype, 'connect')
+        .mockResolvedValue(undefined);
+      const listToolsSpy = vi
+        .spyOn(mod.DevToolsClient.prototype, 'listAllTools')
+        .mockResolvedValue(upstreamTools);
       const pi = createMockExtensionAPI();
       // biome-ignore lint/suspicious/noExplicitAny: mock API
-      mod.default(pi as any);
+      try {
+        mod.default(pi as any);
 
-      const sessionStartHandler = pi.on.mock.calls.find(
-        (c: unknown[]) => c[0] === 'session_start',
-      )?.[1] as (...args: unknown[]) => Promise<void>;
-      expect(sessionStartHandler).toBeDefined();
+        const sessionStartHandler = pi.on.mock.calls.find(
+          (c: unknown[]) => c[0] === 'session_start',
+        )?.[1] as (...args: unknown[]) => Promise<void>;
+        expect(sessionStartHandler).toBeDefined();
 
-      await sessionStartHandler({ type: 'session_start', reason: 'startup' }, { cwd: process.cwd() });
+        await sessionStartHandler(
+          { type: 'session_start', reason: 'startup' },
+          { cwd: process.cwd() },
+        );
 
-      expect(pi.registerTool).toHaveBeenCalled();
-      const toolNames = pi.registerTool.mock.calls.map((c: unknown[]) => c[0].name);
-      expect(toolNames).toContain('browser_click');
-      expect(toolNames).toContain('browser_take_snapshot');
+        expect(pi.registerTool).toHaveBeenCalled();
+        const toolNames = pi.registerTool.mock.calls.map((c: unknown[]) => c[0].name);
+        expect(toolNames).toContain('browser_click');
+        expect(toolNames).toContain('browser_take_snapshot');
+      } finally {
+        connectSpy.mockRestore();
+        listToolsSpy.mockRestore();
+      }
     });
   });
 

@@ -51,7 +51,9 @@ export class AmasterAdapter implements TeamworkProvider {
       await this.runAmaster(withJson(await this.buildArgs(['company', 'list'], undefined, false))),
       'AMaster company list',
     );
-    return data.map(mapWorkspace);
+    const workspaces = data.map(mapWorkspace);
+    this.primeDefaultCompanyCache(workspaces);
+    return workspaces;
   }
 
   async listIssues(filter?: IssueListFilter): Promise<Issue[]> {
@@ -157,9 +159,10 @@ export class AmasterAdapter implements TeamworkProvider {
     );
     return data.map((item) => {
       const record = item as Record<string, unknown>;
+      const id = requiredString(record.id);
       return {
-        id: String(record.id ?? ''),
-        title: String(record.title ?? record.name ?? ''),
+        id,
+        title: String(record.title ?? record.name ?? id),
         ...optionalString('description', record.description),
         ...optionalString('status', record.status),
         ...optionalString('lead', record.lead),
@@ -174,9 +177,10 @@ export class AmasterAdapter implements TeamworkProvider {
     );
     return data.map((item) => {
       const record = item as Record<string, unknown>;
+      const id = requiredString(record.id);
       return {
-        id: String(record.id ?? ''),
-        name: String(record.name ?? record.title ?? ''),
+        id,
+        name: String(record.name ?? record.title ?? id),
         ...optionalString('status', record.status),
         ...optionalString('role', record.role),
         ...optionalString('title', record.title),
@@ -197,9 +201,10 @@ export class AmasterAdapter implements TeamworkProvider {
     const data = parseRequiredJsonArray(await this.runAmaster(args), 'AMaster user-directory list');
     return data.map((item) => {
       const record = item as Record<string, unknown>;
+      const id = requiredString(record.id);
       return {
-        id: String(record.id ?? record.userId ?? record.email ?? ''),
-        name: String(record.name ?? record.displayName ?? record.email ?? ''),
+        id,
+        name: String(record.name ?? record.displayName ?? record.label ?? record.email ?? id),
         ...optionalString('email', record.email),
         ...optionalString('role', record.role),
         ...optionalString('type', record.type ?? record.kind),
@@ -278,9 +283,16 @@ export class AmasterAdapter implements TeamworkProvider {
   private async resolveDefaultCompanyId(): Promise<string | undefined> {
     if (this.defaultCompanyId) return this.defaultCompanyId;
     if (this.discoveredCompanyId) return this.discoveredCompanyId;
-    this.workspaceDiscoveryPromise ??= this.discoverSingleCompanyId();
-    this.discoveredCompanyId = await this.workspaceDiscoveryPromise;
-    return this.discoveredCompanyId;
+    if (!this.workspaceDiscoveryPromise) {
+      this.workspaceDiscoveryPromise = this.discoverSingleCompanyId();
+    }
+    try {
+      this.discoveredCompanyId = await this.workspaceDiscoveryPromise;
+      return this.discoveredCompanyId;
+    } catch (error) {
+      this.workspaceDiscoveryPromise = undefined;
+      throw error;
+    }
   }
 
   private async discoverSingleCompanyId(): Promise<string | undefined> {
@@ -294,6 +306,18 @@ export class AmasterAdapter implements TeamworkProvider {
 
   private amasterExecOptions(): Parameters<ExecFn>[2] {
     return this.apiKey ? { env: { AMASTER_BOARD_API_KEY: this.apiKey } } : undefined;
+  }
+
+  private primeDefaultCompanyCache(workspaces: Workspace[]): void {
+    if (this.defaultCompanyId) return;
+    if (workspaces.length === 1) {
+      const id = workspaces[0]!.id;
+      this.discoveredCompanyId = id;
+      this.workspaceDiscoveryPromise = Promise.resolve(id);
+      return;
+    }
+    this.discoveredCompanyId = undefined;
+    this.workspaceDiscoveryPromise = undefined;
   }
 }
 

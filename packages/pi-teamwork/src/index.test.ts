@@ -262,6 +262,60 @@ describe('AmasterAdapter', () => {
     ]);
   });
 
+  it('does not keep a failed default AMaster company discovery cached', async () => {
+    const calls: string[][] = [];
+    let companyListCalls = 0;
+    const adapter = new AmasterAdapter({}, async (_cmd, args) => {
+      calls.push(args);
+      if (args[0] === 'company') {
+        companyListCalls += 1;
+        if (companyListCalls === 1) {
+          return { stdout: '', stderr: 'temporary company lookup failure', code: 1 };
+        }
+        return {
+          stdout: JSON.stringify([{ id: 'company-only', name: 'Only Company' }]),
+          stderr: '',
+          code: 0,
+        };
+      }
+      return { stdout: '[]', stderr: '', code: 0 };
+    });
+
+    await expect(adapter.listIssues()).rejects.toThrow('temporary company lookup failure');
+    await expect(adapter.listIssues()).resolves.toEqual([]);
+
+    expect(calls).toEqual([
+      ['company', 'list', '--json'],
+      ['company', 'list', '--json'],
+      ['issue', 'list', '-C', 'company-only', '--json'],
+    ]);
+  });
+
+  it('warms the default AMaster company cache from workspace_list', async () => {
+    const calls: string[][] = [];
+    const adapter = new AmasterAdapter({}, async (_cmd, args) => {
+      calls.push(args);
+      if (args[0] === 'company') {
+        return {
+          stdout: JSON.stringify([{ id: 'company-only', name: 'Only Company' }]),
+          stderr: '',
+          code: 0,
+        };
+      }
+      return { stdout: '[]', stderr: '', code: 0 };
+    });
+
+    await expect(adapter.listWorkspaces()).resolves.toEqual([
+      { id: 'company-only', name: 'Only Company' },
+    ]);
+    await adapter.listIssues();
+
+    expect(calls).toEqual([
+      ['company', 'list', '--json'],
+      ['issue', 'list', '-C', 'company-only', '--json'],
+    ]);
+  });
+
   it('requires workspaceId when multiple AMaster companies are available', async () => {
     const adapter = new AmasterAdapter({}, async (_cmd, args) => {
       if (args[0] === 'company') {
@@ -348,6 +402,23 @@ describe('AmasterAdapter', () => {
     );
     await expect(adapter.listUserDirectory({ workspaceId: 'company-1' })).rejects.toThrow(
       'AMaster user-directory list did not return a JSON array.',
+    );
+  });
+
+  it('fails AMaster lookup lists when records do not contain canonical ids', async () => {
+    const adapter = new AmasterAdapter(
+      {},
+      successExec(JSON.stringify([{ name: 'Missing ID', email: 'missing@example.com' }])),
+    );
+
+    await expect(adapter.listProjects('company-1')).rejects.toThrow(
+      'AMaster response did not contain a required id.',
+    );
+    await expect(adapter.listAgents('company-1')).rejects.toThrow(
+      'AMaster response did not contain a required id.',
+    );
+    await expect(adapter.listUserDirectory({ workspaceId: 'company-1' })).rejects.toThrow(
+      'AMaster response did not contain a required id.',
     );
   });
 
