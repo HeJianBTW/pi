@@ -39,6 +39,7 @@ const TEAMWORK_GUIDANCE = [
 export default function piTeamworkExtension(pi: ExtensionAPI): void {
   let provider: TeamworkProvider | undefined;
   let readyPromise: Promise<void> | undefined;
+  let sessionGeneration = 0;
   const registeredToolNames = new Set<string>();
   const suspendedToolNames = new Set<string>();
 
@@ -72,6 +73,7 @@ export default function piTeamworkExtension(pi: ExtensionAPI): void {
   }
 
   pi.on('session_start', async (_event, ctx) => {
+    const generation = ++sessionGeneration;
     provider = undefined;
     readyPromise = undefined;
 
@@ -95,8 +97,10 @@ export default function piTeamworkExtension(pi: ExtensionAPI): void {
       const amasterConfig: AmasterAdapterConfig = { ...(config.amaster ?? {}) };
       const apiKey = amasterApiKeyFromSessionStart(_event);
       if (apiKey) amasterConfig.apiKey = apiKey;
-      provider = await initAmasterProvider(amasterConfig, exec);
-      registerProviderTools(provider);
+      const adapter = await initAmasterProvider(amasterConfig, exec);
+      if (generation !== sessionGeneration) return;
+      provider = adapter;
+      registerProviderTools(adapter);
       ctx.ui.setStatus(STATUS_KEY, 'teamwork: amaster');
       return;
     }
@@ -109,6 +113,7 @@ export default function piTeamworkExtension(pi: ExtensionAPI): void {
 
     readyPromise = (async () => {
       const { adapter, installResult } = await initMulticaProvider(config.multica ?? {}, exec);
+      if (generation !== sessionGeneration) return;
       provider = adapter;
       registerProviderTools(adapter);
 
@@ -141,6 +146,7 @@ export default function piTeamworkExtension(pi: ExtensionAPI): void {
 
       ctx.ui.setStatus(STATUS_KEY, 'teamwork: multica');
     })().catch((err) => {
+      if (generation !== sessionGeneration) return;
       ctx.ui.setStatus(
         STATUS_KEY,
         `teamwork: multica (error: ${err instanceof Error ? err.message : String(err)})`,
@@ -149,6 +155,7 @@ export default function piTeamworkExtension(pi: ExtensionAPI): void {
   });
 
   pi.on('session_shutdown', async () => {
+    sessionGeneration++;
     provider = undefined;
     readyPromise = undefined;
   });
@@ -190,7 +197,7 @@ function createTeamworkTools(ensureReady: EnsureReadyFn, getProvider: GetProvide
       name: 'workspace_list',
       label: 'Teamwork',
       description:
-        'List all workspaces you belong to. Call this first to get a workspace ID before using other teamwork tools.',
+        'List all workspaces you belong to. Use this to discover or switch workspaces. For the AMaster provider, workspaceId is the canonical AMaster companyId passed to the CLI as -C.',
       promptSnippet: 'List workspaces in the shared project tracker.',
       parameters: Type.Object({}),
       async execute() {
@@ -214,7 +221,12 @@ function createTeamworkTools(ensureReady: EnsureReadyFn, getProvider: GetProvide
       promptSnippet:
         'List issues from a shared project tracker where humans and agents collaborate.',
       parameters: Type.Object({
-        workspaceId: Type.String({ description: 'Workspace ID (get from workspace_list).' }),
+        workspaceId: Type.Optional(
+          Type.String({
+            description:
+              'Workspace ID. For AMaster provider this is the canonical companyId from workspace_list and is passed to the CLI as -C. Optional when the account has exactly one workspace.',
+          }),
+        ),
         status: Type.Optional(
           Type.String({ description: 'Filter by status (e.g. todo, in_progress, done, blocked).' }),
         ),
@@ -241,7 +253,12 @@ function createTeamworkTools(ensureReady: EnsureReadyFn, getProvider: GetProvide
       description:
         'Get detailed information about a specific issue (a work item in the shared project tracker).',
       parameters: Type.Object({
-        workspaceId: Type.String({ description: 'Workspace ID (get from workspace_list).' }),
+        workspaceId: Type.Optional(
+          Type.String({
+            description:
+              'Workspace ID. For AMaster provider this is the canonical companyId from workspace_list and is passed to the CLI as -C. Optional when the account has exactly one workspace.',
+          }),
+        ),
         id: Type.String({ description: 'The issue ID.' }),
       }),
       async execute(_toolCallId, params) {
@@ -265,7 +282,12 @@ function createTeamworkTools(ensureReady: EnsureReadyFn, getProvider: GetProvide
       promptSnippet:
         'Create issues / tickets in a shared project tracker for humans or agents to collaborate on.',
       parameters: Type.Object({
-        workspaceId: Type.String({ description: 'Workspace ID (get from workspace_list).' }),
+        workspaceId: Type.Optional(
+          Type.String({
+            description:
+              'Workspace ID. For AMaster provider this is the canonical companyId from workspace_list and is passed to the CLI as -C. Optional when the account has exactly one workspace.',
+          }),
+        ),
         title: Type.String({ description: 'Issue title.' }),
         description: Type.Optional(Type.String({ description: 'Issue description.' })),
         priority: Type.Optional(
@@ -292,7 +314,12 @@ function createTeamworkTools(ensureReady: EnsureReadyFn, getProvider: GetProvide
       description:
         'Update an existing issue in the shared project tracker. Can change title, description, status, priority, or assignee.',
       parameters: Type.Object({
-        workspaceId: Type.String({ description: 'Workspace ID (get from workspace_list).' }),
+        workspaceId: Type.Optional(
+          Type.String({
+            description:
+              'Workspace ID. For AMaster provider this is the canonical companyId from workspace_list and is passed to the CLI as -C. Optional when the account has exactly one workspace.',
+          }),
+        ),
         id: Type.String({ description: 'The issue ID to update.' }),
         title: Type.Optional(Type.String({ description: 'New title.' })),
         description: Type.Optional(Type.String({ description: 'New description.' })),
@@ -325,11 +352,19 @@ function createTeamworkTools(ensureReady: EnsureReadyFn, getProvider: GetProvide
       description:
         'Add a comment to an issue in the shared project tracker. Use for progress updates, questions, or blockers visible to other collaborators (humans or agents).',
       parameters: Type.Object({
-        workspaceId: Type.String({ description: 'Workspace ID (get from workspace_list).' }),
+        workspaceId: Type.Optional(
+          Type.String({
+            description:
+              'Workspace ID. For AMaster provider this is the canonical companyId from workspace_list and is passed to the CLI as -C. Optional when the account has exactly one workspace.',
+          }),
+        ),
         issueId: Type.String({ description: 'The issue ID to comment on.' }),
         content: Type.String({ description: 'Comment content.' }),
         parentId: Type.Optional(
-          Type.String({ description: 'Parent comment ID for threaded replies.' }),
+          Type.String({
+            description:
+              'Optional provider-specific parent comment ID. The AMaster provider currently creates top-level comments.',
+          }),
         ),
       }),
       async execute(_toolCallId, params) {
@@ -354,7 +389,12 @@ function createTeamworkTools(ensureReady: EnsureReadyFn, getProvider: GetProvide
       label: 'Teamwork',
       description: 'List all projects in a workspace.',
       parameters: Type.Object({
-        workspaceId: Type.String({ description: 'Workspace ID (get from workspace_list).' }),
+        workspaceId: Type.Optional(
+          Type.String({
+            description:
+              'Workspace ID. For AMaster provider this is the canonical companyId from workspace_list and is passed to the CLI as -C. Optional when the account has exactly one workspace.',
+          }),
+        ),
       }),
       async execute(_toolCallId, params) {
         const err = await ensureReady();
@@ -376,7 +416,10 @@ function createTeamworkTools(ensureReady: EnsureReadyFn, getProvider: GetProvide
         'List AMaster agents available in the current teamwork workspace. This is read-only and helps choose assignable agents.',
       parameters: Type.Object({
         workspaceId: Type.Optional(
-          Type.String({ description: 'Workspace ID (get from workspace_list).' }),
+          Type.String({
+            description:
+              'Workspace ID. For AMaster provider this is the canonical companyId from workspace_list and is passed to the CLI as -C. Optional when the account has exactly one workspace.',
+          }),
         ),
       }),
       async execute(_toolCallId, params) {
@@ -402,7 +445,10 @@ function createTeamworkTools(ensureReady: EnsureReadyFn, getProvider: GetProvide
         'List assignable AMaster users or members in the current teamwork workspace. This is read-only and helps choose assignees.',
       parameters: Type.Object({
         workspaceId: Type.Optional(
-          Type.String({ description: 'Workspace ID (get from workspace_list).' }),
+          Type.String({
+            description:
+              'Workspace ID. For AMaster provider this is the canonical companyId from workspace_list and is passed to the CLI as -C. Optional when the account has exactly one workspace.',
+          }),
         ),
         q: Type.Optional(Type.String({ description: 'Optional search text.' })),
         limit: Type.Optional(Type.Number({ description: 'Max number of results.' })),

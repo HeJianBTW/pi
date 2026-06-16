@@ -90,6 +90,8 @@ For Pi Agent / AMaster Employee integration, configure the provider explicitly. 
 
 Pi Agent may pass a browser-session board credential through `session_start.amasterEmployee.apiKey`. The extension uses it only in memory for child CLI execution and does not save it to settings.
 
+For the AMaster provider, the LUI-facing `workspaceId` parameter maps to an AMaster company id. The adapter passes that value to the AMaster Employee CLI as `-C <companyId>`. `workspace_list` is a discovery/switch helper, not a hard prerequisite for every tool call: when the account has exactly one company, the adapter falls back to that company automatically; when multiple companies are available and no `workspaceId` is provided, the tool fails clearly and asks the caller to pass a canonical id from `workspace_list`. The adapter does not keep a global "active company" state.
+
 | Field | Description |
 |-------|-------------|
 | `enabled` | Enable/disable the extension |
@@ -101,7 +103,7 @@ Pi Agent may pass a browser-session board credential through `session_start.amas
 | `multica.appUrl` | Self-hosted server frontend URL. Required when `serverUrl` is a remote address |
 | `multica.autoInstall` | Auto-install multica CLI if missing (default: `true`) |
 | `amaster.apiBase` | AMaster Employee API base passed to the CLI as `--api-base` |
-| `amaster.companyId` | Optional AMaster company override passed to the CLI as `-C` |
+| `amaster.companyId` | Optional AMaster canonical company id override passed to the CLI as `-C` |
 | `amaster.context` / `profile` / `authStore` | Optional CLI context/profile/auth-store overrides |
 
 ## Tools

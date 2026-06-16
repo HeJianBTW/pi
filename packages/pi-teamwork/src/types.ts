@@ -12,7 +12,7 @@ export type Issue = {
 };
 
 export type IssueCreateInput = {
-  workspaceId: string;
+  workspaceId?: string;
   title: string;
   description?: string;
   priority?: string;
@@ -29,7 +29,7 @@ export type IssueUpdateInput = {
 };
 
 export type IssueListFilter = {
-  workspaceId: string;
+  workspaceId?: string;
   status?: string;
   assignee?: string;
   project?: string;

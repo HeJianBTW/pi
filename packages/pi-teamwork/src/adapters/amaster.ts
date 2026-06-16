@@ -29,6 +29,8 @@ export class AmasterAdapter implements TeamworkProvider {
   private readonly apiKey?: string;
   private readonly commonArgs: string[];
   private readonly defaultCompanyId?: string;
+  private discoveredCompanyId: string | undefined;
+  private workspaceDiscoveryPromise: Promise<string | undefined> | undefined;
 
   constructor(
     config: AmasterAdapterConfig,
@@ -46,14 +48,14 @@ export class AmasterAdapter implements TeamworkProvider {
 
   async listWorkspaces(): Promise<Workspace[]> {
     const data = parseRequiredJsonArray(
-      await this.runAmaster(withJson(this.buildArgs(['company', 'list'], undefined, false))),
+      await this.runAmaster(withJson(await this.buildArgs(['company', 'list'], undefined, false))),
       'AMaster company list',
     );
     return data.map(mapWorkspace);
   }
 
   async listIssues(filter?: IssueListFilter): Promise<Issue[]> {
-    const args = this.buildArgs(['issue', 'list'], filter?.workspaceId);
+    const args = await this.buildArgs(['issue', 'list'], filter?.workspaceId);
     if (filter?.status) args.push('--status', filter.status);
     if (filter?.assignee) args.push('--assignee', filter.assignee);
     if (filter?.project) args.push('--project', filter.project);
@@ -65,7 +67,7 @@ export class AmasterAdapter implements TeamworkProvider {
 
   async getIssue(id: string, workspaceId?: string): Promise<Issue | undefined> {
     const data = parseRequiredJson(
-      await this.runAmaster(withJson(this.buildArgs(['issue', 'get', id], workspaceId))),
+      await this.runAmaster(withJson(await this.buildArgs(['issue', 'get', id], workspaceId))),
       'AMaster issue get',
     );
     const issue = unwrapIssue(data);
@@ -74,7 +76,10 @@ export class AmasterAdapter implements TeamworkProvider {
   }
 
   async createIssue(input: IssueCreateInput): Promise<Issue> {
-    const args = this.buildArgs(['issue', 'create', '--title', input.title], input.workspaceId);
+    const args = await this.buildArgs(
+      ['issue', 'create', '--title', input.title],
+      input.workspaceId,
+    );
     if (input.description) args.push('--description', input.description);
     if (input.priority) args.push('--priority', input.priority);
     if (input.assignee) args.push('--assignee', input.assignee);
@@ -91,7 +96,7 @@ export class AmasterAdapter implements TeamworkProvider {
     input: IssueUpdateInput,
     workspaceId?: string,
   ): Promise<Issue | undefined> {
-    const args = this.buildArgs(['issue', 'update', id], workspaceId);
+    const args = await this.buildArgs(['issue', 'update', id], workspaceId);
     if (input.title) args.push('--title', input.title);
     if (input.description) args.push('--description', input.description);
     if (input.status) args.push('--status', input.status);
@@ -107,13 +112,12 @@ export class AmasterAdapter implements TeamworkProvider {
   async addComment(
     issueId: string,
     content: string,
-    parentId?: string,
+    _parentId?: string,
     workspaceId?: string,
   ): Promise<Comment> {
+    const args = ['issue', 'comment', issueId, '--content', content];
     const data = parseRequiredJson(
-      await this.runAmaster(
-        withJson(this.buildArgs(['issue', 'comment', issueId, '--content', content], workspaceId)),
-      ),
+      await this.runAmaster(withJson(await this.buildArgs(args, workspaceId))),
       'AMaster issue comment',
     );
     if (data && typeof data === 'object' && !Array.isArray(data)) {
@@ -126,7 +130,6 @@ export class AmasterAdapter implements TeamworkProvider {
         content: String(item.content ?? item.body ?? content),
         ...optionalString('author', item.author ?? item.authorName),
         ...optionalString('createdAt', item.createdAt ?? item.created_at),
-        ...(parentId ? { parentId } : {}),
       };
     }
     throw new Error('AMaster issue comment did not return a created comment.');
@@ -134,7 +137,7 @@ export class AmasterAdapter implements TeamworkProvider {
 
   async listComments(issueId: string, workspaceId?: string): Promise<Comment[]> {
     const summary = await this.getIssue(issueId, workspaceId);
-    const comments = Array.isArray(summary?.metadata?.comments) ? summary.metadata.comments : [];
+    const comments = collectCommentRecords(summary?.metadata);
     return comments.map((item) => {
       const record = item as Record<string, unknown>;
       return {
@@ -143,16 +146,13 @@ export class AmasterAdapter implements TeamworkProvider {
         content: String(record.content ?? record.body ?? ''),
         ...optionalString('author', record.author ?? record.authorName),
         ...optionalString('createdAt', record.createdAt ?? record.created_at),
-        ...(record.parentId || record.parent_id
-          ? { parentId: String(record.parentId ?? record.parent_id) }
-          : {}),
       };
     });
   }
 
   async listProjects(workspaceId?: string): Promise<Project[]> {
     const data = parseRequiredJsonArray(
-      await this.runAmaster(withJson(this.buildArgs(['project', 'list'], workspaceId))),
+      await this.runAmaster(withJson(await this.buildArgs(['project', 'list'], workspaceId))),
       'AMaster project list',
     );
     return data.map((item) => {
@@ -169,7 +169,7 @@ export class AmasterAdapter implements TeamworkProvider {
 
   async listAgents(workspaceId?: string): Promise<AgentSummary[]> {
     const data = parseRequiredJsonArray(
-      await this.runAmaster(withJson(this.buildArgs(['agent', 'list'], workspaceId))),
+      await this.runAmaster(withJson(await this.buildArgs(['agent', 'list'], workspaceId))),
       'AMaster agent list',
     );
     return data.map((item) => {
@@ -190,7 +190,7 @@ export class AmasterAdapter implements TeamworkProvider {
     q?: string;
     limit?: number;
   }): Promise<UserDirectoryEntry[]> {
-    const args = this.buildArgs(['user-directory', 'list'], filter?.workspaceId);
+    const args = await this.buildArgs(['user-directory', 'list'], filter?.workspaceId);
     if (filter?.q) args.push('--q', filter.q);
     if (filter?.limit) args.push('--limit', String(filter.limit));
     args.push('--json');
@@ -212,7 +212,7 @@ export class AmasterAdapter implements TeamworkProvider {
     const [teamwork, runtime] = await Promise.all([
       this.runOptional(
         this.binary,
-        withJson(this.buildArgs(['status'])),
+        withJson(this.buildArgsSync(['status'])),
         this.amasterExecOptions(),
       ),
       this.runOptional(this.runtimeBinary, ['daemon', 'status']),
@@ -254,12 +254,42 @@ export class AmasterAdapter implements TeamworkProvider {
     }
   }
 
-  private buildArgs(args: string[], workspaceId?: string, useDefaultCompany = true): string[] {
+  private async buildArgs(
+    args: string[],
+    workspaceId?: string,
+    useDefaultCompany = true,
+  ): Promise<string[]> {
+    const next = [...args, ...this.commonArgs];
+    const companyId =
+      normalizeWorkspaceId(workspaceId) ??
+      (useDefaultCompany ? await this.resolveDefaultCompanyId() : undefined);
+    if (companyId) next.push('-C', companyId);
+    return next;
+  }
+
+  private buildArgsSync(args: string[], workspaceId?: string, useDefaultCompany = true): string[] {
     const next = [...args, ...this.commonArgs];
     const companyId =
       normalizeWorkspaceId(workspaceId) ?? (useDefaultCompany ? this.defaultCompanyId : undefined);
     if (companyId) next.push('-C', companyId);
     return next;
+  }
+
+  private async resolveDefaultCompanyId(): Promise<string | undefined> {
+    if (this.defaultCompanyId) return this.defaultCompanyId;
+    if (this.discoveredCompanyId) return this.discoveredCompanyId;
+    this.workspaceDiscoveryPromise ??= this.discoverSingleCompanyId();
+    this.discoveredCompanyId = await this.workspaceDiscoveryPromise;
+    return this.discoveredCompanyId;
+  }
+
+  private async discoverSingleCompanyId(): Promise<string | undefined> {
+    const workspaces = await this.listWorkspaces();
+    if (workspaces.length === 0) return undefined;
+    if (workspaces.length === 1) return workspaces[0]!.id;
+    throw new Error(
+      'Multiple AMaster workspaces are available; pass workspaceId from workspace_list.',
+    );
   }
 
   private amasterExecOptions(): Parameters<ExecFn>[2] {
@@ -296,7 +326,7 @@ function parseJsonOrRaw(text: string): unknown {
 function mapWorkspace(raw: unknown): Workspace {
   const item = asRecord(raw);
   if (!item) throw new Error('AMaster company list returned a malformed workspace.');
-  const id = requiredString(item.id ?? item.companyId ?? item.urlKey);
+  const id = requiredString(item.id ?? item.companyId);
   return {
     id,
     name: String(item.name ?? item.title ?? item.urlKey ?? id),
@@ -332,6 +362,20 @@ function buildIssueMetadata(item: Record<string, unknown>): Record<string, unkno
     if (item[key] !== undefined) metadata[key] = sanitizeValue(item[key]);
   }
   return metadata;
+}
+
+function collectCommentRecords(metadata: Record<string, unknown> | undefined): unknown[] {
+  if (!metadata) return [];
+  const comments: unknown[] = [];
+  appendCommentRecords(comments, metadata.comments);
+  const nestedMetadata = asRecord(metadata.metadata);
+  appendCommentRecords(comments, nestedMetadata?.comments);
+  return comments;
+}
+
+function appendCommentRecords(output: unknown[], value: unknown): void {
+  if (!Array.isArray(value)) return;
+  output.push(...value);
 }
 
 const ISSUE_TOP_LEVEL_FIELDS = new Set([
@@ -415,7 +459,7 @@ function requiredString(value: unknown): string {
 
 function normalizeWorkspaceId(workspaceId: string | undefined): string | undefined {
   const trimmed = workspaceId?.trim();
-  if (!trimmed || trimmed === 'current') return undefined;
+  if (!trimmed) return undefined;
   return trimmed;
 }
 

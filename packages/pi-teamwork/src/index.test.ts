@@ -67,6 +67,7 @@ describe('AmasterAdapter', () => {
       {
         apiBase: 'http://amaster.test',
         apiKey: 'session-key',
+        companyId: 'company-1',
       },
       exec,
     );
@@ -80,7 +81,16 @@ describe('AmasterAdapter', () => {
     });
     expect(calls[0]).toMatchObject({
       cmd: 'amaster-employee',
-      args: ['issue', 'get', 'ISS-1', '--api-base', 'http://amaster.test', '--json'],
+      args: [
+        'issue',
+        'get',
+        'ISS-1',
+        '--api-base',
+        'http://amaster.test',
+        '-C',
+        'company-1',
+        '--json',
+      ],
       processEnvApiKey: previousApiKey,
       childEnvApiKey: 'session-key',
     });
@@ -95,20 +105,23 @@ describe('AmasterAdapter', () => {
     let capturedProcessEnvApiKey: string | undefined;
     let capturedChildEnvApiKey: string | undefined;
     const execStarted = new Promise<void>((resolve) => {
-      const adapter = new AmasterAdapter({ apiKey: 'session-key' }, async (_cmd, args, options) => {
-        capturedArgs = args;
-        capturedProcessEnvApiKey = process.env.AMASTER_BOARD_API_KEY;
-        capturedChildEnvApiKey = options?.env?.AMASTER_BOARD_API_KEY;
-        resolve();
-        await new Promise<void>((release) => {
-          releaseExec = release;
-        });
-        return {
-          stdout: JSON.stringify({ issue: { id: 'ISS-1', title: 'Issue', status: 'todo' } }),
-          stderr: '',
-          code: 0,
-        };
-      });
+      const adapter = new AmasterAdapter(
+        { apiKey: 'session-key', companyId: 'company-1' },
+        async (_cmd, args, options) => {
+          capturedArgs = args;
+          capturedProcessEnvApiKey = process.env.AMASTER_BOARD_API_KEY;
+          capturedChildEnvApiKey = options?.env?.AMASTER_BOARD_API_KEY;
+          resolve();
+          await new Promise<void>((release) => {
+            releaseExec = release;
+          });
+          return {
+            stdout: JSON.stringify({ issue: { id: 'ISS-1', title: 'Issue', status: 'todo' } }),
+            stderr: '',
+            code: 0,
+          };
+        },
+      );
 
       issuePromise = adapter.getIssue('ISS-1');
     });
@@ -161,6 +174,28 @@ describe('AmasterAdapter', () => {
     ]);
   });
 
+  it('ignores parent comment IDs for AMaster top-level comments', async () => {
+    const calls: string[][] = [];
+    const adapter = new AmasterAdapter({}, async (_cmd, args) => {
+      calls.push(args);
+      return {
+        stdout: JSON.stringify({ id: 'COMMENT-2', content: 'reply' }),
+        stderr: '',
+        code: 0,
+      };
+    });
+
+    await expect(
+      adapter.addComment('ISS-1', 'reply', 'COMMENT-1', 'company-2'),
+    ).resolves.toMatchObject({
+      id: 'COMMENT-2',
+      issueId: 'ISS-1',
+    });
+    expect(calls).toEqual([
+      ['issue', 'comment', 'ISS-1', '--content', 'reply', '-C', 'company-2', '--json'],
+    ]);
+  });
+
   it('lists all AMaster companies without probing runtime status', async () => {
     const calls: Array<{ cmd: string; args: string[] }> = [];
     const adapter = new AmasterAdapter({}, async (cmd, args) => {
@@ -182,6 +217,71 @@ describe('AmasterAdapter', () => {
     expect(calls).toEqual([{ cmd: 'amaster-employee', args: ['company', 'list', '--json'] }]);
   });
 
+  it('uses the canonical workspace id returned by workspace_list for later -C calls', async () => {
+    const calls: string[][] = [];
+    const adapter = new AmasterAdapter({}, async (_cmd, args) => {
+      calls.push(args);
+      if (args[0] === 'company') {
+        return {
+          stdout: JSON.stringify([
+            { id: 'company-canonical-1', name: 'Display Name', urlKey: 'display-name' },
+          ]),
+          stderr: '',
+          code: 0,
+        };
+      }
+      return { stdout: '[]', stderr: '', code: 0 };
+    });
+
+    const workspaces = await adapter.listWorkspaces();
+    await adapter.listIssues({ workspaceId: workspaces[0]!.id });
+
+    expect(workspaces).toEqual([{ id: 'company-canonical-1', name: 'Display Name' }]);
+    expect(calls[1]).toEqual(['issue', 'list', '-C', 'company-canonical-1', '--json']);
+  });
+
+  it('falls back to the only AMaster company when no workspaceId is provided', async () => {
+    const calls: string[][] = [];
+    const adapter = new AmasterAdapter({}, async (_cmd, args) => {
+      calls.push(args);
+      if (args[0] === 'company') {
+        return {
+          stdout: JSON.stringify([{ id: 'company-only', name: 'Only Company' }]),
+          stderr: '',
+          code: 0,
+        };
+      }
+      return { stdout: '[]', stderr: '', code: 0 };
+    });
+
+    await adapter.listIssues();
+
+    expect(calls).toEqual([
+      ['company', 'list', '--json'],
+      ['issue', 'list', '-C', 'company-only', '--json'],
+    ]);
+  });
+
+  it('requires workspaceId when multiple AMaster companies are available', async () => {
+    const adapter = new AmasterAdapter({}, async (_cmd, args) => {
+      if (args[0] === 'company') {
+        return {
+          stdout: JSON.stringify([
+            { id: 'company-1', name: 'One' },
+            { id: 'company-2', name: 'Two' },
+          ]),
+          stderr: '',
+          code: 0,
+        };
+      }
+      return { stdout: '[]', stderr: '', code: 0 };
+    });
+
+    await expect(adapter.listIssues()).rejects.toThrow(
+      'Multiple AMaster workspaces are available; pass workspaceId from workspace_list.',
+    );
+  });
+
   it('maps create and update envelope responses', async () => {
     const exec: ExecFn = async (_cmd, args) => {
       if (args[1] === 'create') {
@@ -200,13 +300,15 @@ describe('AmasterAdapter', () => {
     const adapter = new AmasterAdapter({}, exec);
 
     await expect(
-      adapter.createIssue({ workspaceId: 'current', title: 'Created' }),
+      adapter.createIssue({ workspaceId: 'company-1', title: 'Created' }),
     ).resolves.toMatchObject({
       id: 'ISS-2',
       title: 'Created',
       status: 'backlog',
     });
-    await expect(adapter.updateIssue('ISS-2', { status: 'done' })).resolves.toMatchObject({
+    await expect(
+      adapter.updateIssue('ISS-2', { status: 'done' }, 'company-1'),
+    ).resolves.toMatchObject({
       id: 'ISS-2',
       title: 'Updated',
       status: 'done',
@@ -216,15 +318,15 @@ describe('AmasterAdapter', () => {
   it('fails create when AMaster CLI does not return a created issue', async () => {
     const adapter = new AmasterAdapter({}, successExec('not json'));
 
-    await expect(adapter.createIssue({ workspaceId: 'current', title: 'Created' })).rejects.toThrow(
-      'AMaster issue create did not return valid JSON.',
-    );
+    await expect(
+      adapter.createIssue({ workspaceId: 'company-1', title: 'Created' }),
+    ).rejects.toThrow('AMaster issue create did not return valid JSON.');
   });
 
   it('fails comments when AMaster CLI does not return a comment id', async () => {
     const adapter = new AmasterAdapter({}, successExec(JSON.stringify({ content: 'saved' })));
 
-    await expect(adapter.addComment('ISS-1', 'saved')).rejects.toThrow(
+    await expect(adapter.addComment('ISS-1', 'saved', undefined, 'company-1')).rejects.toThrow(
       'AMaster issue comment did not return a created comment.',
     );
   });
@@ -235,16 +337,16 @@ describe('AmasterAdapter', () => {
     await expect(adapter.listWorkspaces()).rejects.toThrow(
       'AMaster company list did not return a JSON array.',
     );
-    await expect(adapter.listIssues()).rejects.toThrow(
+    await expect(adapter.listIssues({ workspaceId: 'company-1' })).rejects.toThrow(
       'AMaster issue list did not return a JSON array.',
     );
-    await expect(adapter.listProjects()).rejects.toThrow(
+    await expect(adapter.listProjects('company-1')).rejects.toThrow(
       'AMaster project list did not return a JSON array.',
     );
-    await expect(adapter.listAgents()).rejects.toThrow(
+    await expect(adapter.listAgents('company-1')).rejects.toThrow(
       'AMaster agent list did not return a JSON array.',
     );
-    await expect(adapter.listUserDirectory()).rejects.toThrow(
+    await expect(adapter.listUserDirectory({ workspaceId: 'company-1' })).rejects.toThrow(
       'AMaster user-directory list did not return a JSON array.',
     );
   });
@@ -275,7 +377,7 @@ describe('AmasterAdapter', () => {
       ),
     );
 
-    await expect(adapter.getIssue('ISS-1')).resolves.toMatchObject({
+    await expect(adapter.getIssue('ISS-1', 'company-1')).resolves.toMatchObject({
       id: 'ISS-1',
       project: 'project-1',
       metadata: {
@@ -293,6 +395,35 @@ describe('AmasterAdapter', () => {
         agent: { id: 'agent-1', name: 'Codex' },
       },
     });
+  });
+
+  it('lists comments from both top-level and nested AMaster metadata comment arrays', async () => {
+    const adapter = new AmasterAdapter(
+      {},
+      successExec(
+        JSON.stringify({
+          issue: {
+            id: 'ISS-1',
+            title: 'With comments',
+            status: 'todo',
+            comments: [{ id: 'TOP-1', body: 'top level' }],
+            metadata: {
+              comments: [{ id: 'META-1', content: 'nested', authorName: 'Alice' }],
+            },
+          },
+        }),
+      ),
+    );
+
+    await expect(adapter.listComments('ISS-1', 'company-1')).resolves.toEqual([
+      { id: 'TOP-1', issueId: 'ISS-1', content: 'top level' },
+      {
+        id: 'META-1',
+        issueId: 'ISS-1',
+        content: 'nested',
+        author: 'Alice',
+      },
+    ]);
   });
 
   it('exposes agent and user-directory read-only lists through the AMaster CLI', async () => {
@@ -895,6 +1026,81 @@ describe('piTeamworkExtension Multica provider', () => {
     await sessionStartHandler({}, ctx);
 
     expect(activeTools).toEqual(['read', 'issue_list', 'agent_list', 'user_directory_list']);
+
+    if (previousSettings === undefined) delete process.env.PI_SETTINGS_DIR;
+    else process.env.PI_SETTINGS_DIR = previousSettings;
+    await import('node:fs/promises').then(({ rm }) =>
+      rm(settingsDir, { recursive: true, force: true }),
+    );
+  });
+
+  it('ignores stale Multica initialization after switching to AMaster', async () => {
+    const previousSettings = process.env.PI_SETTINGS_DIR;
+    const settingsDir = await createSettingsDir({
+      'pi-teamwork': {
+        provider: 'multica',
+        multica: { autoInstall: true },
+      },
+    });
+    process.env.PI_SETTINGS_DIR = settingsDir;
+    let releaseMultica!: () => void;
+    let markMulticaStarted!: () => void;
+    const multicaStarted = new Promise<void>((resolve) => {
+      markMulticaStarted = resolve;
+    });
+    const tools = new Map<string, RegisteredTool>();
+    const pi = {
+      on: vi.fn(),
+      registerCommand: vi.fn(),
+      registerTool: vi.fn((tool: RegisteredTool) => tools.set(tool.name, tool)),
+      getActiveTools: vi.fn(() => ['issue_list']),
+      setActiveTools: vi.fn(),
+      exec: vi.fn(async (_cmd: string, args: string[]) => {
+        if (args.includes('--version')) {
+          markMulticaStarted();
+          await new Promise<void>((resolve) => {
+            releaseMultica = resolve;
+          });
+        }
+        return { stdout: '[]', stderr: '', code: 0 };
+      }),
+    };
+    const statusUpdates: string[] = [];
+    const ctx = {
+      cwd: settingsDir,
+      ui: {
+        setStatus: (_key: string, value: string) => statusUpdates.push(value),
+        notify: vi.fn(),
+      },
+    };
+    piTeamworkExtension(pi as never);
+    const sessionStartHandler = pi.on.mock.calls.find((call) => call[0] === 'session_start')?.[1];
+    const beforeAgentStartHandler = pi.on.mock.calls.find(
+      (call) => call[0] === 'before_agent_start',
+    )?.[1];
+
+    const multicaStart = sessionStartHandler({}, ctx);
+    await multicaStarted;
+    await import('node:fs/promises').then(async ({ writeFile }) => {
+      const path = await import('node:path');
+      await writeFile(
+        path.join(settingsDir, '.pi', 'settings.json'),
+        JSON.stringify({
+          'pi-teamwork': {
+            provider: 'amaster',
+          },
+        }),
+      );
+    });
+    await sessionStartHandler({}, ctx);
+    releaseMultica();
+    await multicaStart;
+    const prompt = await beforeAgentStartHandler({ systemPrompt: 'base' });
+    const agentResult = await tools.get('agent_list')!.execute('tool-1' as never, {} as never);
+
+    expect(statusUpdates.at(-1)).toBe('teamwork: amaster');
+    expect(prompt.systemPrompt).toContain('<teamwork-guidance>');
+    expect(agentResult.content[0]?.text).toBe('No agents found.');
 
     if (previousSettings === undefined) delete process.env.PI_SETTINGS_DIR;
     else process.env.PI_SETTINGS_DIR = previousSettings;
