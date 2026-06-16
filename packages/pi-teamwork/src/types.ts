@@ -58,15 +58,6 @@ export type Workspace = {
   name: string;
 };
 
-export type AgentSummary = {
-  id: string;
-  name: string;
-  status?: string;
-  role?: string;
-  title?: string;
-  urlKey?: string;
-};
-
 export type UserDirectoryEntry = {
   id: string;
   name: string;
@@ -95,7 +86,6 @@ export interface TeamworkProvider {
   ): Promise<Comment>;
   listComments(issueId: string, workspaceId?: string): Promise<Comment[]>;
   listProjects(workspaceId?: string): Promise<Project[]>;
-  listAgents?(workspaceId?: string): Promise<AgentSummary[]>;
   listUserDirectory?(filter?: {
     workspaceId?: string;
     q?: string;

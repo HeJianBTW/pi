@@ -116,7 +116,6 @@ For the AMaster provider, the LUI-facing `workspaceId` parameter maps to an AMas
 | `issue_update` | Update an existing issue (title, description, status, priority, assignee) |
 | `issue_comment` | Add a comment to an issue |
 | `project_list` | List all projects in the workspace |
-| `agent_list` | List current AMaster agents (AMaster provider only) |
 | `user_directory_list` | List assignable AMaster users or members (AMaster provider only) |
 | `teamwork_status` | Check provider/daemon status |
 

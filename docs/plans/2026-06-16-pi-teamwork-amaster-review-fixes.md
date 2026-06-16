@@ -15,7 +15,7 @@
 - [x] Route workspace/company IDs into AMaster CLI commands instead of relying on the active profile.
 - [x] Replace global `process.env.AMASTER_BOARD_API_KEY` mutation with per-child AMaster CLI auth env.
 - [x] Fail strictly when create/comment CLI responses do not contain real result objects or IDs.
-- [x] Stop converting malformed CLI responses into empty workspace/issue/project/agent/user lists.
+- [x] Stop converting malformed CLI responses into empty workspace/issue/project/user lists.
 - [x] Preserve raw AMaster issue metadata/custom fields after sensitive-field redaction.
 - [x] Parallelize status probes and keep workspace listing independent from runtime status.
 
@@ -46,7 +46,7 @@
 4. Replace loose JSON parsing with required JSON helpers for arrays and objects.
 5. Require a real comment ID for `issue comment` responses.
 6. Merge raw metadata/custom fields plus unmodeled issue fields into `Issue.metadata`, using existing redaction.
-7. Add workspace parameters to AMaster `agent_list` and `user_directory_list`.
+7. Add workspace parameters to AMaster `user_directory_list`.
 8. Parallelize employee/runtime probes in `status()`.
 
 ### Task 3: Verify And Update The PR
@@ -65,7 +65,7 @@
 
 ## Verification Notes
 
-- 2026-06-16: Added regression coverage for workspace `-C` routing, `company list --json`, per-child auth env, strict malformed response failures, required comment IDs, issue metadata preservation, and AMaster read-only agent/user-directory workspace filters.
+- 2026-06-16: Added regression coverage for workspace `-C` routing, `company list --json`, per-child auth env, strict malformed response failures, required comment IDs, issue metadata preservation, and AMaster read-only user-directory workspace filters.
 - 2026-06-16: Confirmed the new tests fail against the previous implementation: auth used global env, workspace IDs were ignored, workspace list came from `status()`, comment/list failures were hidden, and metadata was dropped.
 - 2026-06-16: `pnpm --filter @amaster.ai/pi-teamwork test` passed with 67 tests.
 - 2026-06-16: `pnpm --filter @amaster.ai/pi-teamwork typecheck` passed.
@@ -73,3 +73,4 @@
 - 2026-06-16: `pnpm exec biome check packages/pi-teamwork/src/adapters/amaster.ts packages/pi-teamwork/src/index.ts packages/pi-teamwork/src/types.ts packages/pi-teamwork/src/index.test.ts` passed.
 - 2026-06-16: `git diff --check` passed.
 - 2026-06-16: Targeted scans found no removed remote IP literal and no real bearer/connector/db/cookie secret pattern in changed implementation/docs files.
+- 2026-06-16: Removed the AMaster-only `agent_list` LUI tool path from pi-teamwork registration, provider types, adapter implementation, README, tests, and stale plan wording. `user_directory_list` remains as the assignable-user discovery tool.

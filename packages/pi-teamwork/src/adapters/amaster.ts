@@ -1,5 +1,4 @@
 import type {
-  AgentSummary,
   AmasterAdapterConfig,
   Comment,
   ExecFn,
@@ -166,25 +165,6 @@ export class AmasterAdapter implements TeamworkProvider {
         ...optionalString('description', record.description),
         ...optionalString('status', record.status),
         ...optionalString('lead', record.lead),
-      };
-    });
-  }
-
-  async listAgents(workspaceId?: string): Promise<AgentSummary[]> {
-    const data = parseRequiredJsonArray(
-      await this.runAmaster(withJson(await this.buildArgs(['agent', 'list'], workspaceId))),
-      'AMaster agent list',
-    );
-    return data.map((item) => {
-      const record = item as Record<string, unknown>;
-      const id = requiredString(record.id);
-      return {
-        id,
-        name: String(record.name ?? record.title ?? id),
-        ...optionalString('status', record.status),
-        ...optionalString('role', record.role),
-        ...optionalString('title', record.title),
-        ...optionalString('urlKey', record.urlKey ?? record.url_key),
       };
     });
   }

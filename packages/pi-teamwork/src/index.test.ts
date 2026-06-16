@@ -397,9 +397,6 @@ describe('AmasterAdapter', () => {
     await expect(adapter.listProjects('company-1')).rejects.toThrow(
       'AMaster project list did not return a JSON array.',
     );
-    await expect(adapter.listAgents('company-1')).rejects.toThrow(
-      'AMaster agent list did not return a JSON array.',
-    );
     await expect(adapter.listUserDirectory({ workspaceId: 'company-1' })).rejects.toThrow(
       'AMaster user-directory list did not return a JSON array.',
     );
@@ -412,9 +409,6 @@ describe('AmasterAdapter', () => {
     );
 
     await expect(adapter.listProjects('company-1')).rejects.toThrow(
-      'AMaster response did not contain a required id.',
-    );
-    await expect(adapter.listAgents('company-1')).rejects.toThrow(
       'AMaster response did not contain a required id.',
     );
     await expect(adapter.listUserDirectory({ workspaceId: 'company-1' })).rejects.toThrow(
@@ -497,19 +491,10 @@ describe('AmasterAdapter', () => {
     ]);
   });
 
-  it('exposes agent and user-directory read-only lists through the AMaster CLI', async () => {
+  it('exposes user-directory read-only lists through the AMaster CLI', async () => {
     const calls: string[][] = [];
     const exec: ExecFn = async (_cmd, args) => {
       calls.push(args);
-      if (args[0] === 'agent') {
-        return {
-          stdout: JSON.stringify([
-            { id: 'agent-1', name: 'Codex', status: 'active', urlKey: 'codex' },
-          ]),
-          stderr: '',
-          code: 0,
-        };
-      }
       return {
         stdout: JSON.stringify([
           { id: 'user-1', name: 'Alice', email: 'alice@example.com', role: 'owner' },
@@ -520,16 +505,6 @@ describe('AmasterAdapter', () => {
     };
     const adapter = new AmasterAdapter({}, exec);
 
-    await expect(adapter.listAgents('company-2')).resolves.toEqual([
-      {
-        id: 'agent-1',
-        name: 'Codex',
-        status: 'active',
-        role: undefined,
-        title: undefined,
-        urlKey: 'codex',
-      },
-    ]);
     await expect(
       adapter.listUserDirectory({ workspaceId: 'company-2', q: 'Alice', limit: 5 }),
     ).resolves.toEqual([
@@ -543,7 +518,6 @@ describe('AmasterAdapter', () => {
       },
     ]);
     expect(calls).toEqual([
-      ['agent', 'list', '-C', 'company-2', '--json'],
       ['user-directory', 'list', '-C', 'company-2', '--q', 'Alice', '--limit', '5', '--json'],
     ]);
   });
@@ -645,8 +619,7 @@ describe('piTeamworkExtension AMaster provider', () => {
         "const fs = require('node:fs');",
         'const args = process.argv.slice(2);',
         `fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({ args, hasApiKey: Boolean(process.env.AMASTER_BOARD_API_KEY) }) + '\\n');`,
-        "if (args[0] === 'agent') console.log(JSON.stringify([{ id: 'agent-1', name: 'Codex' }]));",
-        "else if (args[0] === 'user-directory') console.log(JSON.stringify([{ id: 'user-1', name: 'Alice' }]));",
+        "if (args[0] === 'user-directory') console.log(JSON.stringify([{ id: 'user-1', name: 'Alice' }]));",
         "else console.log('[]');",
       ].join('\n'),
     );
@@ -706,24 +679,16 @@ describe('piTeamworkExtension AMaster provider', () => {
     );
 
     const { result, calls } = await withFakeAmasterEmployeeCli(async () => {
-      const agentResult = await tools
-        .get('agent_list')!
-        .execute('tool-1' as never, { workspaceId: 'company-2' } as never);
       const userResult = await tools
         .get('user_directory_list')!
         .execute('tool-2' as never, { workspaceId: 'company-2', q: 'Ali' } as never);
-      return { agentResult, userResult };
+      return { userResult };
     });
 
     expect(statusUpdates).toContain('teamwork: amaster');
-    expect(result.agentResult.content[0]?.text).toContain('agent-1');
     expect(result.userResult.content[0]?.text).toContain('Alice');
     expect(pi.exec).not.toHaveBeenCalled();
     expect(calls).toEqual([
-      {
-        args: ['agent', 'list', '--api-base', 'http://amaster.test', '-C', 'company-2', '--json'],
-        hasApiKey: true,
-      },
       {
         args: [
           'user-directory',
@@ -789,7 +754,6 @@ describe('piTeamworkExtension AMaster provider', () => {
       'issue_update',
       'issue_comment',
       'project_list',
-      'agent_list',
       'user_directory_list',
       'teamwork_status',
     ]);
@@ -858,7 +822,6 @@ describe('piTeamworkExtension Multica provider', () => {
       'project_list',
       'teamwork_status',
     ]);
-    expect(toolNames).not.toContain('agent_list');
     expect(toolNames).not.toContain('user_directory_list');
 
     if (previousSettings === undefined) delete process.env.PI_SETTINGS_DIR;
@@ -928,7 +891,7 @@ describe('piTeamworkExtension Multica provider', () => {
       },
     });
     process.env.PI_SETTINGS_DIR = settingsDir;
-    let activeTools = ['read', 'agent_list', 'user_directory_list', 'issue_list'];
+    let activeTools = ['read', 'user_directory_list', 'issue_list'];
     const pi = {
       on: vi.fn(),
       registerCommand: vi.fn(),
@@ -1027,8 +990,6 @@ describe('piTeamworkExtension Multica provider', () => {
     await sessionStartHandler({}, ctx);
 
     expect(activeTools).toEqual(['read', 'issue_list']);
-    expect(pi.setActiveTools).not.toHaveBeenLastCalledWith(expect.arrayContaining(['agent_list']));
-
     if (previousSettings === undefined) delete process.env.PI_SETTINGS_DIR;
     else process.env.PI_SETTINGS_DIR = previousSettings;
     await import('node:fs/promises').then(({ rm }) =>
@@ -1044,7 +1005,7 @@ describe('piTeamworkExtension Multica provider', () => {
       },
     });
     process.env.PI_SETTINGS_DIR = settingsDir;
-    let activeTools = ['read', 'agent_list', 'user_directory_list', 'issue_list'];
+    let activeTools = ['read', 'user_directory_list', 'issue_list'];
     const pi = {
       on: vi.fn(),
       registerCommand: vi.fn(),
@@ -1096,7 +1057,7 @@ describe('piTeamworkExtension Multica provider', () => {
     });
     await sessionStartHandler({}, ctx);
 
-    expect(activeTools).toEqual(['read', 'issue_list', 'agent_list', 'user_directory_list']);
+    expect(activeTools).toEqual(['read', 'issue_list', 'user_directory_list']);
 
     if (previousSettings === undefined) delete process.env.PI_SETTINGS_DIR;
     else process.env.PI_SETTINGS_DIR = previousSettings;
@@ -1167,11 +1128,13 @@ describe('piTeamworkExtension Multica provider', () => {
     releaseMultica();
     await multicaStart;
     const prompt = await beforeAgentStartHandler({ systemPrompt: 'base' });
-    const agentResult = await tools.get('agent_list')!.execute('tool-1' as never, {} as never);
+    const userResult = await tools
+      .get('user_directory_list')!
+      .execute('tool-1' as never, {} as never);
 
     expect(statusUpdates.at(-1)).toBe('teamwork: amaster');
     expect(prompt.systemPrompt).toContain('<teamwork-guidance>');
-    expect(agentResult.content[0]?.text).toBe('No agents found.');
+    expect(userResult.content[0]?.text).toBe('No assignable users found.');
 
     if (previousSettings === undefined) delete process.env.PI_SETTINGS_DIR;
     else process.env.PI_SETTINGS_DIR = previousSettings;
@@ -1188,7 +1151,7 @@ describe('piTeamworkExtension Multica provider', () => {
       },
     });
     process.env.PI_SETTINGS_DIR = settingsDir;
-    let activeTools = ['read', 'issue_list', 'agent_list'];
+    let activeTools = ['read', 'issue_list', 'user_directory_list'];
     const pi = {
       on: vi.fn(),
       registerCommand: vi.fn(),
@@ -1231,7 +1194,7 @@ describe('piTeamworkExtension Multica provider', () => {
       },
     });
     process.env.PI_SETTINGS_DIR = settingsDir;
-    let activeTools = ['read', 'issue_list', 'agent_list'];
+    let activeTools = ['read', 'issue_list', 'user_directory_list'];
     const pi = {
       on: vi.fn(),
       registerCommand: vi.fn(),

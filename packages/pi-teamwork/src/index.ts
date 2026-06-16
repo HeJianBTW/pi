@@ -16,7 +16,6 @@ const TEAMWORK_TOOL_ORDER = [
   'issue_update',
   'issue_comment',
   'project_list',
-  'agent_list',
   'user_directory_list',
   'teamwork_status',
 ] as const;
@@ -410,35 +409,6 @@ function createTeamworkTools(ensureReady: EnsureReadyFn, getProvider: GetProvide
     }),
 
     defineTool({
-      name: 'agent_list',
-      label: 'Teamwork',
-      description:
-        'List AMaster agents available in the current teamwork workspace. This is read-only and helps choose assignable agents.',
-      parameters: Type.Object({
-        workspaceId: Type.Optional(
-          Type.String({
-            description:
-              'Workspace ID. For AMaster provider this is the canonical companyId from workspace_list and is passed to the CLI as -C. Optional when the account has exactly one workspace.',
-          }),
-        ),
-      }),
-      async execute(_toolCallId, params) {
-        const err = await ensureReady();
-        if (err) return textResult(err);
-        const activeProvider = getProvider();
-        if (!activeProvider.listAgents)
-          return textResult('The current teamwork provider does not support agent_list.');
-        try {
-          const agents = await activeProvider.listAgents(params.workspaceId);
-          if (agents.length === 0) return textResult('No agents found.');
-          return textResult(JSON.stringify(agents, null, 2));
-        } catch (error) {
-          return textResult(`Error: ${error instanceof Error ? error.message : String(error)}`);
-        }
-      },
-    }),
-
-    defineTool({
       name: 'user_directory_list',
       label: 'Teamwork',
       description:
@@ -492,7 +462,6 @@ function createTeamworkTools(ensureReady: EnsureReadyFn, getProvider: GetProvide
 
 function supportedToolNamesForProvider(provider: TeamworkProvider): Set<string> {
   const supportedToolNames = new Set<string>(TEAMWORK_TOOL_ORDER);
-  if (!provider.listAgents) supportedToolNames.delete('agent_list');
   if (!provider.listUserDirectory) supportedToolNames.delete('user_directory_list');
   return supportedToolNames;
 }
