@@ -19,20 +19,15 @@ function failExec(stderr = 'error', code = 1): ExecFn {
 }
 
 describe('AmasterAdapter', () => {
-  it('uses managed AMaster CLI commands, per-call auth env, and unwraps issue envelopes', async () => {
-    const previousApiKey = process.env.AMASTER_BOARD_API_KEY;
+  it('uses managed AMaster CLI commands and unwraps issue envelopes', async () => {
     const calls: Array<{
       cmd: string;
       args: string[];
-      processEnvApiKey: string | undefined;
-      childEnvApiKey: string | undefined;
     }> = [];
-    const exec: ExecFn = async (cmd, args, options) => {
+    const exec: ExecFn = async (cmd, args) => {
       calls.push({
         cmd,
         args,
-        processEnvApiKey: process.env.AMASTER_BOARD_API_KEY,
-        childEnvApiKey: options?.env?.AMASTER_BOARD_API_KEY,
       });
       if (args[0] === 'issue' && args[1] === 'get') {
         return {
@@ -54,7 +49,6 @@ describe('AmasterAdapter', () => {
     const adapter = new AmasterAdapter(
       {
         apiBase: 'http://amaster.test',
-        apiKey: 'session-key',
         companyId: 'company-1',
       },
       exec,
@@ -79,26 +73,21 @@ describe('AmasterAdapter', () => {
         'company-1',
         '--json',
       ],
-      processEnvApiKey: previousApiKey,
-      childEnvApiKey: 'session-key',
     });
-    expect(process.env.AMASTER_BOARD_API_KEY).toBe(previousApiKey);
   });
 
-  it('does not mutate global api-key env while child CLI execution is pending', async () => {
+  it('does not put AMaster api keys in adapter CLI args or global env', async () => {
     const previousApiKey = process.env.AMASTER_BOARD_API_KEY;
     let releaseExec!: () => void;
     let issuePromise!: Promise<unknown>;
     let capturedArgs: string[] = [];
     let capturedProcessEnvApiKey: string | undefined;
-    let capturedChildEnvApiKey: string | undefined;
     const execStarted = new Promise<void>((resolve) => {
       const adapter = new AmasterAdapter(
         { apiKey: 'session-key', companyId: 'company-1' },
-        async (_cmd, args, options) => {
+        async (_cmd, args) => {
           capturedArgs = args;
           capturedProcessEnvApiKey = process.env.AMASTER_BOARD_API_KEY;
-          capturedChildEnvApiKey = options?.env?.AMASTER_BOARD_API_KEY;
           resolve();
           await new Promise<void>((release) => {
             releaseExec = release;
@@ -118,7 +107,6 @@ describe('AmasterAdapter', () => {
     expect(capturedArgs).not.toContain('--api-key');
     expect(capturedArgs).not.toContain('session-key');
     expect(capturedProcessEnvApiKey).toBe(previousApiKey);
-    expect(capturedChildEnvApiKey).toBe('session-key');
     expect(process.env.AMASTER_BOARD_API_KEY).toBe(previousApiKey);
     releaseExec();
     await expect(issuePromise).resolves.toMatchObject({ id: 'ISS-1' });
@@ -693,6 +681,69 @@ describe('piTeamworkExtension AMaster provider', () => {
       },
     ]);
     expect(JSON.stringify(calls)).not.toContain('session-key');
+
+    if (previousSettings === undefined) delete process.env.PI_SETTINGS_DIR;
+    else process.env.PI_SETTINGS_DIR = previousSettings;
+    await import('node:fs/promises').then(({ rm }) =>
+      rm(settingsDir, { recursive: true, force: true }),
+    );
+  });
+
+  it('passes configured AMaster api key only to child env', async () => {
+    const previousSettings = process.env.PI_SETTINGS_DIR;
+    const settingsDir = await createSettingsDir({
+      'pi-teamwork': {
+        provider: 'amaster',
+        amaster: {
+          apiBase: 'http://amaster.test',
+          apiKey: 'configured-key',
+        },
+      },
+    });
+    process.env.PI_SETTINGS_DIR = settingsDir;
+    const tools = new Map<string, RegisteredTool>();
+    const pi = {
+      on: vi.fn(),
+      registerCommand: vi.fn(),
+      registerTool: vi.fn((tool: RegisteredTool) => tools.set(tool.name, tool)),
+      exec: vi.fn(async () => ({ stdout: '[]', stderr: '', code: 0 })),
+    };
+    piTeamworkExtension(pi as never);
+    const sessionStartHandler = pi.on.mock.calls.find((call) => call[0] === 'session_start')?.[1];
+
+    await sessionStartHandler(
+      {},
+      {
+        cwd: settingsDir,
+        ui: {
+          setStatus: vi.fn(),
+          notify: vi.fn(),
+        },
+      },
+    );
+
+    const { calls } = await withFakeAmasterEmployeeCli(async () => {
+      await tools
+        .get('user_directory_list')!
+        .execute('tool-1' as never, { workspaceId: 'company-2' } as never);
+    });
+
+    expect(pi.exec).not.toHaveBeenCalled();
+    expect(calls).toEqual([
+      {
+        args: [
+          'user-directory',
+          'list',
+          '--api-base',
+          'http://amaster.test',
+          '-C',
+          'company-2',
+          '--json',
+        ],
+        hasApiKey: true,
+      },
+    ]);
+    expect(JSON.stringify(calls)).not.toContain('configured-key');
 
     if (previousSettings === undefined) delete process.env.PI_SETTINGS_DIR;
     else process.env.PI_SETTINGS_DIR = previousSettings;

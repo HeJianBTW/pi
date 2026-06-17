@@ -97,7 +97,6 @@ export interface TeamworkProvider {
 export type ExecFn = (
   command: string,
   args: string[],
-  options?: { env?: Record<string, string> },
 ) => Promise<{ stdout: string; stderr: string; code: number }>;
 
 export type MulticaAdapterConfig = {

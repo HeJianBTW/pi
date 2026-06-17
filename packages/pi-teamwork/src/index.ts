@@ -83,20 +83,37 @@ export default function piTeamworkExtension(pi: ExtensionAPI): void {
       return;
     }
 
-    const exec: ExecFn = async (command, args, options) => {
-      if (options?.env && Object.keys(options.env).length > 0) {
-        return execWithEnv(command, args, options.env, ctx.cwd);
-      }
-      const result = await pi.exec(command, args);
+    const exec: ExecFn = async (command, args) => {
+      const result = await pi.exec(command, args, { cwd: ctx.cwd });
       return { stdout: result.stdout, stderr: result.stderr, code: result.code };
     };
 
     const providerName = config.provider ?? 'multica';
     if (providerName === 'amaster') {
       const amasterConfig: AmasterAdapterConfig = { ...(config.amaster ?? {}) };
-      const apiKey = amasterApiKeyFromSessionStart(_event);
-      if (apiKey) amasterConfig.apiKey = apiKey;
-      const adapter = await initAmasterProvider(amasterConfig, exec);
+      const eventRecord =
+        _event && typeof _event === 'object' && !Array.isArray(_event)
+          ? (_event as unknown as { amasterEmployee?: unknown })
+          : undefined;
+      const amasterEmployee = eventRecord?.amasterEmployee;
+      const sessionApiKey =
+        amasterEmployee && typeof amasterEmployee === 'object' && !Array.isArray(amasterEmployee)
+          ? (amasterEmployee as Record<string, unknown>).apiKey
+          : undefined;
+      const apiKey =
+        typeof sessionApiKey === 'string' && sessionApiKey.trim()
+          ? sessionApiKey.trim()
+          : typeof amasterConfig.apiKey === 'string' && amasterConfig.apiKey.trim()
+            ? amasterConfig.apiKey.trim()
+            : undefined;
+      delete amasterConfig.apiKey;
+      const amasterExec: ExecFn = apiKey
+        ? (command, args) =>
+            command === 'amaster-employee'
+              ? execWithEnv(command, args, { AMASTER_BOARD_API_KEY: apiKey }, ctx.cwd)
+              : exec(command, args)
+        : exec;
+      const adapter = await initAmasterProvider(amasterConfig, amasterExec);
       if (generation !== sessionGeneration) return;
       provider = adapter;
       registerProviderTools(adapter);
@@ -498,16 +515,6 @@ function alignActiveTeamworkTools(
   } catch {
     // Older test harnesses and pre-session runtimes may not expose active tool controls.
   }
-}
-
-function amasterApiKeyFromSessionStart(event: unknown): string | undefined {
-  if (!event || typeof event !== 'object' || Array.isArray(event)) return undefined;
-  const amasterEmployee = (event as Record<string, unknown>).amasterEmployee;
-  if (!amasterEmployee || typeof amasterEmployee !== 'object' || Array.isArray(amasterEmployee)) {
-    return undefined;
-  }
-  const apiKey = (amasterEmployee as Record<string, unknown>).apiKey;
-  return typeof apiKey === 'string' && apiKey.trim() ? apiKey.trim() : undefined;
 }
 
 function textResult(text: string) {
