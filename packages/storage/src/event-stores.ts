@@ -18,28 +18,36 @@ import type {
   RuntimeToolEvent,
   ToolEventStore,
 } from '@amaster.ai/pi-shared';
-import { readJsonFile, writeJsonFile } from './json-file.js';
+import { appendJsonlFile, readJsonFile, readJsonlFile, writeJsonFile } from './json-file.js';
 
+/**
+ * Stores timeline events in JSONL format (one JSON object per line).
+ *
+ * Append is O(1) regardless of file size — no read-modify-write cycle.
+ */
 export class JsonFileRuntimeTimelineEventStore implements RuntimeTimelineEventStore {
   private writeTail: Promise<unknown> = Promise.resolve();
+  private index:
+    | {
+        seqBySession: Map<string, number>;
+        eventIds: Set<string>;
+      }
+    | undefined = undefined;
 
-  constructor(
-    private readonly filePath: string,
-    private readonly maxEvents: number,
-  ) {}
+  constructor(private readonly filePath: string) {}
 
   async append(event: RuntimeTimelineEventInput): Promise<void> {
     await this.enqueue(async () => {
-      const events = await this.readAll();
-      if (events.some((candidate) => candidate.eventId === event.eventId)) {
+      const { seqBySession, eventIds } = await this.getIndex();
+      if (eventIds.has(event.eventId)) {
         return;
       }
-      const sessionEvents = events.filter((candidate) => candidate.sessionId === event.sessionId);
-      const eventSeq =
-        sessionEvents.reduce((max, candidate) => Math.max(max, candidate.eventSeq), 0) + 1;
-      events.push({ ...event, eventSeq });
-      const retained = this.maxEvents > 0 ? events.slice(-this.maxEvents) : events;
-      await writeJsonFile(this.filePath, retained);
+      const seqMap = seqBySession;
+      const current = seqMap.get(event.sessionId) ?? 0;
+      const eventSeq = current + 1;
+      seqMap.set(event.sessionId, eventSeq);
+      eventIds.add(event.eventId);
+      await appendJsonlFile(this.filePath, { ...event, eventSeq });
     });
   }
 
@@ -77,8 +85,23 @@ export class JsonFileRuntimeTimelineEventStore implements RuntimeTimelineEventSt
     return sorted.slice(-limit);
   }
 
-  private readAll(): Promise<RuntimeTimelineEvent[]> {
-    return readJsonFile<RuntimeTimelineEvent[]>(this.filePath, []);
+  private async getIndex(): Promise<NonNullable<JsonFileRuntimeTimelineEventStore['index']>> {
+    if (this.index === undefined) {
+      const events = await this.readAll();
+      const seqBySession = new Map<string, number>();
+      const eventIds = new Set<string>();
+      for (const e of events) {
+        eventIds.add(e.eventId);
+        const prev = seqBySession.get(e.sessionId) ?? 0;
+        if (e.eventSeq > prev) seqBySession.set(e.sessionId, e.eventSeq);
+      }
+      this.index = { seqBySession, eventIds };
+    }
+    return this.index;
+  }
+
+  private async readAll(): Promise<RuntimeTimelineEvent[]> {
+    return readJsonlFile<RuntimeTimelineEvent>(this.filePath);
   }
 
   private async enqueue<T>(operation: () => Promise<T>): Promise<T> {

@@ -7,7 +7,16 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { chmod, copyFile, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import {
+  appendFile,
+  chmod,
+  copyFile,
+  mkdir,
+  readFile,
+  rename,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
 import path from 'node:path';
 
 export async function readJsonFile<T>(filePath: string, fallback: T): Promise<T> {
@@ -58,4 +67,32 @@ function readJsonFileStrict<T>(filePath: string): Promise<T> {
 
 function jsonBackupPath(filePath: string): string {
   return `${filePath}.bak`;
+}
+
+export async function appendJsonlFile(filePath: string, value: unknown): Promise<void> {
+  await mkdir(path.dirname(filePath), { recursive: true });
+  await appendFile(filePath, `${JSON.stringify(value)}\n`);
+}
+
+export async function readJsonlFile<T>(filePath: string): Promise<T[]> {
+  let content: string;
+  try {
+    content = await readFile(filePath, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return [];
+    }
+    throw error;
+  }
+  const results: T[] = [];
+  for (const line of content.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    try {
+      results.push(JSON.parse(trimmed) as T);
+    } catch {
+      // skip malformed lines
+    }
+  }
+  return results;
 }

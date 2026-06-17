@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -14,7 +14,7 @@ describe('JsonFileRuntimeTimelineEventStore', () => {
   it('assigns per-session eventSeq and returns events in timeline order', async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'pi-events-'));
     tmpDirs.push(dir);
-    const store = new JsonFileRuntimeTimelineEventStore(path.join(dir, 'events.json'), 100);
+    const store = new JsonFileRuntimeTimelineEventStore(path.join(dir, 'events.json'));
 
     await store.append(event('event-1', 'session-1', 'runtime_event'));
     await store.append(event('event-2', 'session-1', 'tool_call_started'));
@@ -34,7 +34,7 @@ describe('JsonFileRuntimeTimelineEventStore', () => {
   it('supports afterSeq replay windows', async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'pi-events-'));
     tmpDirs.push(dir);
-    const store = new JsonFileRuntimeTimelineEventStore(path.join(dir, 'events.json'), 100);
+    const store = new JsonFileRuntimeTimelineEventStore(path.join(dir, 'events.json'));
 
     await store.append(event('event-1', 'session-1', 'runtime_event'));
     await store.append(event('event-2', 'session-1', 'tool_call_started'));
@@ -51,7 +51,7 @@ describe('JsonFileRuntimeTimelineEventStore', () => {
   it('preserves append order for events written in the same millisecond', async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'pi-events-'));
     tmpDirs.push(dir);
-    const store = new JsonFileRuntimeTimelineEventStore(path.join(dir, 'events.json'), 100);
+    const store = new JsonFileRuntimeTimelineEventStore(path.join(dir, 'events.json'));
     const createdAt = '2026-05-13T00:00:00.000Z';
 
     await store.append(event('z-delta', 'session-1', 'assistant_thinking_delta', { createdAt }));
@@ -68,7 +68,7 @@ describe('JsonFileRuntimeTimelineEventStore', () => {
   it('supports stable createdAt/eventSeq cursor paging over merged timeline order', async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'pi-events-'));
     tmpDirs.push(dir);
-    const store = new JsonFileRuntimeTimelineEventStore(path.join(dir, 'events.json'), 100);
+    const store = new JsonFileRuntimeTimelineEventStore(path.join(dir, 'events.json'));
 
     await store.append(event('event-1', 'session-1', 'runtime_event'));
     await store.append(
@@ -98,7 +98,7 @@ describe('JsonFileRuntimeTimelineEventStore', () => {
   it('uses eventSeq for cursor paging across same-millisecond events', async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'pi-events-'));
     tmpDirs.push(dir);
-    const store = new JsonFileRuntimeTimelineEventStore(path.join(dir, 'events.json'), 100);
+    const store = new JsonFileRuntimeTimelineEventStore(path.join(dir, 'events.json'));
     const createdAt = '2026-05-13T00:00:00.000Z';
 
     await store.append(event('z-delta', 'session-1', 'assistant_thinking_delta', { createdAt }));
@@ -121,7 +121,7 @@ describe('JsonFileRuntimeTimelineEventStore', () => {
   it('treats eventId as append idempotency key', async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'pi-events-'));
     tmpDirs.push(dir);
-    const store = new JsonFileRuntimeTimelineEventStore(path.join(dir, 'events.json'), 100);
+    const store = new JsonFileRuntimeTimelineEventStore(path.join(dir, 'events.json'));
 
     await store.append(event('event-1', 'session-1', 'runtime_event'));
     await store.append(event('event-1', 'session-1', 'runtime_event'));
@@ -136,7 +136,7 @@ describe('JsonFileRuntimeTimelineEventStore', () => {
   it('serializes concurrent appends without duplicate eventSeq values', async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'pi-events-'));
     tmpDirs.push(dir);
-    const store = new JsonFileRuntimeTimelineEventStore(path.join(dir, 'events.json'), 100);
+    const store = new JsonFileRuntimeTimelineEventStore(path.join(dir, 'events.json'));
 
     await Promise.all(
       Array.from({ length: 20 }, (_, index) =>
@@ -155,7 +155,7 @@ describe('JsonFileRuntimeTimelineEventStore', () => {
   it('waits for queued writes before listing events', async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'pi-events-'));
     tmpDirs.push(dir);
-    const store = new JsonFileRuntimeTimelineEventStore(path.join(dir, 'events.json'), 100);
+    const store = new JsonFileRuntimeTimelineEventStore(path.join(dir, 'events.json'));
 
     const append = store.append(event('event-1', 'session-1', 'runtime_event'));
 
@@ -163,21 +163,6 @@ describe('JsonFileRuntimeTimelineEventStore', () => {
       store.list({ tenantId: 'tenant-1', sessionId: 'session-1' }),
     ).resolves.toMatchObject([{ eventId: 'event-1', eventSeq: 1 }]);
     await append;
-  });
-
-  it('recovers from a corrupt primary file using the backup', async () => {
-    const dir = await mkdtemp(path.join(os.tmpdir(), 'pi-events-'));
-    tmpDirs.push(dir);
-    const filePath = path.join(dir, 'events.json');
-    const store = new JsonFileRuntimeTimelineEventStore(filePath, 100);
-
-    await store.append(event('event-1', 'session-1', 'runtime_event'));
-    await store.append(event('event-2', 'session-1', 'runtime_event'));
-    await writeFile(filePath, '[');
-
-    expect(await store.list({ tenantId: 'tenant-1', sessionId: 'session-1' })).toMatchObject([
-      { eventId: 'event-1', eventSeq: 1 },
-    ]);
   });
 });
 

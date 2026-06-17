@@ -60,10 +60,7 @@ export function createJsonRuntimeStorage(
       path.join(agentDir, 'llm-generation-events.json'),
       eventLimits.llmGenerationEvents,
     ),
-    timelineEvents: new JsonFileRuntimeTimelineEventStore(
-      path.join(agentDir, 'events.json'),
-      Math.max(eventLimits.runtimeEvents, eventLimits.toolEvents, eventLimits.llmGenerationEvents),
-    ),
+    timelineEvents: new JsonFileRuntimeTimelineEventStore(path.join(agentDir, 'events.json')),
     subagents: new JsonFileSubagentRunStore(path.join(agentDir, 'subagents.json')),
     artifacts: new JsonFileArtifactStore(path.join(agentDir, 'artifacts.json')),
   };
