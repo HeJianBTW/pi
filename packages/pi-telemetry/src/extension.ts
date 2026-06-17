@@ -179,6 +179,7 @@ export default function telemetryExtension(pi: ExtensionAPI): void {
   let exporter: RuntimeEventExporter = new NoopRuntimeEventExporter();
   const localSessionId = randomUUID();
   const sessionId = isSubagent && inheritedSessionId ? inheritedSessionId : localSessionId;
+  const parentSessionId = isSubagent ? inheritedSessionId : undefined;
   let currentTraceId: string | undefined = isSubagent ? inheritedTraceId : undefined;
   let traceStartTime: number | undefined;
   let tracePublished = false;
@@ -230,6 +231,7 @@ export default function telemetryExtension(pi: ExtensionAPI): void {
           traceId: currentTraceId,
           type: 'subagent_started',
           sessionId,
+          ...(parentSessionId ? { parentSessionId } : {}),
           childSessionId: localSessionId,
           createdAt: new Date(event.timestamp).toISOString(),
           ...(pendingInput !== undefined ? { details: { input: pendingInput } } : {}),
@@ -260,6 +262,7 @@ export default function telemetryExtension(pi: ExtensionAPI): void {
         traceId: currentTraceId,
         type: 'subagent_completed',
         sessionId,
+        ...(parentSessionId ? { parentSessionId } : {}),
         childSessionId: localSessionId,
         createdAt: new Date(now).toISOString(),
         ...(durationMs !== undefined ? { durationMs } : {}),
@@ -286,7 +289,9 @@ export default function telemetryExtension(pi: ExtensionAPI): void {
       traceId: currentTraceId,
       sessionId: localSessionId,
       conversationId: localSessionId,
-      ...(isSubagent ? { childSessionId: localSessionId } : {}),
+      ...(isSubagent
+        ? { ...(parentSessionId ? { parentSessionId } : {}), childSessionId: localSessionId }
+        : {}),
       toolCallId: event.toolCallId,
       toolName: event.toolName,
       status: 'started',
@@ -304,7 +309,9 @@ export default function telemetryExtension(pi: ExtensionAPI): void {
       traceId: currentTraceId,
       sessionId: localSessionId,
       conversationId: localSessionId,
-      ...(isSubagent ? { childSessionId: localSessionId } : {}),
+      ...(isSubagent
+        ? { ...(parentSessionId ? { parentSessionId } : {}), childSessionId: localSessionId }
+        : {}),
       toolCallId: event.toolCallId,
       toolName: event.toolName,
       status: event.isError ? 'failed' : 'completed',
@@ -326,7 +333,9 @@ export default function telemetryExtension(pi: ExtensionAPI): void {
       traceId: currentTraceId,
       sessionId: localSessionId,
       conversationId: localSessionId,
-      ...(isSubagent ? { childSessionId: localSessionId } : {}),
+      ...(isSubagent
+        ? { ...(parentSessionId ? { parentSessionId } : {}), childSessionId: localSessionId }
+        : {}),
       llmGenerationId: `gen-${llmGenerationCounter}`,
       status: 'started',
       createdAt: new Date().toISOString(),
@@ -344,7 +353,9 @@ export default function telemetryExtension(pi: ExtensionAPI): void {
       traceId: currentTraceId,
       sessionId: localSessionId,
       conversationId: localSessionId,
-      ...(isSubagent ? { childSessionId: localSessionId } : {}),
+      ...(isSubagent
+        ? { ...(parentSessionId ? { parentSessionId } : {}), childSessionId: localSessionId }
+        : {}),
       llmGenerationId: `gen-${llmGenerationCounter}`,
       status: 'failed',
       createdAt: new Date().toISOString(),
@@ -371,7 +382,9 @@ export default function telemetryExtension(pi: ExtensionAPI): void {
       traceId: currentTraceId,
       sessionId: localSessionId,
       conversationId: localSessionId,
-      ...(isSubagent ? { childSessionId: localSessionId } : {}),
+      ...(isSubagent
+        ? { ...(parentSessionId ? { parentSessionId } : {}), childSessionId: localSessionId }
+        : {}),
       llmGenerationId: `gen-${llmGenerationCounter}`,
       status: 'completed',
       createdAt: new Date().toISOString(),

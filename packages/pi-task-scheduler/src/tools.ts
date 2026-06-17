@@ -88,7 +88,7 @@ export function createSchedulerTools(scheduler: TaskScheduler): ToolDefinition[]
               provider: ctx.model?.provider ?? 'anthropic',
               model: ctx.model?.id ?? 'unknown',
             },
-            toolPolicyProfile: 'default',
+            toolPolicyProfile: 'workspace-write',
             enabled: params.enabled !== false,
             ...(params.name ? { name: params.name as string } : {}),
             ...(params.description ? { description: params.description as string } : {}),

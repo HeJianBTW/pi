@@ -749,6 +749,7 @@ describe('telemetryExtension', () => {
 
       const events = getPublishedEvents();
       expect(events[0]).toMatchObject({ type: 'subagent_started' });
+      expect((events[0] as any).parentSessionId).toBe(PARENT_SESSION_ID);
       expect((events[0] as any).childSessionId).toBeTruthy();
     });
 
@@ -761,6 +762,7 @@ describe('telemetryExtension', () => {
       const events = getPublishedEvents();
       const completed = events.find((e) => 'type' in e && e.type === 'subagent_completed');
       expect(completed).toBeDefined();
+      expect((completed as any).parentSessionId).toBe(PARENT_SESSION_ID);
       expect((completed as any).childSessionId).toBeTruthy();
     });
 
@@ -787,6 +789,7 @@ describe('telemetryExtension', () => {
 
       const events = getPublishedEvents();
       const toolEvent = events.find((e) => 'toolCallId' in e) as any;
+      expect(toolEvent.parentSessionId).toBe(PARENT_SESSION_ID);
       expect(toolEvent.childSessionId).toBeTruthy();
       expect(toolEvent.traceId).toBe(PARENT_TRACE_ID);
     });
@@ -803,6 +806,7 @@ describe('telemetryExtension', () => {
 
       const events = getPublishedEvents();
       const llmEvent = events.find((e) => 'llmGenerationId' in e) as any;
+      expect(llmEvent.parentSessionId).toBe(PARENT_SESSION_ID);
       expect(llmEvent.childSessionId).toBeTruthy();
       expect(llmEvent.traceId).toBe(PARENT_TRACE_ID);
     });
