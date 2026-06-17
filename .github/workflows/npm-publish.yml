@@ -26,7 +26,10 @@ concurrency:
 jobs:
   publish:
     name: publish packages
-    runs-on: ubuntu-latest
+    runs-on:
+      - instance-hnpsq9go
+      - linux
+      - x64
     timeout-minutes: 45
     outputs:
       publish_filters: ${{ steps.versioning.outputs.publish_filters }}
@@ -322,7 +325,6 @@ jobs:
     needs: publish
     if: needs.publish.result == 'success'
     runs-on:
-      - self-hosted
       - instance-hnpsq9go
       - linux
       - x64
