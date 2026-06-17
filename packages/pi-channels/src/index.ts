@@ -86,7 +86,8 @@ export default function piChannelsExtension(pi: ExtensionAPI): void {
       scheduleReconnect(event, error);
     }
     if (level === 'ERROR') console.error('[pi-channels]', event, data ?? {});
-    else console.debug('[pi-channels]', event, data ?? {});
+    else if (process.env.DEBUG?.includes('pi-channels'))
+      console.error('[pi-channels]', event, data ?? {});
   };
   registry.setLogger(log);
 

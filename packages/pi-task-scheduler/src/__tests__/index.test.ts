@@ -7,7 +7,7 @@ import {
   type SchedulerLock,
   scheduleExpressionForCroner,
   type TaskSchedulerScope,
-} from './index.js';
+} from '../index.js';
 
 const model = { provider: 'test', model: 'test-model' };
 

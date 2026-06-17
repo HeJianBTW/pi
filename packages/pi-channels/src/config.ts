@@ -102,14 +102,16 @@ export function loadChannelConfig(cwd: string): ChannelConfig {
   const merged = mergeChannelConfig(config, local);
 
   applyEnvOverrides(merged);
-  console.debug('[pi-channels] config', {
-    cwd,
-    agentDir,
-    settingsFiles,
-    adapters: Object.keys(merged.adapters ?? {}),
-    routes: Object.keys(merged.routes ?? {}),
-    bridgeEnabled: Boolean(merged.bridge?.enabled),
-  });
+  if (process.env.DEBUG?.includes('pi-channels')) {
+    console.error('[pi-channels] config', {
+      cwd,
+      agentDir,
+      settingsFiles,
+      adapters: Object.keys(merged.adapters ?? {}),
+      routes: Object.keys(merged.routes ?? {}),
+      bridgeEnabled: Boolean(merged.bridge?.enabled),
+    });
+  }
   return merged;
 }
 

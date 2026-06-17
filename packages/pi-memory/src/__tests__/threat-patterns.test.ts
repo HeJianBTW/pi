@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { firstThreatMessage, scanForThreats } from './threat-patterns.js';
+import { firstThreatMessage, scanForThreats } from '../threat-patterns.js';
 
 describe('scanForThreats', () => {
   it('returns empty for benign text', () => {

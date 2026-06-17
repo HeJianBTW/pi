@@ -385,7 +385,7 @@ class OSSProvider implements Mem0Provider {
         }
       }
       if (totalRestored > 0) {
-        console.log(`[mem0] restored ${totalRestored} memories from snapshot`);
+        console.error(`[pi-memory-mem0] restored ${totalRestored} memories from snapshot`);
       }
     }
 

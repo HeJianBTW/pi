@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { ScheduledTask } from '@amaster.ai/pi-task-scheduler';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { JsonScheduledTaskStore } from './scheduler-json.js';
+import { JsonScheduledTaskStore } from '../scheduler-json.js';
 
 vi.mock('@amaster.ai/pi-task-scheduler', () => ({
   normalizeScheduledTask: (task: ScheduledTask): ScheduledTask => ({

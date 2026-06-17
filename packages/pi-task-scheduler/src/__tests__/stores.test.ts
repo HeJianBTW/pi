@@ -8,8 +8,8 @@ import {
   type ScheduledTaskStore,
   type SchedulerLock,
   type TaskSchedulerScope,
-} from './index.js';
-import { FileSchedulerLock, JsonScheduledTaskStore } from './stores.js';
+} from '../index.js';
+import { FileSchedulerLock, JsonScheduledTaskStore } from '../stores.js';
 
 const TEST_DIR = path.join(tmpdir(), 'pi-task-scheduler-test');
 

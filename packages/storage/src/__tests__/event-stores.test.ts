@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { JsonFileRuntimeTimelineEventStore } from './event-stores.js';
+import { JsonFileRuntimeTimelineEventStore } from '../event-stores.js';
 
 const tmpDirs: string[] = [];
 

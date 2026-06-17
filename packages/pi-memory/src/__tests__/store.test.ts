@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { ENTRY_DELIMITER, MemoryStore } from './store.js';
+import { ENTRY_DELIMITER, MemoryStore } from '../store.js';
 
 const TEST_ROOT = path.join(tmpdir(), 'pi-memory-test');
 

@@ -69,32 +69,34 @@ export function createPiVisionCaller(
       options,
     );
 
-    const contentShape = result.content.map((c) => {
-      const block = c as unknown as Record<string, unknown>;
-      const type = typeof block.type === 'string' ? block.type : 'unknown';
-      const text = typeof block.text === 'string' ? block.text : undefined;
-      return {
-        type,
-        textLength: text?.length,
-        textPreview: text ? text.slice(0, 200) : undefined,
-        keys: Object.keys(block),
-      };
-    });
-    console.error(
-      '[pi-computer-use vision] complete() returned',
-      JSON.stringify(
-        {
-          provider: visionConfig.provider,
-          model: visionConfig.model,
-          imageBase64Length: imageBase64.length,
-          mimeType,
-          blockCount: result.content.length,
-          contentShape,
-        },
-        null,
-        2,
-      ),
-    );
+    if (process.env.DEBUG?.includes('pi-computer-use')) {
+      const contentShape = result.content.map((c) => {
+        const block = c as unknown as Record<string, unknown>;
+        const type = typeof block.type === 'string' ? block.type : 'unknown';
+        const text = typeof block.text === 'string' ? block.text : undefined;
+        return {
+          type,
+          textLength: text?.length,
+          textPreview: text ? text.slice(0, 200) : undefined,
+          keys: Object.keys(block),
+        };
+      });
+      console.error(
+        '[pi-computer-use vision] complete() returned',
+        JSON.stringify(
+          {
+            provider: visionConfig.provider,
+            model: visionConfig.model,
+            imageBase64Length: imageBase64.length,
+            mimeType,
+            blockCount: result.content.length,
+            contentShape,
+          },
+          null,
+          2,
+        ),
+      );
+    }
 
     return result.content
       .filter((c): c is AiTextContent => c.type === 'text')

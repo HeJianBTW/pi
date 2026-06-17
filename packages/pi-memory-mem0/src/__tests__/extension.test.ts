@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import mem0Extension from './index.js';
+import mem0Extension from '../index.js';
 
 // ---------------------------------------------------------------------------
 // Helpers

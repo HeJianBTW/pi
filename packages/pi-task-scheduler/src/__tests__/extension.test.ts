@@ -6,7 +6,7 @@ import {
   type SchedulerLock,
   type TaskScheduler,
   type TaskSchedulerScope,
-} from './index.js';
+} from '../index.js';
 
 interface RegisteredTool {
   name: string;
@@ -105,7 +105,7 @@ class MemLock implements SchedulerLock {
 }
 
 async function setupExtension(injectedConfig?: Record<string, unknown>) {
-  const { default: taskSchedulerExtension } = await import('./extension.js');
+  const { default: taskSchedulerExtension } = await import('../extension.js');
   const pi = createMockPi();
   const ctx = createMockCtx();
 
@@ -370,7 +370,7 @@ describe('extension — tool operations with injected scheduler', () => {
   });
 
   it('all tools return not running when scheduler is undefined', async () => {
-    const { default: taskSchedulerExtension } = await import('./extension.js');
+    const { default: taskSchedulerExtension } = await import('../extension.js');
     const pi = createMockPi();
     taskSchedulerExtension(pi as any);
     // Don't fire session_start — scheduler stays undefined
@@ -544,7 +544,7 @@ describe('extension — /cron command subcommands', () => {
   });
 
   it('/cron warns when scheduler not running', async () => {
-    const { default: taskSchedulerExtension } = await import('./extension.js');
+    const { default: taskSchedulerExtension } = await import('../extension.js');
     const pi = createMockPi();
     taskSchedulerExtension(pi as any);
     // Don't fire session_start — scheduler stays undefined

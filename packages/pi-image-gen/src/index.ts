@@ -20,14 +20,6 @@ export default function piImageGenExtension(pi: ExtensionAPI): void {
   pi.on('session_start', async (_event: unknown, ctx: ExtensionContext) => {
     sessionCwd = ctx.cwd;
     settings = loadImageGenSettings(ctx.cwd);
-    const providers = listConfiguredProviders(settings).map((p) => p.id);
-    console.debug('[pi-image-gen] session_start', {
-      cwd: ctx.cwd,
-      providers,
-      defaultModel: settings.defaultModel,
-      outputDir: settings.outputDir ?? '.pi/images',
-      customProviders: Object.keys(settings.customProviders ?? {}),
-    });
   });
 
   pi.registerCommand('image-gen', {

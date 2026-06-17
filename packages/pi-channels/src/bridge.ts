@@ -454,18 +454,20 @@ function runPrompt(options: {
     args.push(formatBridgePrompt(options.prompt));
     const command = resolvePiCommand(options.cwd, options.piBin);
 
-    console.debug('[pi-channels] bridge_run_prompt', {
-      cwd: options.cwd,
-      command,
-      provider,
-      model,
-      sessionFile: options.sessionFile,
-      hasAnthropicBaseUrl: Boolean(process.env.ANTHROPIC_BASE_URL),
-      hasAnthropicApiKey: Boolean(process.env.ANTHROPIC_API_KEY),
-      providerExtension: shouldAttachBridgeProvider(provider)
-        ? resolveBridgeProviderExtensionPath()
-        : undefined,
-    });
+    if (process.env.DEBUG?.includes('pi-channels')) {
+      console.error('[pi-channels] bridge_run_prompt', {
+        cwd: options.cwd,
+        command,
+        provider,
+        model,
+        sessionFile: options.sessionFile,
+        hasAnthropicBaseUrl: Boolean(process.env.ANTHROPIC_BASE_URL),
+        hasAnthropicApiKey: Boolean(process.env.ANTHROPIC_API_KEY),
+        providerExtension: shouldAttachBridgeProvider(provider)
+          ? resolveBridgeProviderExtensionPath()
+          : undefined,
+      });
+    }
 
     let child: ChildProcess;
     try {

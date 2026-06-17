@@ -9,8 +9,8 @@ import {
   mainAgentWroteMemory,
   serializeMessages,
   type TurnEndEvent,
-} from './background-extraction.js';
-import { MemoryStore } from './store.js';
+} from '../background-extraction.js';
+import { MemoryStore } from '../store.js';
 
 const TEST_ROOT = path.join(tmpdir(), 'pi-memory-extraction-test');
 

@@ -41,13 +41,6 @@ export default function piWebToolExtension(pi: ExtensionAPI): void {
     const hasSearch = !('error' in searchResolved) && Boolean(searchResolved.apiKey);
     const hasFetch = Boolean(settings.fetch?.provider) || Boolean(settings.fetch?.summary);
 
-    console.debug('[pi-web-access] session_start', {
-      cwd: ctx.cwd,
-      searchProvider: hasSearch ? (searchResolved as { id: string }).id : null,
-      fetchProvider: settings.fetch?.provider ?? 'local',
-      hasSummary: Boolean(settings.fetch?.summary),
-    });
-
     if (hasSearch) {
       pi.registerTool({
         name: 'web_search',

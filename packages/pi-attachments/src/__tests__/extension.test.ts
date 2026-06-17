@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { extractMentions, skillSearchPaths, stripMentions } from './extension.js';
+import { extractMentions, skillSearchPaths, stripMentions } from '../extension.js';
 
 describe('extractMentions', () => {
   it('extracts unquoted @path file references', () => {
@@ -162,7 +162,7 @@ describe('skill loading via extension input handler', () => {
       | undefined
     >;
   }> {
-    const ext = (await import('./extension.js')).default;
+    const ext = (await import('../extension.js')).default;
     let handler:
       | ((
           event: {
@@ -318,7 +318,7 @@ describe('skill loading via extension input handler', () => {
     await writeFile(join(skillDir, 'SKILL.md'), 'BODY', 'utf8');
 
     // Re-implement loadExtension inline so we can pass images through.
-    const ext = (await import('./extension.js')).default;
+    const ext = (await import('../extension.js')).default;
     let handler:
       | ((event: { text: string; images?: unknown[] }, ctx: { cwd: string }) => Promise<unknown>)
       | undefined;
@@ -367,7 +367,7 @@ describe('image attachments produce parallel vision + markdown channels', () => 
   });
 
   async function loadExt() {
-    const ext = (await import('./extension.js')).default;
+    const ext = (await import('../extension.js')).default;
     let handler:
       | ((
           event: {
