@@ -1,0 +1,119 @@
+name: Integration
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  pi-runtime:
+    name: Pi runtime integration
+    # Skip on PRs from forks: secrets are unavailable, so the job would fail spuriously.
+    # Same-repo PRs (and pushes / manual runs) execute normally.
+    if: >
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PI_INTEGRATION_BASE_URL: ${{ secrets.PI_INTEGRATION_BASE_URL }}
+      PI_INTEGRATION_API_KEY: ${{ secrets.PI_INTEGRATION_API_KEY }}
+      PI_OFFLINE: '0'
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build packages
+        run: |
+          pnpm --filter @amaster.ai/pi-storage prisma:generate
+          pnpm build
+
+      - name: Install pi-coding-agent
+        run: npm install -g --ignore-scripts @earendil-works/pi-coding-agent
+
+      - name: Verify pi installation
+        run: pi --version
+
+      - name: Install all monorepo extensions into pi (Stage A — load)
+        run: |
+          set -euo pipefail
+          for pkg in packages/pi-*; do
+            echo "::group::pi install $pkg"
+            pi install "./$pkg"
+            echo "::endgroup::"
+          done
+
+      - name: Assert all packages are registered (Stage A — assert)
+        run: |
+          set -euo pipefail
+          installed="$(pi list)"
+          echo "$installed"
+          missing=0
+          for pkg in packages/pi-*; do
+            name="$(basename "$pkg")"
+            if ! grep -F "/packages/${name}" <<<"$installed" >/dev/null; then
+              echo "::error::Missing registration for ${name} in 'pi list' output"
+              missing=$((missing + 1))
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "::error::${missing} extension(s) failed to register"
+            exit 1
+          fi
+
+      - name: Verify integration provider extension loads
+        if: env.PI_INTEGRATION_BASE_URL != '' && env.PI_INTEGRATION_API_KEY != ''
+        run: |
+          set -euo pipefail
+          pi --extension ./tests/integration/provider-extension.mjs --list-models deepseek-integration \
+            | tee /tmp/pi-models.txt
+          grep -F 'deepseek-integration' /tmp/pi-models.txt
+          grep -F 'deepseek-v4-flash' /tmp/pi-models.txt
+
+      - name: Run single-prompt smoke test (Stage B)
+        if: env.PI_INTEGRATION_BASE_URL != '' && env.PI_INTEGRATION_API_KEY != ''
+        run: |
+          set -euo pipefail
+          output="$(pi \
+            --extension ./tests/integration/provider-extension.mjs \
+            --provider deepseek-integration \
+            --model deepseek-v4-flash \
+            --thinking xhigh \
+            --no-session \
+            --no-context-files \
+            --mode text \
+            -p 'Reply with the single word READY and nothing else.')"
+          echo "--- pi output ---"
+          echo "$output"
+          echo "-----------------"
+          if ! grep -qi 'READY' <<<"$output"; then
+            echo "::error::Expected 'READY' in pi output"
+            exit 1
+          fi
+
+      - name: Skipped — Stage B (secrets unavailable)
+        if: env.PI_INTEGRATION_BASE_URL == '' || env.PI_INTEGRATION_API_KEY == ''
+        run: |
+          echo "::warning::PI_INTEGRATION_BASE_URL or PI_INTEGRATION_API_KEY not set — skipping Stage B (single-prompt smoke test). Stage A (extension load + registration) still ran."
