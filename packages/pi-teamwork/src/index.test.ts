@@ -618,6 +618,72 @@ describe('piTeamworkExtension AMaster provider', () => {
     }
   }
 
+  async function withFakeAmasterCli<T>(handler: () => Promise<T>): Promise<{
+    result: T;
+    calls: Array<{
+      command: string;
+      args: string[];
+      hasApiKey: boolean;
+      keyIsSession: boolean;
+      keyIsConfigured: boolean;
+    }>;
+  }> {
+    const { chmod, mkdtemp, readFile, rm, writeFile } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const path = await import('node:path');
+    const dir = await mkdtemp(path.join(tmpdir(), 'pi-teamwork-fake-amaster-'));
+    const logPath = path.join(dir, 'calls.jsonl');
+    const script = [
+      '#!/usr/bin/env node',
+      "const fs = require('node:fs');",
+      "const path = require('node:path');",
+      'const command = path.basename(process.argv[1]);',
+      'const args = process.argv.slice(2);',
+      `fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify({`,
+      '  command,',
+      '  args,',
+      '  hasApiKey: Boolean(process.env.AMASTER_BOARD_API_KEY),',
+      "  keyIsSession: process.env.AMASTER_BOARD_API_KEY === 'session-key',",
+      "  keyIsConfigured: process.env.AMASTER_BOARD_API_KEY === 'configured-key',",
+      "}) + '\\n');",
+      "if (command === 'amaster-runtime') console.log('running');",
+      "else if (args[0] === 'status') console.log(JSON.stringify({ ok: true }));",
+      "else if (args[0] === 'user-directory') console.log(JSON.stringify([{ id: 'user-1', name: 'Alice' }]));",
+      "else console.log('[]');",
+    ].join('\n');
+    const employeePath = path.join(dir, 'amaster-employee');
+    const runtimePath = path.join(dir, 'amaster-runtime');
+    await writeFile(employeePath, script);
+    await writeFile(runtimePath, script);
+    await chmod(employeePath, 0o755);
+    await chmod(runtimePath, 0o755);
+    const previousPath = process.env.PATH;
+    process.env.PATH = `${dir}${path.delimiter}${previousPath ?? ''}`;
+    try {
+      const result = await handler();
+      const log = await readFile(logPath, 'utf8').catch(() => '');
+      const calls = log
+        .trim()
+        .split('\n')
+        .filter(Boolean)
+        .map(
+          (line) =>
+            JSON.parse(line) as {
+              command: string;
+              args: string[];
+              hasApiKey: boolean;
+              keyIsSession: boolean;
+              keyIsConfigured: boolean;
+            },
+        );
+      return { result, calls };
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+
   it('initializes provider=amaster and passes session_start api key only to child env', async () => {
     const previousSettings = process.env.PI_SETTINGS_DIR;
     const settingsDir = await createSettingsDir({
@@ -744,6 +810,181 @@ describe('piTeamworkExtension AMaster provider', () => {
       },
     ]);
     expect(JSON.stringify(calls)).not.toContain('configured-key');
+
+    if (previousSettings === undefined) delete process.env.PI_SETTINGS_DIR;
+    else process.env.PI_SETTINGS_DIR = previousSettings;
+    await import('node:fs/promises').then(({ rm }) =>
+      rm(settingsDir, { recursive: true, force: true }),
+    );
+  });
+
+  it('prefers session_start api key over configured AMaster api key', async () => {
+    const previousSettings = process.env.PI_SETTINGS_DIR;
+    const settingsDir = await createSettingsDir({
+      'pi-teamwork': {
+        provider: 'amaster',
+        amaster: {
+          apiBase: 'http://amaster.test',
+          apiKey: 'configured-key',
+        },
+      },
+    });
+    process.env.PI_SETTINGS_DIR = settingsDir;
+    const tools = new Map<string, RegisteredTool>();
+    const pi = {
+      on: vi.fn(),
+      registerCommand: vi.fn(),
+      registerTool: vi.fn((tool: RegisteredTool) => tools.set(tool.name, tool)),
+      exec: vi.fn(async () => ({ stdout: '[]', stderr: '', code: 0 })),
+    };
+    piTeamworkExtension(pi as never);
+    const sessionStartHandler = pi.on.mock.calls.find((call) => call[0] === 'session_start')?.[1];
+
+    await sessionStartHandler(
+      { amasterEmployee: { apiKey: 'session-key' } },
+      {
+        cwd: settingsDir,
+        ui: {
+          setStatus: vi.fn(),
+          notify: vi.fn(),
+        },
+      },
+    );
+
+    const { calls } = await withFakeAmasterCli(async () => {
+      await tools
+        .get('user_directory_list')!
+        .execute('tool-1' as never, { workspaceId: 'company-2' } as never);
+    });
+
+    expect(calls).toEqual([
+      expect.objectContaining({
+        command: 'amaster-employee',
+        hasApiKey: true,
+        keyIsSession: true,
+        keyIsConfigured: false,
+      }),
+    ]);
+    expect(JSON.stringify(calls)).not.toContain('session-key');
+    expect(JSON.stringify(calls)).not.toContain('configured-key');
+
+    if (previousSettings === undefined) delete process.env.PI_SETTINGS_DIR;
+    else process.env.PI_SETTINGS_DIR = previousSettings;
+    await import('node:fs/promises').then(({ rm }) =>
+      rm(settingsDir, { recursive: true, force: true }),
+    );
+  });
+
+  it('uses pi.exec with the session cwd when no AMaster api key is configured', async () => {
+    const previousSettings = process.env.PI_SETTINGS_DIR;
+    const settingsDir = await createSettingsDir({
+      'pi-teamwork': {
+        provider: 'amaster',
+        amaster: {
+          apiBase: 'http://amaster.test',
+        },
+      },
+    });
+    process.env.PI_SETTINGS_DIR = settingsDir;
+    const tools = new Map<string, RegisteredTool>();
+    const pi = {
+      on: vi.fn(),
+      registerCommand: vi.fn(),
+      registerTool: vi.fn((tool: RegisteredTool) => tools.set(tool.name, tool)),
+      exec: vi.fn(async (command: string, args: string[]) => {
+        if (command === 'amaster-employee' && args[0] === 'user-directory') {
+          return {
+            stdout: JSON.stringify([{ id: 'user-1', name: 'Alice' }]),
+            stderr: '',
+            code: 0,
+          };
+        }
+        return { stdout: '[]', stderr: '', code: 0 };
+      }),
+    };
+    piTeamworkExtension(pi as never);
+    const sessionStartHandler = pi.on.mock.calls.find((call) => call[0] === 'session_start')?.[1];
+
+    await sessionStartHandler(
+      {},
+      {
+        cwd: settingsDir,
+        ui: {
+          setStatus: vi.fn(),
+          notify: vi.fn(),
+        },
+      },
+    );
+    const result = await tools
+      .get('user_directory_list')!
+      .execute('tool-1' as never, { workspaceId: 'company-2' } as never);
+
+    expect(result.content[0]?.text).toContain('Alice');
+    expect(pi.exec).toHaveBeenCalledWith(
+      'amaster-employee',
+      ['user-directory', 'list', '--api-base', 'http://amaster.test', '-C', 'company-2', '--json'],
+      { cwd: settingsDir },
+    );
+
+    if (previousSettings === undefined) delete process.env.PI_SETTINGS_DIR;
+    else process.env.PI_SETTINGS_DIR = previousSettings;
+    await import('node:fs/promises').then(({ rm }) =>
+      rm(settingsDir, { recursive: true, force: true }),
+    );
+  });
+
+  it('uses pi.exec rather than AMaster board child env for amaster-runtime status probes', async () => {
+    const previousSettings = process.env.PI_SETTINGS_DIR;
+    const settingsDir = await createSettingsDir({
+      'pi-teamwork': {
+        provider: 'amaster',
+        amaster: {
+          apiBase: 'http://amaster.test',
+        },
+      },
+    });
+    process.env.PI_SETTINGS_DIR = settingsDir;
+    const tools = new Map<string, RegisteredTool>();
+    const pi = {
+      on: vi.fn(),
+      registerCommand: vi.fn(),
+      registerTool: vi.fn((tool: RegisteredTool) => tools.set(tool.name, tool)),
+      exec: vi.fn(async (command: string) =>
+        command === 'amaster-runtime'
+          ? { stdout: 'running', stderr: '', code: 0 }
+          : { stdout: '[]', stderr: '', code: 0 },
+      ),
+    };
+    piTeamworkExtension(pi as never);
+    const sessionStartHandler = pi.on.mock.calls.find((call) => call[0] === 'session_start')?.[1];
+
+    await sessionStartHandler(
+      { amasterEmployee: { apiKey: 'session-key' } },
+      {
+        cwd: settingsDir,
+        ui: {
+          setStatus: vi.fn(),
+          notify: vi.fn(),
+        },
+      },
+    );
+
+    const { result, calls } = await withFakeAmasterCli(async () =>
+      tools.get('teamwork_status')!.execute('tool-1' as never, {} as never),
+    );
+
+    expect(result.content[0]?.text).toContain('"runtimeOk": true');
+    expect(calls).toEqual([
+      expect.objectContaining({
+        command: 'amaster-employee',
+        args: ['status', '--api-base', 'http://amaster.test', '--json'],
+        hasApiKey: true,
+      }),
+    ]);
+    expect(pi.exec).toHaveBeenCalledWith('amaster-runtime', ['daemon', 'status'], {
+      cwd: settingsDir,
+    });
+    expect(JSON.stringify(calls)).not.toContain('session-key');
 
     if (previousSettings === undefined) delete process.env.PI_SETTINGS_DIR;
     else process.env.PI_SETTINGS_DIR = previousSettings;
