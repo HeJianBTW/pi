@@ -371,15 +371,10 @@ function buildIssueMetadata(item: Record<string, unknown>): Record<string, unkno
 function collectCommentRecords(metadata: Record<string, unknown> | undefined): unknown[] {
   if (!metadata) return [];
   const comments: unknown[] = [];
-  appendCommentRecords(comments, metadata.comments);
+  if (Array.isArray(metadata.comments)) comments.push(...metadata.comments);
   const nestedMetadata = asRecord(metadata.metadata);
-  appendCommentRecords(comments, nestedMetadata?.comments);
+  if (Array.isArray(nestedMetadata?.comments)) comments.push(...nestedMetadata.comments);
   return comments;
-}
-
-function appendCommentRecords(output: unknown[], value: unknown): void {
-  if (!Array.isArray(value)) return;
-  output.push(...value);
 }
 
 const ISSUE_TOP_LEVEL_FIELDS = new Set([

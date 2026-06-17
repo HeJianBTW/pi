@@ -10,18 +10,6 @@ type RegisteredTool = {
   execute: (...args: never[]) => Promise<{ content: Array<{ text: string }> }>;
 };
 
-function _mockExec(
-  responses: Record<string, { stdout: string; stderr: string; code: number }>,
-): ExecFn {
-  return async (_cmd, args) => {
-    const key = args.join(' ');
-    for (const [pattern, response] of Object.entries(responses)) {
-      if (key.includes(pattern)) return response;
-    }
-    return { stdout: '', stderr: '', code: 0 };
-  };
-}
-
 function successExec(stdout = ''): ExecFn {
   return async () => ({ stdout, stderr: '', code: 0 });
 }
