@@ -24,12 +24,15 @@
   },
   "files": [
     "dist",
-    "skills"
+    "skills",
+    "preview.png",
+    "README.md"
   ],
   "pi": {
     "extensions": [
       "./dist/index.js"
-    ]
+    ],
+    "image": "https://raw.githubusercontent.com/TGYD-helige/pi/master/packages/pi-dingtalk/preview.png"
   },
   "publishConfig": {
     "access": "public"

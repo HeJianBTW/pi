@@ -1,4 +1,6 @@
-# pi-lark
+# @amaster.ai/pi-lark
+
+![pi-lark preview](https://raw.githubusercontent.com/TGYD-helige/pi/master/packages/pi-lark/preview.png)
 
 Pi extension for [Lark/Feishu](https://www.feishu.cn/) workspace — calendar, docs, drive, sheets, tasks, mail and more via [lark-cli](https://github.com/larksuite/cli).
 
