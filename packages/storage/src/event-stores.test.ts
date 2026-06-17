@@ -164,7 +164,6 @@ describe('JsonFileRuntimeTimelineEventStore', () => {
     ).resolves.toMatchObject([{ eventId: 'event-1', eventSeq: 1 }]);
     await append;
   });
-
 });
 
 function event(

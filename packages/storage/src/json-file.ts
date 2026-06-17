@@ -7,7 +7,16 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { chmod, copyFile, mkdir, readFile, rename, rm, writeFile, appendFile } from 'node:fs/promises';
+import {
+  appendFile,
+  chmod,
+  copyFile,
+  mkdir,
+  readFile,
+  rename,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
 import path from 'node:path';
 
 export async function readJsonFile<T>(filePath: string, fallback: T): Promise<T> {
