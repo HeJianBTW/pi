@@ -122,7 +122,7 @@ export class DbScheduledTaskStore implements ScheduledTaskStore {
       intervalSeconds: row.intervalSeconds ?? 0,
       enabled: Boolean(row.enabled),
       model: parseModel(row.modelJson),
-      toolPolicyProfile: row.toolPolicyProfile ?? 'scheduled',
+      toolPolicyProfile: row.toolPolicyProfile ?? 'workspace-write',
       ...(row.workspaceDir ? { workspaceDir: row.workspaceDir } : {}),
       ...(row.description ? { description: row.description } : {}),
       createdAt: toIso(row.createdAt),
