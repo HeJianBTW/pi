@@ -1,4 +1,6 @@
-# pi-dingtalk
+# @amaster.ai/pi-dingtalk
+
+![pi-dingtalk preview](https://raw.githubusercontent.com/TGYD-helige/pi/master/packages/pi-dingtalk/preview.png)
 
 Pi extension for [DingTalk](https://www.dingtalk.com/) workspace — calendar, docs, chat, todo, sheets, mail and more via [dws (DingTalk Workspace CLI)](https://github.com/DingTalk-Real-AI/dingtalk-workspace-cli).
 

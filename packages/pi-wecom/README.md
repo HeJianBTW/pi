@@ -1,4 +1,6 @@
-# pi-wecom
+# @amaster.ai/pi-wecom
+
+![pi-wecom preview](https://raw.githubusercontent.com/TGYD-helige/pi/master/packages/pi-wecom/preview.png)
 
 Pi extension for [WeCom (企业微信)](https://work.weixin.qq.com/) workspace — contacts, messages, meetings, schedules, docs and more via [wecom-cli](https://github.com/WecomTeam/wecom-cli).
 
