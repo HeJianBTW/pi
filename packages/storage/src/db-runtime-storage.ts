@@ -432,7 +432,9 @@ class DbRuntimeTimelineEventStore implements RuntimeTimelineEventStore {
   ): Promise<RuntimeTimelineEvent[]> {
     const limit = positiveLimit(input.limit);
     const cursorEventSeq = input.cursor
-      ? await this.findCursorEventSeq(input.cursor.eventId)
+      ? input.cursor.eventSeq !== undefined
+        ? BigInt(input.cursor.eventSeq)
+        : await this.findCursorEventSeq(input.cursor.eventId)
       : undefined;
     const rows = await this.db.prisma.piAgentEvent.findMany({
       where: timelineWhere(input, cursorEventSeq),

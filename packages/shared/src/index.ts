@@ -188,6 +188,7 @@ export type RuntimeTimelineEventInput = Omit<RuntimeTimelineEvent, 'eventSeq'>;
 export type RuntimeTimelineCursor = {
   createdAt: string;
   eventId: string;
+  eventSeq?: number;
 };
 
 export type RuntimeTimelineEventStore = AppendOnlyEventStore<RuntimeTimelineEventInput> & {
