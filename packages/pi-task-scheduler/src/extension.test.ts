@@ -129,9 +129,7 @@ describe('extension — default file storage mode', () => {
     expect(pi.tools.has('scheduler_delete')).toBe(true);
     expect(pi.tools.has('scheduler_run_now')).toBe(true);
 
-    expect(pi.commands.has('pi-scheduler-status')).toBe(true);
-    expect(pi.commands.has('pi-scheduler-list')).toBe(true);
-    expect(pi.commands.has('pi-scheduler-run-now')).toBe(true);
+    expect(pi.commands.has('cron')).toBe(true);
   });
 
   it('sets status to active when scheduler starts', async () => {
@@ -382,5 +380,340 @@ describe('extension — tool operations with injected scheduler', () => {
       const result = (await tool.execute('id', {}, undefined, undefined, ctx)) as any;
       expect(result.content[0].text).toContain('not running');
     }
+  });
+});
+
+describe('extension — /cron command subcommands', () => {
+  let externalScheduler: TaskScheduler;
+  let store: MemStore;
+
+  beforeEach(async () => {
+    store = new MemStore();
+    externalScheduler = new PersistentTaskScheduler({
+      store,
+      lock: new MemLock(),
+      runner: async () => {},
+    });
+    await externalScheduler.start();
+  });
+
+  async function getCronHandler() {
+    const { pi } = await setupExtension({ scheduler: externalScheduler });
+    const cmd = pi.commands.get('cron')!;
+    return cmd.handler;
+  }
+
+  it('/cron (no args) shows status', async () => {
+    const handler = await getCronHandler();
+    const ctx = createMockCtx();
+    await handler('', ctx);
+    expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining('Active:'), 'info');
+  });
+
+  it('/cron status shows status', async () => {
+    const handler = await getCronHandler();
+    const ctx = createMockCtx();
+    await handler('status', ctx);
+    expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining('Tasks:'), 'info');
+  });
+
+  it('/cron list shows tasks', async () => {
+    const handler = await getCronHandler();
+    const ctx = createMockCtx();
+    await handler('list', ctx);
+    expect(ctx.ui.notify).toHaveBeenCalledWith('No scheduled tasks.', 'info');
+  });
+
+  it('/cron get without id shows usage', async () => {
+    const handler = await getCronHandler();
+    const ctx = createMockCtx();
+    await handler('get', ctx);
+    expect(ctx.ui.notify).toHaveBeenCalledWith('Usage: /cron get <task-id>', 'warning');
+  });
+
+  it('/cron get with valid id shows task detail', async () => {
+    const task = await externalScheduler.create({
+      type: 'interval',
+      schedule: '5m',
+      intervalSeconds: 300,
+      prompt: 'test prompt',
+      sessionId: 'sess',
+      model: { provider: 'anthropic', model: 'test' },
+      toolPolicyProfile: 'workspace-write',
+      enabled: true,
+      name: 'my-task',
+    });
+    const handler = await getCronHandler();
+    const ctx = createMockCtx();
+    await handler(`get ${task.id}`, ctx);
+    expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining('my-task'), 'info');
+    expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining('test prompt'), 'info');
+  });
+
+  it('/cron run without id shows usage', async () => {
+    const handler = await getCronHandler();
+    const ctx = createMockCtx();
+    await handler('run', ctx);
+    expect(ctx.ui.notify).toHaveBeenCalledWith('Usage: /cron run <task-id>', 'warning');
+  });
+
+  it('/cron run triggers task', async () => {
+    const task = await externalScheduler.create({
+      type: 'interval',
+      schedule: '1h',
+      intervalSeconds: 3600,
+      prompt: 'run me',
+      sessionId: 'sess',
+      model: { provider: 'anthropic', model: 'test' },
+      toolPolicyProfile: 'workspace-write',
+      enabled: true,
+      name: 'runner',
+    });
+    const handler = await getCronHandler();
+    const ctx = createMockCtx();
+    await handler(`run ${task.id}`, ctx);
+    expect(ctx.ui.notify).toHaveBeenCalledWith('Triggered: runner', 'info');
+  });
+
+  it('/cron enable enables a task', async () => {
+    const task = await externalScheduler.create({
+      type: 'interval',
+      schedule: '1h',
+      intervalSeconds: 3600,
+      prompt: 'test',
+      sessionId: 'sess',
+      model: { provider: 'anthropic', model: 'test' },
+      toolPolicyProfile: 'workspace-write',
+      enabled: false,
+      name: 'toggler',
+    });
+    const handler = await getCronHandler();
+    const ctx = createMockCtx();
+    await handler(`enable ${task.id}`, ctx);
+    expect(ctx.ui.notify).toHaveBeenCalledWith('Enabled: toggler', 'info');
+    const updated = await externalScheduler.get(task.id);
+    expect(updated!.enabled).toBe(true);
+  });
+
+  it('/cron disable disables a task', async () => {
+    const task = await externalScheduler.create({
+      type: 'interval',
+      schedule: '1h',
+      intervalSeconds: 3600,
+      prompt: 'test',
+      sessionId: 'sess',
+      model: { provider: 'anthropic', model: 'test' },
+      toolPolicyProfile: 'workspace-write',
+      enabled: true,
+      name: 'toggler',
+    });
+    const handler = await getCronHandler();
+    const ctx = createMockCtx();
+    await handler(`disable ${task.id}`, ctx);
+    expect(ctx.ui.notify).toHaveBeenCalledWith('Disabled: toggler', 'info');
+    const updated = await externalScheduler.get(task.id);
+    expect(updated!.enabled).toBe(false);
+  });
+
+  it('/cron delete removes a task', async () => {
+    const task = await externalScheduler.create({
+      type: 'interval',
+      schedule: '1h',
+      intervalSeconds: 3600,
+      prompt: 'test',
+      sessionId: 'sess',
+      model: { provider: 'anthropic', model: 'test' },
+      toolPolicyProfile: 'workspace-write',
+      enabled: true,
+    });
+    const handler = await getCronHandler();
+    const ctx = createMockCtx();
+    await handler(`delete ${task.id}`, ctx);
+    expect(ctx.ui.notify).toHaveBeenCalledWith(`Deleted: ${task.id}`, 'info');
+    expect(store.tasks.size).toBe(0);
+  });
+
+  it('/cron unknown shows help', async () => {
+    const handler = await getCronHandler();
+    const ctx = createMockCtx();
+    await handler('bogus', ctx);
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      expect.stringContaining('Unknown subcommand'),
+      'warning',
+    );
+  });
+
+  it('/cron warns when scheduler not running', async () => {
+    const { default: taskSchedulerExtension } = await import('./extension.js');
+    const pi = createMockPi();
+    taskSchedulerExtension(pi as any);
+    // Don't fire session_start — scheduler stays undefined
+
+    const cmd = pi.commands.get('cron')!;
+    const ctx = createMockCtx();
+    await cmd.handler('list', ctx);
+    expect(ctx.ui.notify).toHaveBeenCalledWith('Task scheduler is not running.', 'warning');
+  });
+
+  it('/cron get with invalid id shows not found', async () => {
+    const handler = await getCronHandler();
+    const ctx = createMockCtx();
+    await handler('get nonexistent-id', ctx);
+    expect(ctx.ui.notify).toHaveBeenCalledWith('Task not found: nonexistent-id', 'error');
+  });
+
+  it('/cron run with invalid id shows not found', async () => {
+    const handler = await getCronHandler();
+    const ctx = createMockCtx();
+    await handler('run nonexistent-id', ctx);
+    expect(ctx.ui.notify).toHaveBeenCalledWith('Task not found: nonexistent-id', 'error');
+  });
+
+  it('/cron enable with invalid id shows not found', async () => {
+    const handler = await getCronHandler();
+    const ctx = createMockCtx();
+    await handler('enable nonexistent-id', ctx);
+    expect(ctx.ui.notify).toHaveBeenCalledWith('Task not found: nonexistent-id', 'error');
+  });
+
+  it('/cron disable with invalid id shows not found', async () => {
+    const handler = await getCronHandler();
+    const ctx = createMockCtx();
+    await handler('disable nonexistent-id', ctx);
+    expect(ctx.ui.notify).toHaveBeenCalledWith('Task not found: nonexistent-id', 'error');
+  });
+
+  it('/cron delete with invalid id shows not found', async () => {
+    const handler = await getCronHandler();
+    const ctx = createMockCtx();
+    await handler('delete nonexistent-id', ctx);
+    expect(ctx.ui.notify).toHaveBeenCalledWith('Task not found: nonexistent-id', 'error');
+  });
+
+  it('/cron enable without id shows usage', async () => {
+    const handler = await getCronHandler();
+    const ctx = createMockCtx();
+    await handler('enable', ctx);
+    expect(ctx.ui.notify).toHaveBeenCalledWith('Usage: /cron enable <task-id>', 'warning');
+  });
+
+  it('/cron disable without id shows usage', async () => {
+    const handler = await getCronHandler();
+    const ctx = createMockCtx();
+    await handler('disable', ctx);
+    expect(ctx.ui.notify).toHaveBeenCalledWith('Usage: /cron disable <task-id>', 'warning');
+  });
+
+  it('/cron delete without id shows usage', async () => {
+    const handler = await getCronHandler();
+    const ctx = createMockCtx();
+    await handler('delete', ctx);
+    expect(ctx.ui.notify).toHaveBeenCalledWith('Usage: /cron delete <task-id>', 'warning');
+  });
+
+  it('/cron list shows tasks when they exist', async () => {
+    await externalScheduler.create({
+      type: 'cron',
+      schedule: '0 9 * * *',
+      intervalSeconds: 0,
+      prompt: 'morning check',
+      sessionId: 'sess',
+      model: { provider: 'anthropic', model: 'test' },
+      toolPolicyProfile: 'workspace-write',
+      enabled: true,
+      name: 'morning',
+    });
+    await externalScheduler.create({
+      type: 'interval',
+      schedule: '30m',
+      intervalSeconds: 1800,
+      prompt: 'health check',
+      sessionId: 'sess',
+      model: { provider: 'anthropic', model: 'test' },
+      toolPolicyProfile: 'workspace-write',
+      enabled: false,
+      name: 'health',
+    });
+    const handler = await getCronHandler();
+    const ctx = createMockCtx();
+    await handler('list', ctx);
+    const output = (ctx.ui.notify as ReturnType<typeof vi.fn>).mock.calls[0]![0] as string;
+    expect(output).toContain('morning');
+    expect(output).toContain('[cron]');
+    expect(output).toContain('health');
+    expect(output).toContain('[interval]');
+    expect(output).toContain('disabled');
+  });
+
+  it('/cron get shows task detail fields', async () => {
+    const task = await externalScheduler.create({
+      type: 'cron',
+      schedule: '*/5 * * * *',
+      intervalSeconds: 0,
+      prompt: 'ping server',
+      sessionId: 'sess',
+      model: { provider: 'anthropic', model: 'test' },
+      toolPolicyProfile: 'workspace-write',
+      enabled: true,
+      name: 'pinger',
+      description: 'Pings the server every 5 minutes',
+    });
+    const handler = await getCronHandler();
+    const ctx = createMockCtx();
+    await handler(`get ${task.id}`, ctx);
+    const output = (ctx.ui.notify as ReturnType<typeof vi.fn>).mock.calls[0]![0] as string;
+    expect(output).toContain(`ID: ${task.id}`);
+    expect(output).toContain('Name: pinger');
+    expect(output).toContain('Type: cron');
+    expect(output).toContain('Schedule: */5 * * * *');
+    expect(output).toContain('Enabled: true');
+    expect(output).toContain('Description: Pings the server every 5 minutes');
+    expect(output).toContain('Prompt: ping server');
+  });
+
+  it('/cron status shows running tasks', async () => {
+    const handler = await getCronHandler();
+    const ctx = createMockCtx();
+    await handler('status', ctx);
+    const output = (ctx.ui.notify as ReturnType<typeof vi.fn>).mock.calls[0]![0] as string;
+    expect(output).toContain('Active: true');
+    expect(output).toContain('Tasks: 0');
+    expect(output).toContain('Timers: 0');
+    expect(output).toContain('Crons: 0');
+  });
+
+  it('/cron subcommand is case-insensitive', async () => {
+    const handler = await getCronHandler();
+    const ctx = createMockCtx();
+    await handler('STATUS', ctx);
+    expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining('Active:'), 'info');
+  });
+
+  it('/cron handles extra whitespace in args', async () => {
+    const handler = await getCronHandler();
+    const ctx = createMockCtx();
+    await handler('  status  ', ctx);
+    expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining('Active:'), 'info');
+  });
+
+  it('getArgumentCompletions returns matching subcommands', async () => {
+    const { pi } = await setupExtension({ scheduler: externalScheduler });
+    const cmd = pi.commands.get('cron')! as RegisteredCommand & {
+      getArgumentCompletions?: (prefix: string) => { label: string; value: string }[] | null;
+    };
+    const completions = cmd.getArgumentCompletions!('d');
+    expect(completions).toEqual([
+      { label: 'disable', value: 'disable' },
+      { label: 'delete', value: 'delete' },
+    ]);
+  });
+
+  it('getArgumentCompletions returns all subcommands for empty prefix', async () => {
+    const { pi } = await setupExtension({ scheduler: externalScheduler });
+    const cmd = pi.commands.get('cron')! as RegisteredCommand & {
+      getArgumentCompletions?: (prefix: string) => { label: string; value: string }[] | null;
+    };
+    const completions = cmd.getArgumentCompletions!('');
+    expect(completions).toHaveLength(7);
   });
 });
