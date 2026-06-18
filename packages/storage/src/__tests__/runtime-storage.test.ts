@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createJsonRuntimeStorage } from './runtime-storage-json.js';
+import { createJsonRuntimeStorage } from '../runtime-storage-json.js';
 
 const tmpDirs: string[] = [];
 

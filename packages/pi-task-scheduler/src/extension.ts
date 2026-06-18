@@ -101,48 +101,112 @@ export default function taskSchedulerExtension(
     ownsScheduler = false;
   });
 
-  pi.registerCommand('pi-scheduler-status', {
-    description: 'Show task scheduler status.',
-    handler: async (_args, ctx) => {
-      if (!scheduler) {
-        ctx.ui.notify('Task scheduler is not running.', 'warning');
-        return;
-      }
-      const status = await scheduler.status();
-      ctx.ui.notify(formatStatus(status), 'info');
+  pi.registerCommand('cron', {
+    description:
+      'Manage scheduled tasks. Subcommands: status, list, get, run, enable, disable, delete.',
+    getArgumentCompletions: (prefix) => {
+      const subcommands = ['status', 'list', 'get', 'run', 'enable', 'disable', 'delete'];
+      const matches = subcommands.filter((s) => s.startsWith(prefix.trim().toLowerCase()));
+      return matches.map((s) => ({ label: s, value: s }));
     },
-  });
-
-  pi.registerCommand('pi-scheduler-list', {
-    description: 'List scheduled tasks.',
-    handler: async (_args, ctx) => {
-      if (!scheduler) {
-        ctx.ui.notify('Task scheduler is not running.', 'warning');
-        return;
-      }
-      const tasks = await scheduler.list();
-      ctx.ui.notify(formatTaskList(tasks), 'info');
-    },
-  });
-
-  pi.registerCommand('pi-scheduler-run-now', {
-    description: 'Run a scheduled task immediately by ID.',
     handler: async (args, ctx) => {
-      const taskId = args.trim();
-      if (!taskId) {
-        ctx.ui.notify('Usage: /pi-scheduler-run-now <task-id>', 'warning');
-        return;
-      }
       if (!scheduler) {
         ctx.ui.notify('Task scheduler is not running.', 'warning');
         return;
       }
-      const task = await scheduler.runNow(taskId);
-      if (!task) {
-        ctx.ui.notify(`Task not found: ${taskId}`, 'error');
-        return;
+
+      const parts = args.trim().split(/\s+/).filter(Boolean);
+      const subcommand = parts[0]?.toLowerCase() ?? 'status';
+      const rest = parts.slice(1).join(' ').trim();
+
+      switch (subcommand) {
+        case 'status': {
+          const status = await scheduler.status();
+          ctx.ui.notify(formatStatus(status), 'info');
+          break;
+        }
+
+        case 'list': {
+          const tasks = await scheduler.list();
+          ctx.ui.notify(formatTaskList(tasks), 'info');
+          break;
+        }
+
+        case 'get': {
+          if (!rest) {
+            ctx.ui.notify('Usage: /cron get <task-id>', 'warning');
+            break;
+          }
+          const task = await scheduler.get(rest);
+          if (!task) {
+            ctx.ui.notify(`Task not found: ${rest}`, 'error');
+            break;
+          }
+          ctx.ui.notify(formatTaskDetail(task), 'info');
+          break;
+        }
+
+        case 'run': {
+          if (!rest) {
+            ctx.ui.notify('Usage: /cron run <task-id>', 'warning');
+            break;
+          }
+          const task = await scheduler.runNow(rest);
+          if (!task) {
+            ctx.ui.notify(`Task not found: ${rest}`, 'error');
+            break;
+          }
+          ctx.ui.notify(`Triggered: ${task.name ?? task.id}`, 'info');
+          break;
+        }
+
+        case 'enable': {
+          if (!rest) {
+            ctx.ui.notify('Usage: /cron enable <task-id>', 'warning');
+            break;
+          }
+          const task = await scheduler.update(rest, { enabled: true });
+          if (!task) {
+            ctx.ui.notify(`Task not found: ${rest}`, 'error');
+            break;
+          }
+          ctx.ui.notify(`Enabled: ${task.name ?? task.id}`, 'info');
+          break;
+        }
+
+        case 'disable': {
+          if (!rest) {
+            ctx.ui.notify('Usage: /cron disable <task-id>', 'warning');
+            break;
+          }
+          const task = await scheduler.update(rest, { enabled: false });
+          if (!task) {
+            ctx.ui.notify(`Task not found: ${rest}`, 'error');
+            break;
+          }
+          ctx.ui.notify(`Disabled: ${task.name ?? task.id}`, 'info');
+          break;
+        }
+
+        case 'delete': {
+          if (!rest) {
+            ctx.ui.notify('Usage: /cron delete <task-id>', 'warning');
+            break;
+          }
+          const deleted = await scheduler.delete(rest);
+          ctx.ui.notify(
+            deleted ? `Deleted: ${rest}` : `Task not found: ${rest}`,
+            deleted ? 'info' : 'error',
+          );
+          break;
+        }
+
+        default:
+          ctx.ui.notify(
+            'Unknown subcommand. Available: status, list, get, run, enable, disable, delete.',
+            'warning',
+          );
       }
-      ctx.ui.notify(`Triggered: ${task.name ?? task.id}`, 'info');
     },
   });
 }
@@ -169,7 +233,23 @@ function formatTaskList(tasks: ScheduledTask[]): string {
       const name = t.name ?? t.id.slice(0, 8);
       const status = t.enabled ? (t.lastStatus ?? 'pending') : 'disabled';
       const next = t.nextRunAt ? ` next: ${t.nextRunAt}` : '';
-      return `${name} [${t.type}] ${status}${next}`;
+      return `${t.id.slice(0, 8)} ${name} [${t.type}] ${status}${next}`;
     })
     .join('\n');
+}
+
+function formatTaskDetail(task: ScheduledTask): string {
+  const lines = [
+    `ID: ${task.id}`,
+    `Name: ${task.name ?? '(unnamed)'}`,
+    `Type: ${task.type}`,
+    `Schedule: ${task.schedule}`,
+    `Enabled: ${task.enabled}`,
+    `Status: ${task.lastStatus ?? 'pending'}`,
+    `Runs: ${task.runCount}`,
+  ];
+  if (task.nextRunAt) lines.push(`Next run: ${task.nextRunAt}`);
+  if (task.description) lines.push(`Description: ${task.description}`);
+  lines.push(`Prompt: ${task.prompt}`);
+  return lines.join('\n');
 }

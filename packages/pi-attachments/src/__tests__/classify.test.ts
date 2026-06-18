@@ -9,7 +9,7 @@ import {
   renderAttachmentBlock,
   renderAttachmentContext,
   truncateText,
-} from './classify.js';
+} from '../classify.js';
 
 describe('classifyAttachment', () => {
   it('classifies image files by extension', () => {

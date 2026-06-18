@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { readJsonFile, writeJsonFile } from './json-file.js';
+import { readJsonFile, writeJsonFile } from '../json-file.js';
 
 const tmpDirs: string[] = [];
 

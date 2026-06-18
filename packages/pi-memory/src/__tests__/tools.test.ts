@@ -2,8 +2,8 @@ import { mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { MemoryStore } from './store.js';
-import { createMemoryTools } from './tools.js';
+import { MemoryStore } from '../store.js';
+import { createMemoryTools } from '../tools.js';
 
 const TEST_ROOT = path.join(tmpdir(), 'pi-memory-tools-test');
 

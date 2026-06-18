@@ -2,10 +2,10 @@ import { existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { Prefetch } from './prefetch.js';
-import type { KeyResolver, Mem0Provider, ProviderResolver } from './provider.js';
-import { mapApiToMem0Provider, SqliteSnapshotStore } from './provider.js';
-import { createMem0Tools } from './tools.js';
+import { Prefetch } from '../prefetch.js';
+import type { KeyResolver, Mem0Provider, ProviderResolver } from '../provider.js';
+import { mapApiToMem0Provider, SqliteSnapshotStore } from '../provider.js';
+import { createMem0Tools } from '../tools.js';
 
 // ---------------------------------------------------------------------------
 // Mock provider
@@ -305,7 +305,7 @@ describe('createMem0Provider with resolveProvider', () => {
   });
 
   it('maps custom provider to openai and injects baseURL', async () => {
-    const { createMem0Provider: create } = await import('./provider.js');
+    const { createMem0Provider: create } = await import('../provider.js');
 
     await create({
       config: {
@@ -346,7 +346,7 @@ describe('createMem0Provider with resolveProvider', () => {
   });
 
   it('falls back to resolveKey when resolveProvider is not provided', async () => {
-    const { createMem0Provider: create } = await import('./provider.js');
+    const { createMem0Provider: create } = await import('../provider.js');
 
     await create({
       config: {
@@ -372,7 +372,7 @@ describe('createMem0Provider with resolveProvider', () => {
   });
 
   it('keeps original provider name when resolveProvider returns undefined', async () => {
-    const { createMem0Provider: create } = await import('./provider.js');
+    const { createMem0Provider: create } = await import('../provider.js');
 
     await create({
       config: {
@@ -545,7 +545,7 @@ describe('createMem0Provider additional scenarios', () => {
   });
 
   it('uses default embedder and llm when oss config is empty', async () => {
-    const { createMem0Provider: create } = await import('./provider.js');
+    const { createMem0Provider: create } = await import('../provider.js');
 
     await create({
       config: { mode: 'open-source' },
@@ -567,7 +567,7 @@ describe('createMem0Provider additional scenarios', () => {
   });
 
   it('defaults vectorStore to memory provider', async () => {
-    const { createMem0Provider: create } = await import('./provider.js');
+    const { createMem0Provider: create } = await import('../provider.js');
 
     await create({
       config: { mode: 'open-source' },
@@ -579,7 +579,7 @@ describe('createMem0Provider additional scenarios', () => {
   });
 
   it('respects custom vectorStore config', async () => {
-    const { createMem0Provider: create } = await import('./provider.js');
+    const { createMem0Provider: create } = await import('../provider.js');
 
     await create({
       config: {
@@ -600,7 +600,7 @@ describe('createMem0Provider additional scenarios', () => {
   });
 
   it('does not inject baseURL when resolveProvider returns no baseUrl', async () => {
-    const { createMem0Provider: create } = await import('./provider.js');
+    const { createMem0Provider: create } = await import('../provider.js');
 
     await create({
       config: {
@@ -623,7 +623,7 @@ describe('createMem0Provider additional scenarios', () => {
   });
 
   it('does not override explicitly set apiKey in config', async () => {
-    const { createMem0Provider: create } = await import('./provider.js');
+    const { createMem0Provider: create } = await import('../provider.js');
 
     await create({
       config: {
@@ -644,7 +644,7 @@ describe('createMem0Provider additional scenarios', () => {
   });
 
   it('throws for platform mode without apiKey', async () => {
-    const { createMem0Provider: create } = await import('./provider.js');
+    const { createMem0Provider: create } = await import('../provider.js');
 
     await expect(create({ config: { mode: 'platform' } })).rejects.toThrow(
       'Platform mode requires apiKey',
@@ -652,7 +652,7 @@ describe('createMem0Provider additional scenarios', () => {
   });
 
   it('sets disableHistory when configured', async () => {
-    const { createMem0Provider: create } = await import('./provider.js');
+    const { createMem0Provider: create } = await import('../provider.js');
 
     await create({
       config: {

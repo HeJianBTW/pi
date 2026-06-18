@@ -95,6 +95,7 @@ class PlatformProvider implements Mem0Provider {
     await this.ensureClient();
     const addOpts: Record<string, unknown> = { userId: opts.userId };
     if (opts.infer === false) addOpts.infer = false;
+    // biome-ignore lint/suspicious/noExplicitAny: mem0ai/oss lacks type definitions
     const result = await (this.client as any).add(messages, addOpts);
     return result as AddResult;
   }
@@ -105,12 +106,14 @@ class PlatformProvider implements Mem0Provider {
       filters: { user_id: opts.userId },
     };
     if (opts.topK) searchOpts.topK = opts.topK;
+    // biome-ignore lint/suspicious/noExplicitAny: mem0ai/oss lacks type definitions
     const results = await (this.client as any).search(query, searchOpts);
     return normalizeResults(results);
   }
 
   async getAll(opts: { userId: string }): Promise<MemoryItem[]> {
     await this.ensureClient();
+    // biome-ignore lint/suspicious/noExplicitAny: mem0ai/oss lacks type definitions
     const results = await (this.client as any).getAll({
       filters: { user_id: opts.userId },
     });
@@ -126,6 +129,7 @@ interface SqliteDatabase {
   pragma(sql: string): void;
   exec(sql: string): void;
   prepare(sql: string): {
+    // biome-ignore lint/suspicious/noExplicitAny: better-sqlite3 untyped return
     all(...args: unknown[]): any[];
     run(...args: unknown[]): void;
   };
@@ -331,6 +335,7 @@ class OSSProvider implements Mem0Provider {
 
   private async _init(): Promise<void> {
     const mod = await import('mem0ai/oss');
+    // biome-ignore lint/suspicious/noExplicitAny: mem0ai/oss lacks type definitions
     const Memory = (mod as any).Memory ?? (mod as any).default;
 
     // Detect broken better-sqlite3 (Node version mismatch) — disable history if so
@@ -351,6 +356,7 @@ class OSSProvider implements Mem0Provider {
     const builtConfig = await this._buildConfig();
     if (!sqliteOk) builtConfig.disableHistory = true;
 
+    // biome-ignore lint/suspicious/noExplicitAny: mem0ai/oss lacks type definitions
     let mem: any;
     try {
       mem = new Memory(builtConfig);
@@ -385,7 +391,7 @@ class OSSProvider implements Mem0Provider {
         }
       }
       if (totalRestored > 0) {
-        console.log(`[mem0] restored ${totalRestored} memories from snapshot`);
+        console.error(`[pi-memory-mem0] restored ${totalRestored} memories from snapshot`);
       }
     }
 
@@ -395,6 +401,7 @@ class OSSProvider implements Mem0Provider {
   private asyncSnapshotSync(userId: string): void {
     if (!this.snapshot || this.syncingSnapshot) return;
     this.syncingSnapshot = true;
+    // biome-ignore lint/suspicious/noExplicitAny: mem0ai/oss lacks type definitions
     (this.memory as any)
       .getAll({ filters: { user_id: userId } })
       .then((results: unknown) => {
@@ -414,6 +421,7 @@ class OSSProvider implements Mem0Provider {
     await this.ensureMemory();
     const addOpts: Record<string, unknown> = { userId: opts.userId };
     if (opts.infer === false) addOpts.infer = false;
+    // biome-ignore lint/suspicious/noExplicitAny: mem0ai/oss lacks type definitions
     const result = await (this.memory as any).add(messages, addOpts);
     this.asyncSnapshotSync(opts.userId);
     return result as AddResult;
@@ -425,12 +433,14 @@ class OSSProvider implements Mem0Provider {
       filters: { user_id: opts.userId },
     };
     if (opts.topK) searchOpts.topK = opts.topK;
+    // biome-ignore lint/suspicious/noExplicitAny: mem0ai/oss lacks type definitions
     const results = await (this.memory as any).search(query, searchOpts);
     return normalizeResults(results);
   }
 
   async getAll(opts: { userId: string }): Promise<MemoryItem[]> {
     await this.ensureMemory();
+    // biome-ignore lint/suspicious/noExplicitAny: mem0ai/oss lacks type definitions
     const results = await (this.memory as any).getAll({
       filters: { user_id: opts.userId },
     });
@@ -467,6 +477,7 @@ export async function createMem0Provider(opts: CreateProviderOptions): Promise<M
       useRegistry ? resolveProvider : undefined,
       snapshotDbPath,
     );
+    // biome-ignore lint/suspicious/noExplicitAny: mem0ai/oss lacks type definitions
     await (provider as any).ensureMemory();
     return provider;
   }

@@ -1,0 +1,191 @@
+name: Integration
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  pi-runtime:
+    name: Pi runtime integration
+    # Skip on PRs from forks: secrets are unavailable, so the job would fail spuriously.
+    # Same-repo PRs (and pushes / manual runs) execute normally.
+    if: >
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on:
+      - instance-hnpsq9go
+      - linux
+      - x64
+    timeout-minutes: 15
+    env:
+      # Custom-provider routing for Stage B is configured via ~/.pi/agent/models.json
+      # (the declarative config path documented at https://pi.dev/docs/latest/models).
+      # The runtime registerProvider() / `--extension` path was unstable on CI under
+      # pi 0.79.6 — every request died with `Invalid URL` before any HTTP packet
+      # left the runner, even though the same extension worked on macOS.
+      # models.json sidesteps that path entirely: pi parses the file at startup,
+      # `apiKey: "$VAR"` reads the env at request time, baseUrl is taken verbatim.
+      PI_INTEGRATION_BASE_URL: ${{ secrets.PI_INTEGRATION_BASE_URL }}
+      PI_INTEGRATION_API_KEY: ${{ secrets.PI_INTEGRATION_API_KEY }}
+      PI_OFFLINE: '0'
+
+    steps:
+      - name: Clean self-hosted runner caches
+        run: |
+          set -euo pipefail
+          # pnpm/action-setup@v4 fails with ENOTEMPTY rmdir if a previous CI
+          # build left files behind in /home/work/setup-pnpm. Wipe both that
+          # dir and the shared pi config from previous runs (the latter
+          # otherwise accumulates `pi install` paths from other workspaces and
+          # makes pi crash with tool-name conflicts on startup).
+          rm -rf "$HOME/setup-pnpm" || true
+          rm -rf "$HOME/.pi/agent" || true
+          mkdir -p "$HOME/.pi/agent"
+
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build packages
+        run: |
+          pnpm --filter @amaster.ai/pi-storage prisma:generate
+          pnpm build
+
+      - name: Install pi-coding-agent
+        run: npm install -g --ignore-scripts @earendil-works/pi-coding-agent
+
+      - name: Verify pi installation
+        run: pi --version
+
+      - name: Install all monorepo extensions into pi (Stage A — load)
+        run: |
+          set -euo pipefail
+          for pkg in packages/pi-*; do
+            echo "::group::pi install $pkg"
+            pi install "./$pkg"
+            echo "::endgroup::"
+          done
+
+      - name: Assert all packages are registered (Stage A — assert)
+        run: |
+          set -euo pipefail
+          installed="$(pi list)"
+          echo "$installed"
+          missing=0
+          for pkg in packages/pi-*; do
+            name="$(basename "$pkg")"
+            if ! grep -F "/packages/${name}" <<<"$installed" >/dev/null; then
+              echo "::error::Missing registration for ${name} in 'pi list' output"
+              missing=$((missing + 1))
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "::error::${missing} extension(s) failed to register"
+            exit 1
+          fi
+
+      - name: Configure custom deepseek provider in ~/.pi/agent/models.json
+        if: env.PI_INTEGRATION_BASE_URL != '' && env.PI_INTEGRATION_API_KEY != ''
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.pi/agent"
+          # baseUrl is interpolated by the shell here; apiKey uses pi's `$VAR`
+          # template so the secret is resolved at request time, not embedded.
+          cat > "$HOME/.pi/agent/models.json" <<EOF
+          {
+            "providers": {
+              "deepseek-integration": {
+                "baseUrl": "${PI_INTEGRATION_BASE_URL}",
+                "api": "openai-completions",
+                "apiKey": "\$PI_INTEGRATION_API_KEY",
+                "authHeader": true,
+                "models": [
+                  {
+                    "id": "deepseek-v4-flash",
+                    "name": "DeepSeek V4 Flash",
+                    "reasoning": true,
+                    "input": ["text"],
+                    "contextWindow": 1000000,
+                    "maxTokens": 384000,
+                    "thinkingLevelMap": {
+                      "minimal": null,
+                      "low": null,
+                      "medium": null,
+                      "high": "high",
+                      "xhigh": "max"
+                    },
+                    "compat": {
+                      "thinkingFormat": "deepseek",
+                      "requiresReasoningContentOnAssistantMessages": true,
+                      "supportsDeveloperRole": false
+                    }
+                  }
+                ]
+              }
+            }
+          }
+          EOF
+
+      - name: Verify provider is registered
+        if: env.PI_INTEGRATION_BASE_URL != '' && env.PI_INTEGRATION_API_KEY != ''
+        run: |
+          set -euo pipefail
+          pi --list-models deepseek-integration | tee /tmp/pi-models.txt
+          grep -F 'deepseek-integration' /tmp/pi-models.txt
+          grep -F 'deepseek-v4-flash' /tmp/pi-models.txt
+
+      - name: Run single-prompt smoke test (Stage B)
+        if: env.PI_INTEGRATION_BASE_URL != '' && env.PI_INTEGRATION_API_KEY != ''
+        run: |
+          set -euo pipefail
+          # pi imports `undici.EnvHttpProxyAgent` at startup, which reads
+          # HTTP_PROXY/HTTPS_PROXY/ALL_PROXY/NO_PROXY at construction time.
+          # On self-hosted runners these may be set to an empty string, which
+          # `new URL("")` rejects, killing pi before it can run. Fully unset
+          # them — `undefined` is treated as "no proxy" by the agent.
+          unset HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY
+          unset http_proxy https_proxy all_proxy no_proxy
+          set +e
+          output="$(pi \
+            --provider deepseek-integration \
+            --model deepseek-v4-flash \
+            --thinking xhigh \
+            --no-session \
+            --no-context-files \
+            --mode text \
+            -p 'Reply with the single word READY and nothing else.' 2>&1)"
+          rc=$?
+          set -e
+          echo "--- pi output (exit=$rc) ---"
+          echo "$output"
+          echo "----------------------------"
+          if [ $rc -ne 0 ] || ! grep -qi 'READY' <<<"$output"; then
+            echo "::error::Expected 'READY' in pi output (exit=$rc)"
+            exit 1
+          fi
+
+      - name: Skipped — Stage B (secrets unavailable)
+        if: env.PI_INTEGRATION_BASE_URL == '' || env.PI_INTEGRATION_API_KEY == ''
+        run: |
+          echo "::warning::PI_INTEGRATION_BASE_URL or PI_INTEGRATION_API_KEY secret not set — skipping Stage B. Stage A (extension load + registration) still ran."

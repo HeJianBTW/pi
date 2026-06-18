@@ -13,7 +13,10 @@ concurrency:
 jobs:
   lint:
     name: Lint
-    runs-on: ubuntu-latest
+    runs-on:
+      - instance-hnpsq9go
+      - linux
+      - x64
     steps:
       - uses: actions/checkout@v4
       - uses: biomejs/setup-biome@v2
@@ -21,9 +24,13 @@ jobs:
 
   typecheck:
     name: Typecheck
-    runs-on: ubuntu-latest
+    runs-on:
+      - instance-hnpsq9go
+      - linux
+      - x64
     steps:
       - uses: actions/checkout@v4
+      - run: rm -rf "$HOME/setup-pnpm"
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -34,9 +41,13 @@ jobs:
 
   test:
     name: Test
-    runs-on: ubuntu-latest
+    runs-on:
+      - instance-hnpsq9go
+      - linux
+      - x64
     steps:
       - uses: actions/checkout@v4
+      - run: rm -rf "$HOME/setup-pnpm"
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -49,10 +60,14 @@ jobs:
 
   build:
     name: Build
-    runs-on: ubuntu-latest
+    runs-on:
+      - instance-hnpsq9go
+      - linux
+      - x64
     needs: [lint, typecheck, test]
     steps:
       - uses: actions/checkout@v4
+      - run: rm -rf "$HOME/setup-pnpm"
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:

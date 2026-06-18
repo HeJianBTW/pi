@@ -7,7 +7,7 @@ import {
   isCapabilityExposed,
   resolveCapabilityPolicy,
   SecurityGate,
-} from './index.js';
+} from '../index.js';
 
 const request: RuntimeRequestContext = {
   sessionId: 'session-1',

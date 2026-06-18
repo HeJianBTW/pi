@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { AmasterAdapter, initAmasterProvider } from './adapters/amaster.js';
-import { initMulticaProvider, MulticaAdapter } from './adapters/multica.js';
-import { ensureMulticaBinary } from './adapters/multica-installer.js';
-import piTeamworkExtension from './index.js';
-import type { ExecFn } from './types.js';
+import { AmasterAdapter, initAmasterProvider } from '../adapters/amaster.js';
+import { initMulticaProvider, MulticaAdapter } from '../adapters/multica.js';
+import { ensureMulticaBinary } from '../adapters/multica-installer.js';
+import piTeamworkExtension from '../index.js';
+import type { ExecFn } from '../types.js';
 
 type RegisteredTool = {
   name: string;

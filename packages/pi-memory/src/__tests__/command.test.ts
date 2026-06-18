@@ -2,8 +2,8 @@ import { mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import memoryExtension from './extension.js';
-import { MemoryStore } from './store.js';
+import memoryExtension from '../extension.js';
+import { MemoryStore } from '../store.js';
 
 const TEST_ROOT = path.join(tmpdir(), 'pi-memory-command-test');
 

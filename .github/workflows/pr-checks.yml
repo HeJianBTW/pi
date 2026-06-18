@@ -10,7 +10,10 @@ permissions:
 jobs:
   build-checks:
     name: build checks
-    runs-on: ubuntu-latest
+    runs-on:
+      - instance-hnpsq9go
+      - linux
+      - x64
     timeout-minutes: 45
 
     steps:

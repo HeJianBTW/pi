@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { splitSqlStatements } from './db-migrations.js';
+import { splitSqlStatements } from '../db-migrations.js';
 
 describe('splitSqlStatements', () => {
   it('splits SQL statements while ignoring comments and quoted semicolons', () => {
