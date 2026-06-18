@@ -14,11 +14,19 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  # Run JavaScript actions (checkout, setup-node, pnpm/action-setup, etc.) on
+  # Node 24 instead of the deprecated Node 20 the runner ships by default.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 jobs:
+  # ──────────────────────────────────────────────────────────────────────
+  # Stage A: pi runtime can install + load every extension in this monorepo.
+  # No LLM calls — keeps this job fast (<2min) so downstream jobs (Stage B
+  # smoke, Stage C matrix) can start as soon as the load contract is verified.
+  # ──────────────────────────────────────────────────────────────────────
   pi-runtime:
     name: Pi runtime integration
-    # Skip on PRs from forks: secrets are unavailable, so the job would fail spuriously.
-    # Same-repo PRs (and pushes / manual runs) execute normally.
     if: >
       github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository
@@ -28,35 +36,36 @@ jobs:
       - x64
     timeout-minutes: 15
     env:
-      # Custom-provider routing for Stage B is configured via ~/.pi/agent/models.json
-      # (the declarative config path documented at https://pi.dev/docs/latest/models).
-      # The runtime registerProvider() / `--extension` path was unstable on CI under
-      # pi 0.79.6 — every request died with `Invalid URL` before any HTTP packet
-      # left the runner, even though the same extension worked on macOS.
-      # models.json sidesteps that path entirely: pi parses the file at startup,
-      # `apiKey: "$VAR"` reads the env at request time, baseUrl is taken verbatim.
       PI_INTEGRATION_BASE_URL: ${{ secrets.PI_INTEGRATION_BASE_URL }}
       PI_INTEGRATION_API_KEY: ${{ secrets.PI_INTEGRATION_API_KEY }}
       PI_OFFLINE: '0'
 
     steps:
+      - name: Set up per-job pi config dir
+        run: |
+          # Self-hosted runners share $HOME across the 6 matrix workers
+          # (instance-hnpsq9go-1..6), so writes to ~/.pi/agent race between
+          # concurrent jobs. Pointing PI_CODING_AGENT_DIR at the job's
+          # RUNNER_TEMP gives each job an isolated agent home.
+          # `env:` blocks can't reference `runner.temp` (it's not in scope at
+          # job-startup time), so we resolve via $RUNNER_TEMP at step time.
+          echo "PI_CODING_AGENT_DIR=$RUNNER_TEMP/pi-agent" >> "$GITHUB_ENV"
+
       - name: Clean self-hosted runner caches
         run: |
           set -euo pipefail
-          # pnpm/action-setup@v4 fails with ENOTEMPTY rmdir if a previous CI
-          # build left files behind in /home/work/setup-pnpm. Wipe both that
-          # dir and the shared pi config from previous runs (the latter
-          # otherwise accumulates `pi install` paths from other workspaces and
-          # makes pi crash with tool-name conflicts on startup).
-          rm -rf "$HOME/setup-pnpm" || true
-          rm -rf "$HOME/.pi/agent" || true
-          mkdir -p "$HOME/.pi/agent"
+          rm -rf "$PI_CODING_AGENT_DIR" || true
+          mkdir -p "$PI_CODING_AGENT_DIR"
 
       - name: Checkout source
         uses: actions/checkout@v4
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
+        with:
+          # Per-job temp dir avoids cwd-deleted races between concurrent
+          # matrix jobs sharing the runner's $HOME/setup-pnpm.
+          dest: ${{ runner.temp }}/setup-pnpm
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -65,7 +74,16 @@ jobs:
           cache: pnpm
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: |
+          pnpm install --frozen-lockfile
+          # Force-fetch the better-sqlite3 prebuilt binary. pnpm 10's
+          # build-script gating means our onlyBuiltDependencies allowlist
+          # only fires on first install of a package — when pnpm restores
+          # node_modules from cache or re-uses an existing module, the
+          # `install` script is skipped and mem0's OSS sqlite store can't
+          # load the native binding. Running prebuild-install directly is
+          # cheap (~10s, downloads a precompiled .node) and idempotent.
+          (cd node_modules/.pnpm/better-sqlite3@*/node_modules/better-sqlite3 && npx --no-install prebuild-install) || true
 
       - name: Build packages
         run: |
@@ -105,14 +123,69 @@ jobs:
             exit 1
           fi
 
+  # ──────────────────────────────────────────────────────────────────────
+  # Stage B: single-prompt LLM smoke test against the custom deepseek
+  # provider. This job runs in parallel with the Stage C matrix (both
+  # `needs: pi-runtime` and don't depend on each other) so the LLM
+  # round-trip doesn't gate per-extension verification.
+  # ──────────────────────────────────────────────────────────────────────
+  pi-runtime-smoke:
+    name: Pi runtime smoke (Stage B)
+    needs: pi-runtime
+    if: >
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on:
+      - instance-hnpsq9go
+      - linux
+      - x64
+    timeout-minutes: 15
+    env:
+      PI_INTEGRATION_BASE_URL: ${{ secrets.PI_INTEGRATION_BASE_URL }}
+      PI_INTEGRATION_API_KEY: ${{ secrets.PI_INTEGRATION_API_KEY }}
+      PI_OFFLINE: '0'
+
+    steps:
+      - name: Set up per-job pi config dir
+        run: echo "PI_CODING_AGENT_DIR=$RUNNER_TEMP/pi-agent" >> "$GITHUB_ENV"
+
+      - name: Clean self-hosted runner caches
+        run: |
+          set -euo pipefail
+          rm -rf "$PI_CODING_AGENT_DIR" || true
+          mkdir -p "$PI_CODING_AGENT_DIR"
+
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          dest: ${{ runner.temp }}/setup-pnpm
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build packages
+        run: |
+          pnpm --filter @amaster.ai/pi-storage prisma:generate
+          pnpm build
+
+      - name: Install pi-coding-agent
+        run: npm install -g --ignore-scripts @earendil-works/pi-coding-agent
+
       - name: Configure custom deepseek provider in ~/.pi/agent/models.json
         if: env.PI_INTEGRATION_BASE_URL != '' && env.PI_INTEGRATION_API_KEY != ''
         run: |
           set -euo pipefail
-          mkdir -p "$HOME/.pi/agent"
-          # baseUrl is interpolated by the shell here; apiKey uses pi's `$VAR`
-          # template so the secret is resolved at request time, not embedded.
-          cat > "$HOME/.pi/agent/models.json" <<EOF
+          mkdir -p "$PI_CODING_AGENT_DIR"
+          cat > "$PI_CODING_AGENT_DIR/models.json" <<EOF
           {
             "providers": {
               "deepseek-integration": {
@@ -159,11 +232,8 @@ jobs:
         if: env.PI_INTEGRATION_BASE_URL != '' && env.PI_INTEGRATION_API_KEY != ''
         run: |
           set -euo pipefail
-          # pi imports `undici.EnvHttpProxyAgent` at startup, which reads
-          # HTTP_PROXY/HTTPS_PROXY/ALL_PROXY/NO_PROXY at construction time.
-          # On self-hosted runners these may be set to an empty string, which
-          # `new URL("")` rejects, killing pi before it can run. Fully unset
-          # them — `undefined` is treated as "no proxy" by the agent.
+          # pi's undici EnvHttpProxyAgent reads HTTP_PROXY/HTTPS_PROXY at
+          # startup; an empty string crashes `new URL("")`. Unset entirely.
           unset HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY
           unset http_proxy https_proxy all_proxy no_proxy
           set +e
@@ -188,4 +258,367 @@ jobs:
       - name: Skipped — Stage B (secrets unavailable)
         if: env.PI_INTEGRATION_BASE_URL == '' || env.PI_INTEGRATION_API_KEY == ''
         run: |
-          echo "::warning::PI_INTEGRATION_BASE_URL or PI_INTEGRATION_API_KEY secret not set — skipping Stage B. Stage A (extension load + registration) still ran."
+          echo "::warning::PI_INTEGRATION_BASE_URL or PI_INTEGRATION_API_KEY secret not set — skipping Stage B."
+
+  # ──────────────────────────────────────────────────────────────────────
+  # Stage C: per-extension LLM-driven E2E. One matrix job per extension —
+  # each job constrains the LLM to a tiny tool allowlist, runs a prompt
+  # that should make the model invoke the target tool, and asserts the
+  # tool's output appears in pi's response.
+  #
+  # Skipped on fork PRs (secrets unavailable). Each job duplicates Stage A
+  # setup because self-hosted matrix jobs don't share workspace state.
+  # ──────────────────────────────────────────────────────────────────────
+  extension-tool-matrix:
+    name: Extension E2E (${{ matrix.extension }})
+    needs: pi-runtime
+    if: >
+      (github.event_name != 'pull_request' ||
+       github.event.pull_request.head.repo.full_name == github.repository) &&
+      vars.PI_INTEGRATION_SKIP_STAGE_C != 'true'
+    runs-on:
+      - instance-hnpsq9go
+      - linux
+      - x64
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - extension: pi-channels
+            tools: notify
+            prompt: "Use the notify tool with action=list-adapters to list registered channel adapters, then tell me how many you found. Use the tool exactly once."
+            assert_pattern: "(adapter|adapters|0|no )"
+          - extension: pi-memory
+            tools: memory_add,memory_read,mem0_save,mem0_search
+            prompt: "Step 1 — call memory_add with target=memory and content=ci-probe=alpha. Step 2 — call memory_read with target=memory and quote the saved entry verbatim. Step 3 — call mem0_save with fact=ci-mem0-marker is present. Step 4 — call mem0_search with query=ci-mem0-marker and quote the result. Use each tool exactly once."
+            assert_pattern: "ci-probe=alpha"
+          - extension: pi-task-scheduler
+            tools: scheduler_list
+            prompt: "Use the scheduler_list tool exactly once to list scheduled tasks, then tell me how many tasks there are."
+            assert_pattern: "(0|task|tasks|empty|none)"
+          - extension: pi-teamwork
+            tools: workspace_list
+            prompt: "Use workspace_list to fetch teamwork workspaces, then tell me the names of the workspaces. Call the tool exactly once."
+            assert_pattern: "(workspace|name|id)"
+          - extension: pi-web-access
+            tools: web_fetch
+            prompt: "Use web_fetch on https://www.baidu.com once. Tell me the page title in one sentence."
+            assert_pattern: "(baidu|百度|bing|google|search|title)"
+    env:
+      PI_INTEGRATION_BASE_URL: ${{ secrets.PI_INTEGRATION_BASE_URL }}
+      PI_INTEGRATION_API_KEY: ${{ secrets.PI_INTEGRATION_API_KEY }}
+      PI_INTEGRATION_MULTICA_TOKEN: ${{ secrets.PI_INTEGRATION_MULTICA_TOKEN }}
+      PI_OFFLINE: '0'
+
+    steps:
+      - name: Set up per-job pi config dir
+        # Self-hosted runners share $HOME across the 6 matrix workers
+        # (instance-hnpsq9go-1..6), so writes to ~/.pi/agent race between
+        # concurrent jobs. Pointing PI_CODING_AGENT_DIR at the job's
+        # RUNNER_TEMP gives each job an isolated agent home. `env:` blocks
+        # can't reference `runner.temp` (it's not in scope at job-startup
+        # time), so we resolve via $RUNNER_TEMP at step time.
+        run: echo "PI_CODING_AGENT_DIR=$RUNNER_TEMP/pi-agent" >> "$GITHUB_ENV"
+
+      - name: Clean self-hosted runner caches
+        run: |
+          set -euo pipefail
+          rm -rf "$PI_CODING_AGENT_DIR" || true
+          mkdir -p "$PI_CODING_AGENT_DIR"
+
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          # Per-job temp dir avoids cwd-deleted races between concurrent
+          # matrix jobs sharing the runner's $HOME/setup-pnpm.
+          dest: ${{ runner.temp }}/setup-pnpm
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: |
+          pnpm install --frozen-lockfile
+          # Force-fetch the better-sqlite3 prebuilt binary. pnpm 10's
+          # build-script gating means our onlyBuiltDependencies allowlist
+          # only fires on first install of a package — when pnpm restores
+          # node_modules from cache or re-uses an existing module, the
+          # `install` script is skipped and mem0's OSS sqlite store can't
+          # load the native binding. Running prebuild-install directly is
+          # cheap (~10s, downloads a precompiled .node) and idempotent.
+          (cd node_modules/.pnpm/better-sqlite3@*/node_modules/better-sqlite3 && npx --no-install prebuild-install) || true
+
+      - name: Build packages
+        run: |
+          pnpm --filter @amaster.ai/pi-storage prisma:generate
+          pnpm build
+
+      - name: Install pi-coding-agent
+        run: npm install -g --ignore-scripts @earendil-works/pi-coding-agent
+
+      - name: Configure pi settings (provider, models, extensions)
+        if: env.PI_INTEGRATION_BASE_URL != '' && env.PI_INTEGRATION_API_KEY != ''
+        run: |
+          set -euo pipefail
+          mkdir -p "$PI_CODING_AGENT_DIR"
+
+          # NOTE on ordering: this step writes settings.json BEFORE the
+          # `pi install` step below. `pi install` appends to settings.json's
+          # `packages` array; if we wrote settings.json after install, the
+          # packages array would be clobbered and the matrix prompt would
+          # run against zero registered extensions while still constraining
+          # tools to a name that no longer exists — pi hangs in that state.
+
+          # 1. models.json — the deepseek-integration custom provider used by
+          #    every matrix entry.
+          cat > "$PI_CODING_AGENT_DIR/models.json" <<EOF
+          {
+            "providers": {
+              "deepseek-integration": {
+                "baseUrl": "${PI_INTEGRATION_BASE_URL}",
+                "api": "openai-completions",
+                "apiKey": "\$PI_INTEGRATION_API_KEY",
+                "authHeader": true,
+                "models": [
+                  {
+                    "id": "deepseek-v4-flash",
+                    "name": "DeepSeek V4 Flash",
+                    "reasoning": true,
+                    "input": ["text"],
+                    "contextWindow": 1000000,
+                    "maxTokens": 384000,
+                    "thinkingLevelMap": {
+                      "minimal": null,
+                      "low": null,
+                      "medium": null,
+                      "high": "high",
+                      "xhigh": "max"
+                    },
+                    "compat": {
+                      "thinkingFormat": "deepseek",
+                      "requiresReasoningContentOnAssistantMessages": true,
+                      "supportsDeveloperRole": false
+                    }
+                  }
+                ]
+              }
+            }
+          }
+          EOF
+
+          # 2. settings.json — extension-specific configuration. Every matrix
+          #    entry carries any keys it needs; absent extensions ignore them.
+          cat > "$PI_CODING_AGENT_DIR/settings.json" <<EOF
+          {
+            "pi-teamwork": {
+              "provider": "multica",
+              "multica": {
+                "serverUrl": "https://multica.ai",
+                "token": "\${PI_INTEGRATION_MULTICA_TOKEN}",
+                "autoInstall": true
+              }
+            },
+            "pi-web-access": {
+              "fetch": {
+                "summary": {
+                  "provider": "deepseek-integration",
+                  "model": "deepseek-v4-flash"
+                }
+              }
+            },
+            "pi-scheduler": {
+              "dataDir": "${RUNNER_TEMP}/pi-scheduler"
+            },
+            "pi-memory-mem0": {
+              "mode": "open-source",
+              "userId": "ci-integration",
+              "oss": {
+                "snapshotDbPath": "${RUNNER_TEMP}/pi-mem0/snapshot.db",
+                "embedder": {
+                  "provider": "deepseek-integration",
+                  "config": { "model": "text-embedding-v4" }
+                },
+                "llm": {
+                  "provider": "deepseek-integration",
+                  "config": { "model": "deepseek-v4-flash" }
+                }
+              }
+            }
+          }
+          EOF
+
+      - name: Install monorepo extensions into pi
+        run: |
+          set -euo pipefail
+          # `pi install` appends to ~/.pi/agent/settings.json's `packages`
+          # array, so this must run AFTER the settings-write step above (the
+          # heredoc would otherwise clobber the array and the matrix prompt
+          # would hang against zero registered extensions).
+          pi install "./packages/${{ matrix.extension }}"
+          if [ "${{ matrix.extension }}" = "pi-memory" ]; then
+            pi install "./packages/pi-memory-mem0"
+          fi
+          pi list
+
+      - name: Bootstrap multica CLI (pi-teamwork only)
+        # pi-teamwork's autoInstall path is broken on this self-hosted runner:
+        # multica's upstream install.sh tries `sudo mv ...` to /usr/local/bin
+        # before falling back to ~/.local/bin, but our runner user has sudo
+        # configured to require a password — so the install silently fails.
+        # We bootstrap the binary ourselves with MULTICA_BIN_DIR forcing the
+        # user-bin path, then put it on $GITHUB_PATH so pi-teamwork's
+        # session_start spawn(multica) finds it. Driving login + daemon up
+        # front means the LLM's workspace_list call returns real data
+        # instead of `Exit code 1`, cutting the job from ~12min to ~1min.
+        if: matrix.extension == 'pi-teamwork'
+        env:
+          MULTICA_TOKEN: ${{ secrets.PI_INTEGRATION_MULTICA_TOKEN }}
+          MULTICA_BIN_DIR: /home/work/.local/bin
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.local/bin:$PATH"
+          if ! command -v multica >/dev/null 2>&1; then
+            curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
+          fi
+          multica --version
+          multica config set server_url https://multica.ai
+          multica daemon start || true   # may already be running on this runner
+          multica login --token "$MULTICA_TOKEN"
+          # Smoke-test the auth before handing off to pi-teamwork.
+          multica workspace list --output json
+
+      - name: Run extension prompt (Stage C)
+        if: env.PI_INTEGRATION_BASE_URL != '' && env.PI_INTEGRATION_API_KEY != ''
+        run: |
+          set -euo pipefail
+          unset HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY
+          unset http_proxy https_proxy all_proxy no_proxy
+          set +e
+          # --mode json emits one JSON event per line (session_start, turn_start,
+          # tool_execution_start/end, message_end, agent_end, …). We capture
+          # the whole stream so the log shows what tools the LLM called, with
+          # what args, and what each call returned — including any tool-side
+          # errors that text-mode silently summarizes into prose.
+          #
+          # --thinking high (not xhigh): xhigh maps to deepseek
+          # `reasoning_effort: max`, which on the amaster gateway has been
+          # observed to occasionally hang >5min on tool-call prompts. Stage B
+          # smoke keeps xhigh per the original spec.
+          output="$(pi \
+            --provider deepseek-integration \
+            --model deepseek-v4-flash \
+            --thinking high \
+            --no-session \
+            --no-context-files \
+            --tools '${{ matrix.tools }}' \
+            --mode json \
+            -p '${{ matrix.prompt }}' 2>&1)"
+          rc=$?
+          set -e
+          echo "--- raw event stream (${{ matrix.extension }}, exit=$rc) ---"
+          echo "$output"
+          echo "----------------------------"
+          if [ $rc -ne 0 ]; then
+            echo "::error::pi exited non-zero ($rc) for ${{ matrix.extension }}"
+            exit 1
+          fi
+          # Pretty-print the salient events so failures are diagnosable at a
+          # glance. `jq` is preinstalled on the runner image.
+          if command -v jq >/dev/null 2>&1; then
+            echo "--- tool calls ---"
+            jq -rc 'select(.type == "tool_execution_start" or .type == "tool_execution_end") | .' <<<"$output" || true
+            echo "--- tool errors (isError=true OR result text starts with Error:) ---"
+            # Match both proper isError tool results AND tools that smuggle
+            # errors into a normal text result (e.g. multica adapter today).
+            jq -rc '
+              select(.type == "tool_execution_end")
+              | select(
+                  .isError == true
+                  or (
+                    (.result.content // []) as $c
+                    | any($c[]?; .type == "text" and (.text // "" | startswith("Error:")))
+                  )
+                )
+              | {tool: .toolName, isError: .isError, result: .result}
+            ' <<<"$output" || true
+            echo "--- final assistant text ---"
+            ASSISTANT_TEXT=$(jq -rs '
+              map(select(.type == "message_end") | .message.content[]?
+                | select(.type == "text") | .text)
+              | join("\n")
+            ' <<<"$output" 2>/dev/null || echo "")
+            echo "$ASSISTANT_TEXT"
+            echo "------------------"
+          else
+            ASSISTANT_TEXT="$output"
+          fi
+          # Assert: prefer the assistant text (cleanest), fall back to grepping
+          # the raw event stream when jq isn't available or didn't extract any
+          # text. The raw stream contains tool args/results too, so the
+          # pattern still matches when the assistant doesn't quote them back.
+          HAYSTACK="${ASSISTANT_TEXT:-$output}"
+          [ -z "$HAYSTACK" ] && HAYSTACK="$output"
+          if ! grep -qiE '${{ matrix.assert_pattern }}' <<<"$HAYSTACK"; then
+            echo "::error::Expected pattern '${{ matrix.assert_pattern }}' not found in ${{ matrix.extension }} output"
+            exit 1
+          fi
+
+      - name: Verify pi-memory-mem0 captured turn (memory job only)
+        if: matrix.extension == 'pi-memory' && env.PI_INTEGRATION_BASE_URL != ''
+        run: |
+          set -euo pipefail
+          # mem0 (open-source mode) writes the SQLite snapshot to the path
+          # configured in settings.json (oss.snapshotDbPath = $RUNNER_TEMP/...).
+          # The matrix prompt explicitly drives mem0_save (which awaits
+          # provider.add()) so by the time pi exits the memory should be
+          # persisted. Three assertions:
+          #   1. Snapshot db exists with non-trivial size
+          #   2. `memories` table exists (full OSS init succeeded)
+          #   3. The `ci-mem0-marker` row is actually written (mem0_save ran)
+          DB="${RUNNER_TEMP}/pi-mem0/snapshot.db"
+          if [ ! -f "$DB" ]; then
+            echo "::error::mem0 snapshot db not created at $DB — mem0 OSS init failed."
+            exit 1
+          fi
+          SIZE=$(stat -c%s "$DB" 2>/dev/null || stat -f%z "$DB")
+          echo "Snapshot db size: $SIZE bytes"
+          if [ "$SIZE" -lt 1024 ]; then
+            echo "::error::Snapshot db is suspiciously small ($SIZE bytes). mem0 likely failed before schema creation."
+            exit 1
+          fi
+          if ! command -v sqlite3 >/dev/null 2>&1; then
+            echo "::warning::sqlite3 CLI not present on runner; row-level assertions skipped."
+            exit 0
+          fi
+          echo "--- mem0 snapshot tables ---"
+          sqlite3 "$DB" '.tables'
+          echo "--- mem0 memories schema ---"
+          sqlite3 "$DB" '.schema memories'
+          echo "--- mem0 stored memories (full dump) ---"
+          sqlite3 -header -column "$DB" 'SELECT user_id, memory FROM memories ORDER BY id;' || \
+            sqlite3 "$DB" 'SELECT user_id, memory FROM memories;'
+          ROWS=$(sqlite3 "$DB" 'SELECT COUNT(*) FROM memories;')
+          echo "Row count: $ROWS"
+          if [ "$ROWS" -lt 1 ]; then
+            echo "::error::mem0 memories table is empty — the mem0_save tool did not persist anything."
+            exit 1
+          fi
+          if ! sqlite3 "$DB" 'SELECT memory FROM memories;' | grep -qi 'ci-mem0-marker'; then
+            echo "::error::Expected 'ci-mem0-marker' in mem0 stored memories — mem0_save tool wrote, but the marker is missing."
+            exit 1
+          fi
+          echo "✓ mem0 OSS pipeline verified end-to-end."
+
+      - name: Skipped (secrets unavailable)
+        if: env.PI_INTEGRATION_BASE_URL == '' || env.PI_INTEGRATION_API_KEY == ''
+        run: |
+          echo "::warning::PI_INTEGRATION_* secrets unset — skipping Stage C ${{ matrix.extension }}."
