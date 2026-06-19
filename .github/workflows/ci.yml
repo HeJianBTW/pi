@@ -35,16 +35,9 @@ jobs:
       - x64
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: ./.github/actions/setup-pi-build
         with:
-          # Per-job temp dir avoids races between concurrent jobs sharing
-          # $HOME/setup-pnpm on self-hosted runners.
-          dest: ${{ runner.temp }}/setup-pnpm
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
+          build: 'false'
       - run: pnpm typecheck
 
   test:
@@ -55,14 +48,9 @@ jobs:
       - x64
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: ./.github/actions/setup-pi-build
         with:
-          dest: ${{ runner.temp }}/setup-pnpm
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
+          build: 'false'
       - run: pnpm --filter @amaster.ai/pi-storage prisma:generate
       - run: pnpm --filter @amaster.ai/pi-shared build
       - run: pnpm test
@@ -76,12 +64,5 @@ jobs:
     needs: [lint, typecheck, test]
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-        with:
-          dest: ${{ runner.temp }}/setup-pnpm
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
+      - uses: ./.github/actions/setup-pi-build
       - run: pnpm build

@@ -41,57 +41,12 @@ jobs:
       PI_OFFLINE: '0'
 
     steps:
-      - name: Set up per-job pi config dir
-        run: |
-          # Self-hosted runners share $HOME across the 6 matrix workers
-          # (instance-hnpsq9go-1..6), so writes to ~/.pi/agent race between
-          # concurrent jobs. Pointing PI_CODING_AGENT_DIR at the job's
-          # RUNNER_TEMP gives each job an isolated agent home.
-          # `env:` blocks can't reference `runner.temp` (it's not in scope at
-          # job-startup time), so we resolve via $RUNNER_TEMP at step time.
-          echo "PI_CODING_AGENT_DIR=$RUNNER_TEMP/pi-agent" >> "$GITHUB_ENV"
-
-      - name: Clean self-hosted runner caches
-        run: |
-          set -euo pipefail
-          rm -rf "$PI_CODING_AGENT_DIR" || true
-          mkdir -p "$PI_CODING_AGENT_DIR"
-
-      - name: Checkout source
-        uses: actions/checkout@v4
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v4
+      - name: Setup pi build environment
+        uses: ./.github/actions/setup-pi-build
         with:
-          # Per-job temp dir avoids cwd-deleted races between concurrent
-          # matrix jobs sharing the runner's $HOME/setup-pnpm.
-          dest: ${{ runner.temp }}/setup-pnpm
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-
-      - name: Install dependencies
-        run: |
-          pnpm install --frozen-lockfile
-          # Force-fetch the better-sqlite3 prebuilt binary. pnpm 10's
-          # build-script gating means our onlyBuiltDependencies allowlist
-          # only fires on first install of a package — when pnpm restores
-          # node_modules from cache or re-uses an existing module, the
-          # `install` script is skipped and mem0's OSS sqlite store can't
-          # load the native binding. Running prebuild-install directly is
-          # cheap (~10s, downloads a precompiled .node) and idempotent.
-          (cd node_modules/.pnpm/better-sqlite3@*/node_modules/better-sqlite3 && npx --no-install prebuild-install) || true
-
-      - name: Build packages
-        run: |
-          pnpm --filter @amaster.ai/pi-storage prisma:generate
-          pnpm build
-
-      - name: Install pi-coding-agent
-        run: npm install -g --ignore-scripts @earendil-works/pi-coding-agent
+          set-pi-agent-dir: 'true'
+          install-pi-cli: 'true'
 
       - name: Verify pi installation
         run: pi --version
@@ -146,39 +101,12 @@ jobs:
       PI_OFFLINE: '0'
 
     steps:
-      - name: Set up per-job pi config dir
-        run: echo "PI_CODING_AGENT_DIR=$RUNNER_TEMP/pi-agent" >> "$GITHUB_ENV"
-
-      - name: Clean self-hosted runner caches
-        run: |
-          set -euo pipefail
-          rm -rf "$PI_CODING_AGENT_DIR" || true
-          mkdir -p "$PI_CODING_AGENT_DIR"
-
-      - name: Checkout source
-        uses: actions/checkout@v4
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v4
+      - name: Setup pi build environment
+        uses: ./.github/actions/setup-pi-build
         with:
-          dest: ${{ runner.temp }}/setup-pnpm
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build packages
-        run: |
-          pnpm --filter @amaster.ai/pi-storage prisma:generate
-          pnpm build
-
-      - name: Install pi-coding-agent
-        run: npm install -g --ignore-scripts @earendil-works/pi-coding-agent
+          set-pi-agent-dir: 'true'
+          install-pi-cli: 'true'
 
       - name: Configure custom deepseek provider in ~/.pi/agent/models.json
         if: env.PI_INTEGRATION_BASE_URL != '' && env.PI_INTEGRATION_API_KEY != ''
@@ -312,56 +240,18 @@ jobs:
       PI_OFFLINE: '0'
 
     steps:
-      - name: Set up per-job pi config dir
-        # Self-hosted runners share $HOME across the 6 matrix workers
-        # (instance-hnpsq9go-1..6), so writes to ~/.pi/agent race between
-        # concurrent jobs. Pointing PI_CODING_AGENT_DIR at the job's
-        # RUNNER_TEMP gives each job an isolated agent home. `env:` blocks
-        # can't reference `runner.temp` (it's not in scope at job-startup
-        # time), so we resolve via $RUNNER_TEMP at step time.
-        run: echo "PI_CODING_AGENT_DIR=$RUNNER_TEMP/pi-agent" >> "$GITHUB_ENV"
-
-      - name: Clean self-hosted runner caches
-        run: |
-          set -euo pipefail
-          rm -rf "$PI_CODING_AGENT_DIR" || true
-          mkdir -p "$PI_CODING_AGENT_DIR"
-
-      - name: Checkout source
-        uses: actions/checkout@v4
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v4
+      - name: Setup pi build environment
+        uses: ./.github/actions/setup-pi-build
         with:
-          # Per-job temp dir avoids cwd-deleted races between concurrent
-          # matrix jobs sharing the runner's $HOME/setup-pnpm.
-          dest: ${{ runner.temp }}/setup-pnpm
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-
-      - name: Install dependencies
-        run: |
-          pnpm install --frozen-lockfile
-          # Force-fetch the better-sqlite3 prebuilt binary. pnpm 10's
-          # build-script gating means our onlyBuiltDependencies allowlist
-          # only fires on first install of a package — when pnpm restores
-          # node_modules from cache or re-uses an existing module, the
-          # `install` script is skipped and mem0's OSS sqlite store can't
-          # load the native binding. Running prebuild-install directly is
-          # cheap (~10s, downloads a precompiled .node) and idempotent.
-          (cd node_modules/.pnpm/better-sqlite3@*/node_modules/better-sqlite3 && npx --no-install prebuild-install) || true
-
-      - name: Build packages
-        run: |
-          pnpm --filter @amaster.ai/pi-storage prisma:generate
-          pnpm build
-
-      - name: Install pi-coding-agent
-        run: npm install -g --ignore-scripts @earendil-works/pi-coding-agent
+          set-pi-agent-dir: 'true'
+          install-pi-cli: 'true'
+          # pi-memory job loads pi-memory-mem0 which needs better-sqlite3's
+          # native binding for its OSS vector store. We rebuild for every
+          # matrix entry because conditional `if:` on composite-action steps
+          # is fine but routing per-extension setup is noisier than just
+          # running a cheap prebuild-install across the board.
+          prebuild-better-sqlite3: 'true'
 
       - name: Configure pi settings (provider, models, extensions)
         if: env.PI_INTEGRATION_BASE_URL != '' && env.PI_INTEGRATION_API_KEY != ''
