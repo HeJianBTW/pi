@@ -10,6 +10,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # Run JavaScript actions (checkout, setup-node, pnpm/action-setup, etc.) on
+  # Node 24 instead of the deprecated Node 20 the runner ships by default.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 jobs:
   lint:
     name: Lint
@@ -30,13 +35,9 @@ jobs:
       - x64
     steps:
       - uses: actions/checkout@v4
-      - run: rm -rf "$HOME/setup-pnpm"
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: ./.github/actions/setup-pi-build
         with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
+          build: 'false'
       - run: pnpm typecheck
 
   test:
@@ -47,13 +48,9 @@ jobs:
       - x64
     steps:
       - uses: actions/checkout@v4
-      - run: rm -rf "$HOME/setup-pnpm"
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: ./.github/actions/setup-pi-build
         with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
+          build: 'false'
       - run: pnpm --filter @amaster.ai/pi-storage prisma:generate
       - run: pnpm --filter @amaster.ai/pi-shared build
       - run: pnpm test
@@ -67,11 +64,5 @@ jobs:
     needs: [lint, typecheck, test]
     steps:
       - uses: actions/checkout@v4
-      - run: rm -rf "$HOME/setup-pnpm"
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
+      - uses: ./.github/actions/setup-pi-build
       - run: pnpm build

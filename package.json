@@ -24,5 +24,17 @@
     "jiti": "^2.7.0",
     "typescript": "^5.9.3",
     "vitest": "^4.0.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@google/genai",
+      "@prisma/client",
+      "@prisma/engines",
+      "better-sqlite3",
+      "esbuild",
+      "koffi",
+      "prisma",
+      "protobufjs"
+    ]
   }
 }

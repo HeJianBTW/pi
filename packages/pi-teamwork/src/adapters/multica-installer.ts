@@ -75,10 +75,32 @@ async function checkBrew(exec: ExecFn): Promise<boolean> {
 }
 
 async function installViaCurl(exec: ExecFn): Promise<string | undefined> {
+  // multica's upstream install.sh tries `/usr/local/bin` first, then `sudo mv`,
+  // and only falls back to `~/.local/bin` if `sudo` is missing entirely. On
+  // CI runners (and other environments where the user has sudo configured but
+  // no NOPASSWD), the sudo branch hangs on a password prompt and the script
+  // exits non-zero before reaching the user-bin fallback.
+  //
+  // Force the user-bin path via MULTICA_BIN_DIR. macOS users who own
+  // /usr/local/bin still take the first branch (writable), so this only
+  // changes behavior for the cases that were broken.
+  const userBin = `${process.env.HOME ?? ''}/.local/bin`;
+  const cmd = `curl -fsSL ${INSTALL_SCRIPT_URL} | MULTICA_BIN_DIR=${JSON.stringify(userBin)} bash`;
   try {
-    const { code, stderr } = await exec('bash', ['-c', `curl -fsSL ${INSTALL_SCRIPT_URL} | bash`]);
-    if (code === 0) return undefined;
-    return stderr.trim() || `install script exited with code ${code}`;
+    const { code, stderr } = await exec('bash', ['-c', cmd]);
+    if (code !== 0) {
+      return stderr.trim() || `install script exited with code ${code}`;
+    }
+    // ~/.local/bin isn't on the inherited PATH on every Linux runner; without
+    // this the very next isAvailable() spawn(multica) misses the binary we
+    // just dropped.
+    if (process.env.HOME) {
+      const path = process.env.PATH ?? '';
+      if (!path.split(':').includes(userBin)) {
+        process.env.PATH = path ? `${userBin}:${path}` : userBin;
+      }
+    }
+    return undefined;
   } catch (e) {
     return e instanceof Error ? e.message : String(e);
   }
