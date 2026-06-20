@@ -170,10 +170,37 @@ function mapUsage(usage: Record<string, unknown>): RuntimeLlmUsage {
   return result;
 }
 
+function nonEmptyEnv(name: string): string | undefined {
+  const value = process.env[name]?.trim();
+  return value ? value : undefined;
+}
+
+function subagentLifecycleDetails(input: {
+  agent?: string | undefined;
+  input?: string | undefined;
+  output?: string | undefined;
+}): JsonObject | undefined {
+  const details: JsonObject = {};
+  if (input.agent !== undefined) {
+    details.agent = input.agent;
+  }
+  if (input.input !== undefined) {
+    details.input = input.input;
+  }
+  if (input.output !== undefined) {
+    details.output = input.output;
+  }
+  return Object.keys(details).length > 0 ? details : undefined;
+}
+
 export default function telemetryExtension(pi: ExtensionAPI): void {
   const inheritedTraceId = process.env.PI_TELEMETRY_TRACE_ID;
   const inheritedSessionId = process.env.PI_TELEMETRY_SESSION_ID;
   const ownerPid = process.env.PI_TELEMETRY_OWNER_PID;
+  const subagentAgent =
+    nonEmptyEnv('PI_SUBAGENT_CHILD_AGENT') ??
+    nonEmptyEnv('PI_TELEMETRY_SUBAGENT_NAME') ??
+    nonEmptyEnv('PI_TELEMETRY_SUBAGENT_AGENT');
   const isSubagent = Boolean(inheritedTraceId && ownerPid && ownerPid !== String(process.pid));
 
   let exporter: RuntimeEventExporter = new NoopRuntimeEventExporter();
@@ -226,6 +253,10 @@ export default function telemetryExtension(pi: ExtensionAPI): void {
     if (!tracePublished) {
       tracePublished = true;
       if (isSubagent) {
+        const details = subagentLifecycleDetails({
+          agent: subagentAgent,
+          input: pendingInput,
+        });
         await exporter.publish({
           id: randomUUID(),
           traceId: currentTraceId,
@@ -234,7 +265,7 @@ export default function telemetryExtension(pi: ExtensionAPI): void {
           ...(parentSessionId ? { parentSessionId } : {}),
           childSessionId: localSessionId,
           createdAt: new Date(event.timestamp).toISOString(),
-          ...(pendingInput !== undefined ? { details: { input: pendingInput } } : {}),
+          ...(details ? { details } : {}),
         });
       } else {
         await exporter.publish({
@@ -257,6 +288,10 @@ export default function telemetryExtension(pi: ExtensionAPI): void {
     const output = extractOutput(event.message);
 
     if (isSubagent) {
+      const details = subagentLifecycleDetails({
+        agent: subagentAgent,
+        output,
+      });
       await exporter.publish({
         id: randomUUID(),
         traceId: currentTraceId,
@@ -266,7 +301,7 @@ export default function telemetryExtension(pi: ExtensionAPI): void {
         childSessionId: localSessionId,
         createdAt: new Date(now).toISOString(),
         ...(durationMs !== undefined ? { durationMs } : {}),
-        ...(output !== undefined ? { details: { output } } : {}),
+        ...(details ? { details } : {}),
       });
     } else {
       await exporter.publish({
