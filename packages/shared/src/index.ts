@@ -338,6 +338,8 @@ export type RuntimeToolEvent = {
   workspaceId?: string;
   parentSessionId?: string;
   childSessionId?: string;
+  parentToolCallId?: string;
+  childIndex?: number;
   runId?: string;
   spawnBatchId?: string;
   taskRunId?: string;
@@ -420,6 +422,7 @@ export type RuntimeLifecycleEvent = {
   spawnBatchId?: string;
   taskRunId?: string;
   parentToolCallId?: string;
+  childIndex?: number;
   createdAt: string;
   durationMs?: number;
   model?: RuntimeModelConfig;

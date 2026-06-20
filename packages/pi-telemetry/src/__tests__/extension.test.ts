@@ -725,12 +725,14 @@ describe('telemetryExtension', () => {
       process.env.PI_TELEMETRY_TRACE_ID = PARENT_TRACE_ID;
       process.env.PI_TELEMETRY_SESSION_ID = PARENT_SESSION_ID;
       process.env.PI_TELEMETRY_OWNER_PID = '99999';
+      process.env.PI_SUBAGENT_CHILD_AGENT = 'legal';
     });
 
     afterEach(() => {
       delete process.env.PI_TELEMETRY_TRACE_ID;
       delete process.env.PI_TELEMETRY_SESSION_ID;
       delete process.env.PI_TELEMETRY_OWNER_PID;
+      delete process.env.PI_SUBAGENT_CHILD_AGENT;
     });
 
     test('uses inherited traceId from parent', async () => {
@@ -751,6 +753,7 @@ describe('telemetryExtension', () => {
       expect(events[0]).toMatchObject({ type: 'subagent_started' });
       expect((events[0] as any).parentSessionId).toBe(PARENT_SESSION_ID);
       expect((events[0] as any).childSessionId).toBeTruthy();
+      expect((events[0] as any).details).toMatchObject({ agent: 'legal' });
     });
 
     test('publishes subagent_completed instead of chat_turn_completed', async () => {
@@ -764,6 +767,7 @@ describe('telemetryExtension', () => {
       expect(completed).toBeDefined();
       expect((completed as any).parentSessionId).toBe(PARENT_SESSION_ID);
       expect((completed as any).childSessionId).toBeTruthy();
+      expect((completed as any).details).toMatchObject({ agent: 'legal' });
     });
 
     test('uses parent sessionId for lifecycle events', async () => {

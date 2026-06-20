@@ -540,6 +540,7 @@ describe('telemetry', () => {
       parentToolCallId: 'spawn-call-1',
       createdAt: '2026-05-02T00:00:00.100Z',
       details: {
+        agent: 'legal',
         input: 'child task',
         taskRunId: 'run-1',
         spawnBatchId: 'trace:11111111111111111111111111111111',
@@ -624,7 +625,7 @@ describe('telemetry', () => {
       name: 'subagent fan-out',
       metadata: { spawnBatchId: '11111111' },
     });
-    expect(subagentSpan?.body).toMatchObject({ name: 'subagent' });
+    expect(subagentSpan?.body).toMatchObject({ name: 'subagent [legal]' });
     expect(subagentSpan?.generations[0]?.body).toMatchObject({
       name: 'llm-generation [subagent] [child task]',
       input: 'child task',
@@ -983,7 +984,7 @@ describe('telemetry', () => {
       spawnBatchId: 'trace:11111111111111111111111111111111',
       parentToolCallId: 'spawn-call-1',
       createdAt: '2026-05-02T00:00:00.100Z',
-      details: { input: 'task-1' },
+      details: { agent: 'legal', input: 'task-1' },
     });
     await exporter.publish({
       id: 'subagent-1-done',
@@ -1025,7 +1026,7 @@ describe('telemetry', () => {
       spawnBatchId: 'trace:11111111111111111111111111111111',
       parentToolCallId: 'spawn-call-2',
       createdAt: '2026-05-02T00:00:01.200Z',
-      details: { input: 'task-2' },
+      details: { agent: 'finance', input: 'task-2' },
     });
     await exporter.publish({
       id: 'subagent-2-done',
@@ -1049,8 +1050,8 @@ describe('telemetry', () => {
 
     expect(batchSpan).toBeDefined();
     expect(batchSpan?.spans).toHaveLength(2);
-    expect(batchSpan?.spans[0]?.body).toMatchObject({ name: 'subagent' });
-    expect(batchSpan?.spans[1]?.body).toMatchObject({ name: 'subagent' });
+    expect(batchSpan?.spans[0]?.body).toMatchObject({ name: 'subagent [legal]' });
+    expect(batchSpan?.spans[1]?.body).toMatchObject({ name: 'subagent [finance]' });
     const sub0Updates = batchSpan?.spans[0]?.updates ?? [];
     const sub1Updates = batchSpan?.spans[1]?.updates ?? [];
     expect(sub0Updates[sub0Updates.length - 1]).toMatchObject({ output: 'result-1' });
