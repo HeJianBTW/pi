@@ -45,6 +45,7 @@ Search X (Twitter) for posts and social media content. Only registered when xai 
 | Provider | Search | Fetch | X Search | Default Base URL | Env Var | Default Model |
 |----------|:------:|:-----:|:--------:|------------------|---------|---------------|
 | `tavily` | ✓ | ✓ | ✗ | `https://api.tavily.com` | `TAVILY_API_KEY` | - |
+| `brave` | ✓ | ✗ | ✗ | `https://api.search.brave.com` | `BRAVE_API_KEY` | - |
 | `kimi` | ✓ | ✗ | ✗ | `https://api.moonshot.cn/v1` | `MOONSHOT_API_KEY` | `kimi-k2.6` |
 | `mimo` | ✓ | ✗ | ✗ | `https://api.xiaomimimo.com/v1` | `MIMO_API_KEY` | `mimo-v2.5-pro` |
 | `zai` | ✓ | ✓ | ✗ | `https://api.z.ai` | `ZAI_API_KEY` | - |
