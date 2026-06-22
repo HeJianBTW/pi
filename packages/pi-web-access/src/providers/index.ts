@@ -1,6 +1,7 @@
 import type { BuiltInProviderId } from '../types.js';
 import { AnthropicProvider } from './anthropic.js';
 import type { WebProvider } from './base.js';
+import { BraveProvider } from './brave.js';
 import { GeminiProvider } from './gemini.js';
 import { KimiProvider } from './kimi.js';
 import { MimoProvider } from './mimo.js';
@@ -25,6 +26,7 @@ export { BaseProvider, getEnvironmentContext, SEARCH_SYSTEM_PROMPT } from './bas
 
 const providers: WebProvider[] = [
   new TavilyProvider(),
+  new BraveProvider(),
   new KimiProvider(),
   new MimoProvider(),
   new ZaiProvider(),
