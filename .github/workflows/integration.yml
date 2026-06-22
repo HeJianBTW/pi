@@ -415,9 +415,10 @@ jobs:
         if: matrix.extension == 'pi-browser-use'
         run: |
           set -euo pipefail
-          # Download Chrome for Testing (smaller, faster CDN than raw Chromium).
+          # Use npmmirror CDN to avoid slow Google CDN on domestic runners.
           npx -y @puppeteer/browsers install chrome@stable \
-            --path "$RUNNER_TEMP/chrome-install"
+            --path "$RUNNER_TEMP/chrome-install" \
+            --base-url https://cdn.npmmirror.com/binaries/chrome-for-testing
           CHROME_BIN=$(find "$RUNNER_TEMP/chrome-install" -name "chrome" -type f | head -1)
           if [ -z "$CHROME_BIN" ]; then
             echo "::error::Could not find chrome binary after install"
