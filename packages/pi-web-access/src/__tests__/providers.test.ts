@@ -216,6 +216,94 @@ describe('search - all providers', () => {
     expect(opts.headers['anthropic-version']).toBe('2023-06-01');
   });
 
+  it('brave: calls web search API with X-Subscription-Token', async () => {
+    const settings: WebToolSettings = {
+      search: { provider: 'brave' },
+      providers: { brave: { apiKey: 'brave-key' } },
+    };
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        query: { original: 'test query' },
+        web: {
+          results: [
+            { title: 'Result 1', url: 'https://example.com', description: 'Example description' },
+            { title: 'Result 2', url: 'https://other.com', description: 'Other description' },
+          ],
+        },
+      }),
+    });
+
+    const result = await search({ query: 'test query' }, settings);
+
+    expect(result.provider).toBe('brave');
+    expect(result.query).toBe('test query');
+    expect(result.results).toHaveLength(2);
+    expect(result.results[0]!.title).toBe('Result 1');
+    expect(result.results[0]!.url).toBe('https://example.com');
+    expect(result.results[0]!.content).toBe('Example description');
+
+    const [url, opts] = mockFetch.mock.calls[0]!;
+    expect(url).toContain('https://api.search.brave.com/res/v1/web/search');
+    expect(url).toContain('q=test+query');
+    expect(opts.headers['X-Subscription-Token']).toBe('brave-key');
+  });
+
+  it('brave: passes freshness for timeRange', async () => {
+    const settings: WebToolSettings = {
+      search: { provider: 'brave' },
+      providers: { brave: { apiKey: 'key' } },
+    };
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ web: { results: [] } }),
+    });
+
+    await search({ query: 'test', timeRange: 'week' }, settings);
+
+    const [url] = mockFetch.mock.calls[0]!;
+    expect(url).toContain('freshness=pw');
+  });
+
+  it('brave: uses news results when topic is news', async () => {
+    const settings: WebToolSettings = {
+      search: { provider: 'brave' },
+      providers: { brave: { apiKey: 'key' } },
+    };
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        news: {
+          results: [{ title: 'News Item', url: 'https://news.com', description: 'Breaking news' }],
+        },
+      }),
+    });
+
+    const result = await search({ query: 'test', topic: 'news' }, settings);
+
+    expect(result.results).toHaveLength(1);
+    expect(result.results[0]!.title).toBe('News Item');
+
+    const [url] = mockFetch.mock.calls[0]!;
+    expect(url).toContain('result_filter=news');
+  });
+
+  it('brave: passes count parameter', async () => {
+    const settings: WebToolSettings = {
+      search: { provider: 'brave' },
+      providers: { brave: { apiKey: 'key' } },
+    };
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ web: { results: [] } }),
+    });
+
+    await search({ query: 'test', maxResults: 10 }, settings);
+
+    const [url] = mockFetch.mock.calls[0]!;
+    expect(url).toContain('count=10');
+  });
+
   it('openrouter: passes domain filters', async () => {
     const settings: WebToolSettings = {
       search: { provider: 'openrouter' },
