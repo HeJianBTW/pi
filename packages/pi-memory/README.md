@@ -2,7 +2,7 @@
 
 ![pi-memory preview](https://raw.githubusercontent.com/TGYD-helige/pi/master/packages/pi-memory/preview.png)
 
-Persistent curated memory for pi agents — `MEMORY.md` (the agent's own notes) and `USER.md` (what the agent knows about the user). Both are loaded from disk at session start, **frozen**, and injected into the system prompt for the entire session. Mid-session writes are durable on disk but do **not** mutate the system prompt — this preserves prefix-cache stability.
+Persistent curated memory for pi agents — `MEMORY.md` (the agent's own notes) and `USER.md` (what the agent knows about the user). The extension initializes storage at session start, then reloads both files before each agent run and injects a sanitized snapshot into that run's system prompt. Writes are durable on disk immediately; they are visible through `memory_read` right away and appear in the prompt snapshot on the next agent run.
 
 Modeled after hermes' default `MemoryStore` mechanism (no provider/manager abstraction).
 
@@ -52,14 +52,14 @@ These are total chars after `§`-joining all entries. The limit is enforced at w
 When installed as a dependency with the `pi.extensions` field declared in `package.json`, the runtime auto-discovers and loads the extension. The extension creates its own `MemoryStore` with file-based storage at `<agentDir>/memories/` — fully self-contained.
 
 ```
-pi.extensions → session_start → load MEMORY.md/USER.md → freeze snapshot → register tools
-              → before_agent_start → append snapshot to systemPrompt
+pi.extensions → session_start → initialize store → register tools
+              → before_agent_start → reload MEMORY.md/USER.md → append snapshot to systemPrompt
               → session_shutdown → release
 ```
 
 - **Storage**: `<agentDir>/memories/MEMORY.md` and `<agentDir>/memories/USER.md`
-- **Lifecycle**: load on `session_start`, snapshot held until `session_shutdown`
-- **Status command**: `/pi-memory-status` shows entry counts per file
+- **Lifecycle**: initialize on `session_start`, rebuild the prompt snapshot before each agent run
+- **Status command**: `/memory status` shows entry counts per file
 - **LLM tools**: `memory_add`, `memory_replace`, `memory_remove`, `memory_read`
 
 Configure via the `pi-memory` settings key:
@@ -90,7 +90,7 @@ await store.loadFromDisk();
 // ToolDefinition[] — wire into your tool registry directly
 const tools = createMemoryTools(store);
 
-// System prompt fragment (frozen at loadFromDisk; safe to use repeatedly)
+// System prompt fragment (rebuilt by loadFromDisk; call it before each agent run)
 const promptBlock = store.formatAllForSystemPrompt();
 ```
 
@@ -114,18 +114,18 @@ To recover:
 
 The drift guard exists to prevent silent data loss — never bypass it by deleting `.bak.<ts>` snapshots blindly.
 
-## Frozen snapshot
+## Prompt snapshot
 
-`loadFromDisk()` captures the system-prompt block once; subsequent `add` / `replace` / `remove` calls update **live state** but not the snapshot. Why:
+`loadFromDisk()` refreshes live entries from disk and rebuilds the sanitized system-prompt block. The extension calls it before each agent run. Subsequent `add` / `replace` / `remove` calls update **live state** and disk, but not the snapshot already attached to the current agent run. Why:
 
-- The system prompt is the prefix-cache key for every model call. Mutating it mid-session invalidates the entire prefix.
+- The system prompt is the prefix-cache key for a model call. Mutating it mid-run invalidates the prefix and makes the model's context harder to reason about.
 - Tool responses always reflect live state, so the model still sees its own writes — just via tool-result tail, not system-prompt head.
-- The snapshot picks up changes on the **next** `loadFromDisk()` (typically the next session start).
+- The prompt snapshot picks up changes on the **next** `before_agent_start` / `loadFromDisk()`.
 
 ## Lifecycle reference
 
 | Hook                  | Behavior                                                                  |
 |-----------------------|---------------------------------------------------------------------------|
-| `session_start`       | Resolve `dataDir`, build `MemoryStore`, `loadFromDisk()`, capture snapshot, register 4 tools, set status `memory: loaded`/`memory: empty`. |
-| `before_agent_start`  | Append snapshot to assembled `systemPrompt` (no-op when empty).           |
-| `session_shutdown`    | Drop store + snapshot references.                                         |
+| `session_start`       | Resolve `dataDir`, build `MemoryStore`, `loadFromDisk()`, register 4 tools, set status `memory: loaded`/`memory: empty`. |
+| `before_agent_start`  | Reload memory from disk, rebuild the prompt snapshot, and append it to assembled `systemPrompt` (guidance only when empty). |
+| `session_shutdown`    | Drop store references.                                                    |
