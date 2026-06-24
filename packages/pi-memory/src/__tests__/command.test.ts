@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -66,8 +66,30 @@ async function setupCommand(dir: string) {
     return notify;
   }
 
-  return { store, runCommand, notify };
+  return { store, runCommand, notify, eventHandlers, ctx };
 }
+
+// ---------------------------------------------------------------------------
+// prompt snapshot
+// ---------------------------------------------------------------------------
+
+describe('prompt snapshot', () => {
+  it('refreshes from disk before each agent run', async () => {
+    const dir = freshDir();
+    const { eventHandlers, ctx } = await setupCommand(dir);
+
+    writeFileSync(path.join(dir, 'MEMORY.md'), 'late memory fact', 'utf-8');
+
+    const result = await eventHandlers.before_agent_start?.[0]?.(
+      { systemPrompt: 'base prompt' },
+      ctx,
+    );
+
+    expect(result).toEqual({
+      systemPrompt: expect.stringContaining('late memory fact'),
+    });
+  });
+});
 
 // ---------------------------------------------------------------------------
 // /memory status
