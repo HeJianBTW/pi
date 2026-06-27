@@ -6,7 +6,7 @@
  * - Linux: user crontab (tagged lines)
  * - Windows: Task Scheduler (schtasks)
  */
-import { execFileSync, execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -133,7 +133,8 @@ function statusDarwin(name: string): ScheduleStatus {
     execFileSync('launchctl', ['list', name], { stdio: 'ignore' });
     return 'installed';
   } catch {
-    return 'installed';
+    // plist exists but not loaded
+    return 'not-found';
   }
 }
 
@@ -158,13 +159,13 @@ function readCrontab(): string {
 }
 
 function writeCrontab(content: string): void {
-  execSync(`echo ${shellQuote(content)} | crontab -`, { stdio: 'ignore' });
+  execFileSync('crontab', ['-'], { input: content, stdio: ['pipe', 'ignore', 'inherit'] });
 }
 
 function installLinux(config: ScheduleJobConfig): void {
   const tag = `${CRON_TAG_PREFIX}${config.name}`;
   const cronExpr = intervalToCron(config.intervalSeconds);
-  const fullCommand = buildShellCommand(config);
+  const fullCommand = buildPosixCommand(config);
   const line = `${cronExpr} ${fullCommand} ${tag}`;
 
   let current = readCrontab();
@@ -195,8 +196,6 @@ function statusLinux(name: string): ScheduleStatus {
 // ─── Windows (Task Scheduler) ───────────────────────────────────────────────
 
 function installWin32(config: ScheduleJobConfig): void {
-  const minutes = Math.max(1, Math.round(config.intervalSeconds / 60));
-
   // Delete existing if present
   try {
     execFileSync('schtasks', ['/delete', '/tn', config.name, '/f'], { stdio: 'ignore' });
@@ -204,21 +203,26 @@ function installWin32(config: ScheduleJobConfig): void {
     // task may not exist
   }
 
-  const fullCommand = buildShellCommand(config);
+  const fullCommand = buildWin32Command(config);
+  const minutes = Math.max(1, Math.round(config.intervalSeconds / 60));
+  const hours = Math.round(minutes / 60);
+  // schtasks /mo limits: minute 1-1439, hourly 1-23, daily 1-365
+  let sc: string;
+  let mo: string;
+  if (minutes < 60) {
+    sc = 'minute';
+    mo = String(minutes);
+  } else if (hours < 24) {
+    sc = 'hourly';
+    mo = String(hours);
+  } else {
+    sc = 'daily';
+    mo = String(Math.max(1, Math.round(hours / 24)));
+  }
+
   execFileSync(
     'schtasks',
-    [
-      '/create',
-      '/tn',
-      config.name,
-      '/tr',
-      fullCommand,
-      '/sc',
-      'minute',
-      '/mo',
-      String(minutes),
-      '/f',
-    ],
+    ['/create', '/tn', config.name, '/tr', fullCommand, '/sc', sc, '/mo', mo, '/f'],
     { stdio: 'ignore' },
   );
 }
@@ -250,16 +254,17 @@ function escapeXml(s: string): string {
     .replace(/"/g, '&quot;');
 }
 
-function shellQuote(s: string): string {
+function shellEscape(s: string): string {
   return `'${s.replace(/'/g, "'\\''")}'`;
 }
 
-function quoteArg(s: string): string {
-  if (/\s/.test(s)) return `"${s}"`;
-  return s;
+function buildPosixCommand(config: ScheduleJobConfig): string {
+  const parts = [config.command, ...(config.args ?? [])];
+  return parts.map(shellEscape).join(' ');
 }
 
-function buildShellCommand(config: ScheduleJobConfig): string {
+function buildWin32Command(config: ScheduleJobConfig): string {
   const parts = [config.command, ...(config.args ?? [])];
-  return parts.map(quoteArg).join(' ');
+  // Windows cmd: quote args containing spaces with double quotes
+  return parts.map((s) => (/[\s"]/.test(s) ? `"${s.replace(/"/g, '\\"')}"` : s)).join(' ');
 }

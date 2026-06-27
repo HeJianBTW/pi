@@ -17,8 +17,12 @@ interface DreamingConfig {
   enabled?: boolean;
   intervalHours?: number;
   minHoursSinceLastRun?: number;
+  minTurnsSinceLastRun?: number;
+  /** @deprecated Use minTurnsSinceLastRun */
   minSessionsSinceLastRun?: number;
   model?: { provider: string; model: string };
+  /** User ID for mem0 dedup. Persisted here so cron doesn't depend on shell env. */
+  mem0UserId?: string;
 }
 
 interface PiMemorySettings {
@@ -26,8 +30,12 @@ interface PiMemorySettings {
 }
 
 const DEFAULT_MIN_HOURS = 24;
-const DEFAULT_MIN_SESSIONS = 5;
+const DEFAULT_MIN_TURNS = 5;
 const DEFAULT_MODEL = { provider: 'openai', model: 'gpt-4.1-mini' };
+
+function log(msg: string): void {
+  process.stderr.write(`[pi-memory-dream ${new Date().toISOString()}] ${msg}\n`);
+}
 
 async function main(): Promise<void> {
   const settings = loadPiSettings<PiMemorySettings>('pi-memory');
@@ -41,7 +49,8 @@ async function main(): Promise<void> {
   const state = await readDreamingState();
   const now = Date.now();
   const minHours = config.minHoursSinceLastRun ?? DEFAULT_MIN_HOURS;
-  const minSessions = config.minSessionsSinceLastRun ?? DEFAULT_MIN_SESSIONS;
+  const minTurns =
+    config.minTurnsSinceLastRun ?? config.minSessionsSinceLastRun ?? DEFAULT_MIN_TURNS;
 
   // Gate check: enough time since last run?
   if (state.lastConsolidatedAt) {
@@ -51,7 +60,7 @@ async function main(): Promise<void> {
     }
   }
 
-  // Gate check: enough sessions since last run?
+  // Gate check: enough turns since last run?
   const transcriptsPath = join(home, 'transcripts.json');
   const transcripts = new JsonFileTranscriptStore(transcriptsPath);
   const turns = await transcripts.listTurns({ tenantId: 'default' });
@@ -63,9 +72,11 @@ async function main(): Promise<void> {
       )
     : turns;
 
-  if (recentTurns.length < minSessions) {
+  if (recentTurns.length < minTurns) {
     process.exit(0);
   }
+
+  log(`starting: ${recentTurns.length} turns since last run`);
 
   const abortController = new AbortController();
   process.on('SIGTERM', () => abortController.abort());
@@ -88,23 +99,35 @@ async function main(): Promise<void> {
       },
       signal: abortController.signal,
     });
-  } catch {
-    // consolidation failure — don't update state so we retry next time
+    if (consolidationSucceeded) log('consolidation done');
+    else log('consolidation skipped (model/auth unavailable)');
+  } catch (err) {
+    log(`consolidation failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   if (abortController.signal.aborted) process.exit(0);
 
-  // Phase 2: Dedup
+  // Phase 2: Dedup (only if pi-memory-mem0 is configured)
   const mem0Settings = loadPiSettings<Record<string, unknown>>('pi-memory-mem0');
   if (mem0Settings && Object.keys(mem0Settings).length > 0) {
-    try {
-      await dedupMemories({
-        userId: (mem0Settings.userId as string) ?? process.env.USER ?? 'default',
-        config: mem0Settings as never,
-        signal: abortController.signal,
-      });
-    } catch {
-      // dedup failure is non-fatal
+    const mode = (mem0Settings.mode as string | undefined) ?? 'platform';
+    const userId = config.mem0UserId ?? (mem0Settings.userId as string | undefined);
+
+    if (!userId) {
+      log(
+        'dedup skipped: no explicit userId configured (set pi-memory.dreaming.mem0UserId or pi-memory-mem0.userId)',
+      );
+    } else {
+      try {
+        const result = await dedupMemories({
+          userId,
+          config: { ...mem0Settings, mode } as never,
+          signal: abortController.signal,
+        });
+        log(`dedup done: ${result.duplicatesRemoved} removed from ${result.total}`);
+      } catch (err) {
+        log(`dedup failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
     }
   }
 
@@ -115,6 +138,11 @@ async function main(): Promise<void> {
       lastSessionCount: recentTurns.length,
     });
   }
+
+  log('done');
 }
 
-main().catch(() => process.exit(1));
+main().catch((err) => {
+  log(`fatal: ${err instanceof Error ? err.message : String(err)}`);
+  process.exit(1);
+});

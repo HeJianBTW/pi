@@ -5,11 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Mock child_process and os/fs so we don't actually touch the system scheduler
 const execFileSyncMock = vi.fn();
-const execSyncMock = vi.fn();
 
 vi.mock('node:child_process', () => ({
   execFileSync: (...args: unknown[]) => execFileSyncMock(...args),
-  execSync: (...args: unknown[]) => execSyncMock(...args),
 }));
 
 let mockedHome: string;
@@ -31,7 +29,6 @@ describe('scheduler', () => {
     mkdirSync(tempDir, { recursive: true });
     mockedHome = tempDir;
     execFileSyncMock.mockReset();
-    execSyncMock.mockReset();
   });
 
   afterEach(() => {
@@ -117,6 +114,24 @@ describe('scheduler', () => {
       await uninstall('ai.pi.nonexistent');
       expect(execFileSyncMock).not.toHaveBeenCalled();
     });
+
+    it('status returns not-found when plist exists but launchctl list fails', async () => {
+      const { install, status } = await import('../scheduler.js');
+
+      await install({
+        name: 'ai.pi.test-job',
+        command: '/usr/bin/node',
+        args: ['script.js'],
+        intervalSeconds: 7200,
+      });
+
+      // Make launchctl list throw (simulating unloaded state)
+      execFileSyncMock.mockImplementation((cmd: string, args: string[]) => {
+        if (cmd === 'launchctl' && args?.[0] === 'list') throw new Error('not loaded');
+      });
+
+      expect(await status('ai.pi.test-job')).toBe('not-found');
+    });
   });
 
   describe('linux (crontab)', () => {
@@ -133,10 +148,14 @@ describe('scheduler', () => {
         intervalSeconds: 14400, // 4 hours
       });
 
-      expect(execSyncMock).toHaveBeenCalledTimes(1);
-      const written = execSyncMock.mock.calls[0]?.[0] as string;
+      // Find the writeCrontab call: execFileSync('crontab', ['-'], { input: ... })
+      const writeCall = execFileSyncMock.mock.calls.find(
+        (c: unknown[]) => c[0] === 'crontab' && Array.isArray(c[1]) && c[1][0] === '-',
+      );
+      expect(writeCall).toBeDefined();
+      const written = (writeCall![2] as { input: string }).input;
       expect(written).toContain('# @pi-scheduler:ai.pi.test-job');
-      expect(written).toContain('/usr/bin/node /path/to/script.js --once');
+      expect(written).toContain("'/usr/bin/node' '/path/to/script.js' '--once'");
       expect(written).toContain('0 */4 * * *');
     });
 
@@ -148,7 +167,11 @@ describe('scheduler', () => {
       const { uninstall } = await import('../scheduler.js');
       await uninstall('ai.pi.test-job');
 
-      const written = execSyncMock.mock.calls[0]?.[0] as string;
+      const writeCall = execFileSyncMock.mock.calls.find(
+        (c: unknown[]) => c[0] === 'crontab' && Array.isArray(c[1]) && c[1][0] === '-',
+      );
+      expect(writeCall).toBeDefined();
+      const written = (writeCall![2] as { input: string }).input;
       expect(written).not.toContain('ai.pi.test-job');
       expect(written).toContain('/other/job');
     });
@@ -171,7 +194,7 @@ describe('scheduler', () => {
   describe('win32 (schtasks)', () => {
     beforeEach(() => setPlatform('win32'));
 
-    it('install calls schtasks /create', async () => {
+    it('install calls schtasks /create with unquoted args', async () => {
       const { install } = await import('../scheduler.js');
 
       await install({
@@ -181,9 +204,49 @@ describe('scheduler', () => {
         intervalSeconds: 14400, // 240 minutes
       });
 
+      // Verify /tr uses Windows quoting (no single quotes)
+      const createCall = execFileSyncMock.mock.calls.find(
+        (c: unknown[]) => c[0] === 'schtasks' && Array.isArray(c[1]) && c[1].includes('/create'),
+      );
+      expect(createCall).toBeDefined();
+      const args = createCall![1] as string[];
+      const trIdx = args.indexOf('/tr');
+      expect(trIdx).toBeGreaterThan(-1);
+      const trValue = args[trIdx + 1];
+      expect(trValue).toBe('node C:\\path\\script.js');
+    });
+
+    it('install quotes args with spaces on Windows', async () => {
+      const { install } = await import('../scheduler.js');
+
+      await install({
+        name: 'ai.pi.space-job',
+        command: 'C:\\Program Files\\node.exe',
+        args: ['C:\\my scripts\\run.js'],
+        intervalSeconds: 3600,
+      });
+
+      const createCall = execFileSyncMock.mock.calls.find(
+        (c: unknown[]) => c[0] === 'schtasks' && Array.isArray(c[1]) && c[1].includes('/create'),
+      );
+      const args = createCall![1] as string[];
+      const trValue = args[args.indexOf('/tr') + 1];
+      expect(trValue).toBe('"C:\\Program Files\\node.exe" "C:\\my scripts\\run.js"');
+    });
+
+    it('install uses /sc daily for intervals >= 24 hours', async () => {
+      const { install } = await import('../scheduler.js');
+
+      await install({
+        name: 'ai.pi.daily-job',
+        command: 'node',
+        args: ['script.js'],
+        intervalSeconds: 86400, // 24 hours
+      });
+
       expect(execFileSyncMock).toHaveBeenCalledWith(
         'schtasks',
-        expect.arrayContaining(['/create', '/tn', 'ai.pi.test-job', '/mo', '240']),
+        expect.arrayContaining(['/create', '/tn', 'ai.pi.daily-job', '/sc', 'daily', '/mo', '1']),
         { stdio: 'ignore' },
       );
     });

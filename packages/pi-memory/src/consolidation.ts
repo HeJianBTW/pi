@@ -88,20 +88,23 @@ export function buildConsolidationUserPrompt(turns: ConversationTurn[]): string 
   }
 
   const maxChars = 8000;
-  let content =
+  const header =
     '## Recent Conversations\n\nBelow are recent conversation turns (newest last). Review them for signal worth persisting.\n\n';
-  let totalChars = content.length;
+  const footer =
+    '\n---\nBegin by calling memory_read for both targets to orient yourself, then consolidate as needed.';
 
-  for (const turn of turns) {
+  let totalChars = header.length + footer.length;
+  const selected: string[] = [];
+
+  for (let i = turns.length - 1; i >= 0; i--) {
+    const turn = turns[i]!;
     const entry = `### Session ${turn.sessionId} (${turn.createdAt})\n**User:** ${turn.userMessage}\n**Assistant:** ${turn.assistantMessage}\n\n`;
     if (totalChars + entry.length > maxChars) break;
-    content += entry;
+    selected.unshift(entry);
     totalChars += entry.length;
   }
 
-  content +=
-    '\n---\nBegin by calling memory_read for both targets to orient yourself, then consolidate as needed.';
-  return content;
+  return header + selected.join('') + footer;
 }
 
 export async function runConsolidation(opts: ConsolidationOptions): Promise<boolean> {
@@ -117,8 +120,7 @@ export async function runConsolidation(opts: ConsolidationOptions): Promise<bool
   await store.loadFromDisk();
 
   const tools = createMemoryTools(store);
-  const recentTurns = turns.slice(-30);
-  const userPrompt = buildConsolidationUserPrompt(recentTurns);
+  const userPrompt = buildConsolidationUserPrompt(turns);
 
   const agent = new Agent({
     initialState: {
@@ -126,12 +128,15 @@ export async function runConsolidation(opts: ConsolidationOptions): Promise<bool
       model: model as never,
       tools: tools as never[],
     },
-    streamFn: (m, c, streamOpts) =>
-      streamSimple(m, c, {
+    streamFn: (m, c, streamOpts) => {
+      const existingSignal = (streamOpts as { signal?: AbortSignal } | undefined)?.signal;
+      return streamSimple(m, c, {
         ...streamOpts,
         ...(auth.apiKey ? { apiKey: auth.apiKey } : {}),
         ...(auth.headers ? { headers: auth.headers } : {}),
-      }),
+        ...(existingSignal ? { signal: existingSignal } : signal ? { signal } : {}),
+      });
+    },
     convertToLlm: (msgs) => msgs as never[],
   });
 

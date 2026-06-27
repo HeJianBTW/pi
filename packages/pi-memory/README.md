@@ -158,7 +158,7 @@ Add to `settings.json` under the `pi-memory` key:
       "enabled": true,
       "intervalHours": 4,
       "minHoursSinceLastRun": 24,
-      "minSessionsSinceLastRun": 5,
+      "minTurnsSinceLastRun": 5,
       "model": {
         "provider": "openai",
         "model": "gpt-4.1-mini"
@@ -168,7 +168,7 @@ Add to `settings.json` under the `pi-memory` key:
 }
 ```
 
-All fields are optional with sensible defaults. The `model` field accepts any provider/model pair configured in your `~/.pi/agent/models.json` (built-in or custom).
+All fields are optional with sensible defaults. The `model` field accepts any provider/model pair configured in your `~/.pi/agent/models.json` (built-in or custom). `minSessionsSinceLastRun` is accepted as a deprecated alias for `minTurnsSinceLastRun`.
 
 Set `"enabled": false` to disable dreaming and remove the scheduled task.
 
