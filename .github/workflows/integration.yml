@@ -560,7 +560,7 @@ jobs:
           fi
 
           node --input-type=module <<'NODE'
-          import { createMem0Provider } from './packages/pi-memory-mem0/dist/provider.js';
+          import { SqliteSnapshotStore } from './packages/pi-memory-mem0/dist/provider.js';
           import { dedupMemories } from './packages/pi-memory-mem0/dist/dedup.js';
 
           const config = {
@@ -587,20 +587,14 @@ jobs:
             }
           };
 
-          const provider = await createMem0Provider({ config });
-          const memories = [
-            'ci-dedup-marker duplicate fact',
-            'ci-dedup-marker duplicate fact',
-            'ci-retain-marker user likes black coffee',
-            'ci-unique-marker user uses pnpm'
-          ];
-          for (const memory of memories) {
-            await provider.add([{ role: 'user', content: memory }], {
-              userId: 'ci-integration',
-              infer: false
-            });
-          }
-          await provider.flushSnapshot('ci-integration');
+          const snapshot = new SqliteSnapshotStore(config.oss.snapshotDbPath);
+          snapshot.replaceAll('ci-integration', [
+            { id: 'ci-dedup-1', memory: 'ci-dedup-marker duplicate fact' },
+            { id: 'ci-dedup-2', memory: 'ci-dedup-marker duplicate fact' },
+            { id: 'ci-retain-1', memory: 'ci-retain-marker user likes black coffee' },
+            { id: 'ci-unique-1', memory: 'ci-unique-marker user uses pnpm' }
+          ]);
+          snapshot.close();
 
           const result = await dedupMemories({ userId: 'ci-integration', config });
           if (result.duplicatesRemoved < 1) {
