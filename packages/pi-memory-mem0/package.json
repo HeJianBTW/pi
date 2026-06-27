@@ -17,6 +17,10 @@
       "types": "./dist/provider.d.ts",
       "default": "./dist/provider.js"
     },
+    "./dedup": {
+      "types": "./dist/dedup.d.ts",
+      "default": "./dist/dedup.js"
+    },
     "./package.json": {
       "default": "./package.json"
     }

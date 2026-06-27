@@ -126,6 +126,60 @@ The drift guard exists to prevent silent data loss — never bypass it by deleti
 
 | Hook                  | Behavior                                                                  |
 |-----------------------|---------------------------------------------------------------------------|
-| `session_start`       | Resolve `dataDir`, build `MemoryStore`, `loadFromDisk()`, capture snapshot, register 4 tools, set status `memory: loaded`/`memory: empty`. |
+| `session_start`       | Resolve `dataDir`, build `MemoryStore`, `loadFromDisk()`, capture snapshot, register 4 tools, set status `memory: loaded`/`memory: empty`. Auto-register dreaming cron job if not already installed. |
 | `before_agent_start`  | Append snapshot to assembled `systemPrompt` (no-op when empty).           |
 | `session_shutdown`    | Drop store + snapshot references.                                         |
+
+## Dreaming (Periodic Memory Consolidation)
+
+On first session start, pi-memory automatically registers a system-level scheduled task that periodically reviews recent conversations and consolidates durable facts into memory. No manual cron configuration needed.
+
+### How it works
+
+1. **System cron registration** — On first load, the extension registers a platform-native scheduled job:
+   - macOS: `launchd` LaunchAgent
+   - Linux: user `crontab` entry
+   - Windows: Task Scheduler
+
+2. **Gate check** — Each run checks whether enough time and sessions have elapsed since the last consolidation before proceeding.
+
+3. **Phase 1 — Consolidation** — An agentic loop (using pi-agent-core) reviews recent conversation transcripts and updates `MEMORY.md`/`USER.md` via the memory tools. Follows a 4-phase prompt: Orient → Gather → Consolidate → Prune.
+
+4. **Phase 2 — Dedup** — If `pi-memory-mem0` is configured, exact-duplicate entries in the vector store are identified and deleted.
+
+### Configuration
+
+Add to `settings.json` under the `pi-memory` key:
+
+```json
+{
+  "pi-memory": {
+    "dreaming": {
+      "enabled": true,
+      "intervalHours": 4,
+      "minHoursSinceLastRun": 24,
+      "minSessionsSinceLastRun": 5,
+      "model": {
+        "provider": "openai",
+        "model": "gpt-4.1-mini"
+      }
+    }
+  }
+}
+```
+
+All fields are optional with sensible defaults. The `model` field accepts any provider/model pair configured in your `~/.pi/agent/models.json` (built-in or custom).
+
+Set `"enabled": false` to disable dreaming and remove the scheduled task.
+
+### CLI
+
+The dreaming logic is also available as a standalone CLI:
+
+```bash
+# Run once (called by the system scheduler)
+npx pi-memory-dream
+
+# Or via the installed bin
+pi-memory-dream
+```

@@ -13,6 +13,7 @@
 import { mkdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
+import { resolveHome } from '@amaster.ai/pi-shared/settings';
 import type { AddResult, Mem0ExtensionConfig, MemoryItem } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -28,6 +29,11 @@ export interface Mem0Provider {
   search(query: string, opts: { userId: string; topK?: number }): Promise<MemoryItem[]>;
 
   getAll(opts: { userId: string }): Promise<MemoryItem[]>;
+
+  delete(memoryId: string): Promise<void>;
+
+  /** Flush any pending snapshot writes. No-op for platform mode. */
+  flushSnapshot(userId: string): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -119,9 +125,17 @@ class PlatformProvider implements Mem0Provider {
     });
     return normalizeResults(results);
   }
-}
 
-// ---------------------------------------------------------------------------
+  async delete(memoryId: string): Promise<void> {
+    await this.ensureClient();
+    // biome-ignore lint/suspicious/noExplicitAny: mem0ai/oss lacks type definitions
+    await (this.client as any).delete(memoryId);
+  }
+
+  async flushSnapshot(): Promise<void> {
+    // Platform mode persists server-side, no local snapshot to flush.
+  }
+}
 // SQLite Snapshot Store — persists mem0 memories to disk for restart recovery
 // ---------------------------------------------------------------------------
 
@@ -446,6 +460,22 @@ class OSSProvider implements Mem0Provider {
     });
     return normalizeResults(results);
   }
+
+  async delete(memoryId: string): Promise<void> {
+    await this.ensureMemory();
+    // biome-ignore lint/suspicious/noExplicitAny: mem0ai/oss lacks type definitions
+    await (this.memory as any).delete(memoryId);
+  }
+
+  async flushSnapshot(userId: string): Promise<void> {
+    if (!this.snapshot) return;
+    // biome-ignore lint/suspicious/noExplicitAny: mem0ai/oss lacks type definitions
+    const results = await (this.memory as any).getAll({
+      filters: { user_id: userId },
+    });
+    const items = normalizeResults(results);
+    this.snapshot.replaceAll(userId, items);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -458,19 +488,16 @@ export interface CreateProviderOptions {
   resolveKey?: KeyResolver;
   /** Full provider resolver — returns key, baseUrl, and api type from the model registry. */
   resolveProvider?: ProviderResolver;
-  /** Home directory for default snapshot db path. Falls back to ~/.amaster */
-  homeDir?: string;
 }
 
 export async function createMem0Provider(opts: CreateProviderOptions): Promise<Mem0Provider> {
-  const { config, resolveKey, resolveProvider, homeDir } = opts;
+  const { config, resolveKey, resolveProvider } = opts;
   const mode = config.mode ?? 'platform';
 
   if (mode === 'open-source') {
     const useRegistry = config.useRegistryKeys !== false;
     const snapshotDbPath =
-      config.oss?.snapshotDbPath ??
-      (homeDir ? join(homeDir, 'memories', 'mem0-snapshot.db') : undefined);
+      config.oss?.snapshotDbPath ?? join(resolveHome(), 'memories', 'mem0-snapshot.db');
     const provider = new OSSProvider(
       config.oss,
       useRegistry ? resolveKey : undefined,

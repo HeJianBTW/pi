@@ -154,7 +154,7 @@ When using an external vector store, the SQLite snapshot is not needed (the vect
 | Open-Source (default) | In-memory | `<home>/memories/mem0-snapshot.db` | `~/.mem0/history.db` |
 | Open-Source (qdrant) | Qdrant server | Not used | `~/.mem0/history.db` |
 
-The `home` directory is resolved by the host application and passed via `CreateProviderOptions.homeDir`.
+The `home` directory is resolved via `resolveHome()` from `@amaster.ai/pi-shared/settings` (defaults to `~/.pi/agent`).
 
 ## Provider Mapping
 
@@ -211,3 +211,19 @@ Open-Source mode depends on `better-sqlite3` (native addon, transitive dependenc
 - `pi-memory-mem0`: Passive memory — automatic extraction and storage, semantic retrieval, no capacity limits
 
 They do not interfere with each other and each injects into the system prompt separately.
+
+## Dedup API
+
+The package exports a standalone deduplication function used by pi-memory's dreaming job:
+
+```ts
+import { dedupMemories } from "@amaster.ai/pi-memory-mem0/dedup";
+
+const result = await dedupMemories({
+  userId: "my-user",
+  config: { mode: "platform", apiKey: "..." },
+});
+// result: { total: 42, duplicatesRemoved: 3 }
+```
+
+Normalizes entries (case-insensitive, whitespace-collapsed), identifies exact duplicates, deletes the older ones via `provider.delete()`, and flushes the SQLite snapshot so deletions persist across process restarts.

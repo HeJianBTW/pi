@@ -8,6 +8,9 @@
   "sideEffects": false,
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "pi-memory-dream": "./dist/cli/dream.js"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -32,6 +35,14 @@
     "./background-extraction": {
       "types": "./dist/background-extraction.d.ts",
       "default": "./dist/background-extraction.js"
+    },
+    "./consolidation": {
+      "types": "./dist/consolidation.d.ts",
+      "default": "./dist/consolidation.js"
+    },
+    "./dreaming-state": {
+      "types": "./dist/dreaming-state.d.ts",
+      "default": "./dist/dreaming-state.js"
     },
     "./package.json": {
       "default": "./package.json"
@@ -63,6 +74,8 @@
   },
   "dependencies": {
     "@amaster.ai/pi-shared": "workspace:*",
+    "@amaster.ai/pi-storage": "workspace:*",
+    "@amaster.ai/pi-memory-mem0": "workspace:*",
     "proper-lockfile": "^4.1.2"
   },
   "peerDependencies": {
