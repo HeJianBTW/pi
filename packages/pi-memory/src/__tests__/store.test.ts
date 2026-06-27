@@ -159,6 +159,18 @@ describe('frozen system-prompt snapshot', () => {
     expect(all).toContain('MEMORY');
     expect(all).toContain('USER PROFILE');
   });
+
+  it('loadFromDisk rebuilds the prompt snapshot from disk', async () => {
+    const dir = freshDir();
+    const store = makeStore(dir);
+    await store.loadFromDisk();
+    expect(store.formatAllForSystemPrompt()).toBe('');
+
+    writeFileSync(path.join(dir, 'MEMORY.md'), 'late prompt fact', 'utf-8');
+    await store.loadFromDisk();
+
+    expect(store.formatAllForSystemPrompt()).toContain('late prompt fact');
+  });
 });
 
 describe('threat scanning', () => {
@@ -263,6 +275,34 @@ describe('read', () => {
     const r = await store.read('memory');
     expect(r.success).toBe(true);
     expect(r.entries).toEqual(['pre-existing']);
+  });
+
+  it('refreshes from disk after the store was already loaded', async () => {
+    const dir = freshDir();
+    const store = makeStore(dir);
+    await store.loadFromDisk();
+    expect(store.getEntries('memory')).toEqual([]);
+
+    writeFileSync(path.join(dir, 'MEMORY.md'), 'written elsewhere', 'utf-8');
+
+    const r = await store.read('memory');
+    expect(r.success).toBe(true);
+    expect(r.entries).toEqual(['written elsewhere']);
+    expect(store.getEntries('memory')).toEqual(['written elsewhere']);
+  });
+
+  it('sees writes from another store instance', async () => {
+    const dir = freshDir();
+    const reader = makeStore(dir);
+    await reader.loadFromDisk();
+
+    const writer = makeStore(dir);
+    await writer.loadFromDisk();
+    await writer.add('memory', 'cross-session fact');
+
+    const r = await reader.read('memory');
+    expect(r.success).toBe(true);
+    expect(r.entries).toEqual(['cross-session fact']);
   });
 });
 

@@ -1,6 +1,7 @@
 /** Built-in provider identifiers. */
 export type BuiltInProviderId =
   | 'tavily'
+  | 'brave'
   | 'kimi'
   | 'mimo'
   | 'zai'

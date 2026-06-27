@@ -123,7 +123,6 @@ export default function memoryExtension(
   injectedConfig?: PiMemoryExtensionConfig,
 ): void {
   let store: MemoryStore | undefined;
-  let snapshot = '';
   let extractionRunner: ExtractionRunner | undefined;
 
   pi.on('session_start', async (_event, ctx) => {
@@ -140,7 +139,7 @@ export default function memoryExtension(
         store = new MemoryStore(opts);
       }
       await store.loadFromDisk();
-      snapshot = store.formatAllForSystemPrompt();
+      const snapshot = store.formatAllForSystemPrompt();
 
       ctx.ui.setStatus(STATUS_KEY, snapshot ? 'memory: loaded' : 'memory: empty');
 
@@ -175,6 +174,10 @@ export default function memoryExtension(
   });
 
   pi.on('before_agent_start', async (event) => {
+    if (store) {
+      await store.loadFromDisk();
+    }
+    const snapshot = store?.formatAllForSystemPrompt() ?? '';
     const block = snapshot ? `${MEMORY_GUIDANCE}\n\n${snapshot}` : MEMORY_GUIDANCE;
     return {
       systemPrompt: event.systemPrompt ? `${event.systemPrompt}\n\n${block}` : block,
@@ -185,7 +188,6 @@ export default function memoryExtension(
     extractionRunner?.shutdown();
     extractionRunner = undefined;
     store = undefined;
-    snapshot = '';
   });
 
   pi.registerCommand('memory', {

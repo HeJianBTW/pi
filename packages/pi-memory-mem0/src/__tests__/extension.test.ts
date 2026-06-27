@@ -1,4 +1,19 @@
 import { describe, expect, it, vi } from 'vitest';
+
+// Isolate mem0Extension from any settings.json that happens to live on the
+// test runner's filesystem. Self-hosted CI runners share $HOME across builds,
+// so without this mock a stale ~/.pi/agent/settings.json from an integration
+// run can leak `pi-memory-mem0.mode: "open-source"` into a unit test that
+// expects the platform-mode-no-apiKey early-return path. Returning `{}` keeps
+// the tests deterministic.
+vi.mock('@amaster.ai/pi-shared/settings', async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  return {
+    ...actual,
+    loadPiSettings: vi.fn(() => ({})),
+  };
+});
+
 import mem0Extension from '../index.js';
 
 // ---------------------------------------------------------------------------

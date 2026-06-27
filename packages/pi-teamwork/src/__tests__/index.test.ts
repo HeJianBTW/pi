@@ -1964,6 +1964,43 @@ describe('ensureMulticaBinary', () => {
     vi.unstubAllGlobals();
   });
 
+  it('passes MULTICA_BIN_DIR=$HOME/.local/bin to install.sh to bypass sudo fallback', async () => {
+    const originalPlatform = process.platform;
+    const originalHome = process.env.HOME;
+    const originalPath = process.env.PATH;
+    vi.stubGlobal('process', { ...process, platform: 'linux' });
+    process.env.HOME = '/tmp/fake-home';
+    process.env.PATH = '/usr/bin';
+
+    const calls: { cmd: string; args: string[] }[] = [];
+    let versionCallCount = 0;
+    const exec: ExecFn = async (cmd, args) => {
+      calls.push({ cmd, args });
+      if (args[0] === '--version') {
+        versionCallCount++;
+        if (versionCallCount === 1) return { stdout: '', stderr: '', code: 127 };
+        return { stdout: 'multica 1.0.0', stderr: '', code: 0 };
+      }
+      if (cmd === 'which' && args[0] === 'brew') return { stdout: '', stderr: '', code: 1 };
+      if (cmd === 'bash') return { stdout: '', stderr: '', code: 0 };
+      return { stdout: '', stderr: '', code: 0 };
+    };
+
+    await ensureMulticaBinary('multica', exec);
+    const bashCall = calls.find((c) => c.cmd === 'bash' && c.args[0] === '-c');
+    expect(bashCall).toBeDefined();
+    expect(bashCall!.args[1]).toContain('MULTICA_BIN_DIR=');
+    expect(bashCall!.args[1]).toContain('/tmp/fake-home/.local/bin');
+    // Installer should also prepend ~/.local/bin to PATH so subsequent
+    // spawn(multica) calls find the freshly-installed binary.
+    expect(process.env.PATH).toContain('/tmp/fake-home/.local/bin');
+
+    process.env.HOME = originalHome;
+    process.env.PATH = originalPath;
+    vi.stubGlobal('process', { ...process, platform: originalPlatform });
+    vi.unstubAllGlobals();
+  });
+
   it('falls back to curl when brew install fails', async () => {
     const originalPlatform = process.platform;
     vi.stubGlobal('process', { ...process, platform: 'darwin' });

@@ -23,10 +23,18 @@ concurrency:
   group: npm-publish-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  # Run JavaScript actions (checkout, setup-node, pnpm/action-setup, etc.) on
+  # Node 24 instead of the deprecated Node 20 the runner ships by default.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 jobs:
   publish:
     name: publish packages
-    runs-on: ubuntu-latest
+    runs-on:
+      - instance-hnpsq9go
+      - linux
+      - x64
     timeout-minutes: 45
     outputs:
       publish_filters: ${{ steps.versioning.outputs.publish_filters }}
@@ -322,7 +330,6 @@ jobs:
     needs: publish
     if: needs.publish.result == 'success'
     runs-on:
-      - self-hosted
       - instance-hnpsq9go
       - linux
       - x64

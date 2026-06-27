@@ -10,10 +10,18 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # Run JavaScript actions (checkout, setup-node, pnpm/action-setup, etc.) on
+  # Node 24 instead of the deprecated Node 20 the runner ships by default.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 jobs:
   lint:
     name: Lint
-    runs-on: ubuntu-latest
+    runs-on:
+      - instance-hnpsq9go
+      - linux
+      - x64
     steps:
       - uses: actions/checkout@v4
       - uses: biomejs/setup-biome@v2
@@ -21,42 +29,40 @@ jobs:
 
   typecheck:
     name: Typecheck
-    runs-on: ubuntu-latest
+    runs-on:
+      - instance-hnpsq9go
+      - linux
+      - x64
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: ./.github/actions/setup-pi-build
         with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
+          build: 'false'
       - run: pnpm typecheck
 
   test:
     name: Test
-    runs-on: ubuntu-latest
+    runs-on:
+      - instance-hnpsq9go
+      - linux
+      - x64
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: ./.github/actions/setup-pi-build
         with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
+          build: 'false'
       - run: pnpm --filter @amaster.ai/pi-storage prisma:generate
       - run: pnpm --filter @amaster.ai/pi-shared build
       - run: pnpm test
 
   build:
     name: Build
-    runs-on: ubuntu-latest
+    runs-on:
+      - instance-hnpsq9go
+      - linux
+      - x64
     needs: [lint, typecheck, test]
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
+      - uses: ./.github/actions/setup-pi-build
       - run: pnpm build

@@ -8,6 +8,7 @@ const SETTINGS_KEY = 'pi-web-access';
 
 const DEFAULT_BASE_URL: Record<BuiltInProviderId, string> = {
   tavily: 'https://api.tavily.com',
+  brave: 'https://api.search.brave.com',
   kimi: 'https://api.moonshot.cn/v1',
   mimo: 'https://api.xiaomimimo.com/v1',
   zai: 'https://api.z.ai',
@@ -21,6 +22,7 @@ const DEFAULT_BASE_URL: Record<BuiltInProviderId, string> = {
 
 const ENV_VARS: Record<BuiltInProviderId, string> = {
   tavily: 'TAVILY_API_KEY',
+  brave: 'BRAVE_API_KEY',
   kimi: 'MOONSHOT_API_KEY',
   mimo: 'MIMO_API_KEY',
   zai: 'ZAI_API_KEY',
@@ -109,6 +111,7 @@ export function resolveProvider(
 
 const ALL_SEARCH_PROVIDER_IDS: BuiltInProviderId[] = [
   'tavily',
+  'brave',
   'kimi',
   'mimo',
   'zai',

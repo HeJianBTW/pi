@@ -208,7 +208,7 @@ export class LangfuseSdkRuntimeEventExporter implements RuntimeEventExporter {
         this.ensureSdkRootSpan(trace, rootKey, event);
         const body = {
           id: langfuseSpanId(traceId, key),
-          name: 'subagent',
+          name: subagentObservationName(event),
           startTime: event.createdAt,
           input: event.details?.input,
           level: 'DEFAULT',
@@ -236,7 +236,7 @@ export class LangfuseSdkRuntimeEventExporter implements RuntimeEventExporter {
           this.spans.get(key) ??
           this.getSdkSubagentParent(trace, rootKey, event).span({
             id: langfuseSpanId(traceId, key),
-            name: 'subagent',
+            name: subagentObservationName(event),
             startTime: event.createdAt,
             metadata: lifecycleMetadata(event),
           });
@@ -724,7 +724,7 @@ function mapLifecycleEventToOtelSpans(
         traceId: langfuseTraceId(traceId),
         spanId: langfuseSpanId(traceId, key),
         parentSpanId: langfuseSpanId(traceId, subagentSpawnToolSpanKey(event) ?? rootKey),
-        name: 'subagent',
+        name: subagentObservationName(event),
         startTime: event.createdAt,
         attributes: {
           ...lifecycleMetadata(event),
@@ -745,7 +745,7 @@ function mapLifecycleEventToOtelSpans(
             traceId: langfuseTraceId(traceId),
             spanId: langfuseSpanId(traceId, key),
             parentSpanId: langfuseSpanId(traceId, subagentSpawnToolSpanKey(event) ?? rootKey),
-            name: 'subagent',
+            name: subagentObservationName(event),
             startTime: event.createdAt,
             attributes: {
               ...lifecycleMetadata(event),
@@ -994,6 +994,11 @@ function chatInputLifecycleOutput(event: RuntimeLifecycleEvent): JsonObject {
   return event.type === 'chat_turn_steer_delivered' || event.type === 'chat_turn_followup_delivered'
     ? { delivered: true, turnMode: event.details?.turnMode }
     : { accepted: true, turnMode: event.details?.turnMode };
+}
+
+function subagentObservationName(event: RuntimeLifecycleEvent): string {
+  const agent = stringFromJsonObject(event.details, 'agent');
+  return agent ? `subagent [${truncateObservationSummary(agent)}]` : 'subagent';
 }
 
 function summarizeToolArgsForName(

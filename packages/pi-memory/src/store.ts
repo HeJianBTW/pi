@@ -60,10 +60,10 @@ const DEFAULT_USER_CHAR_LIMIT = 1375;
  * Bounded curated memory with file persistence.
  *
  * Two parallel states:
- *  - `_systemPromptSnapshot`: frozen at `loadFromDisk()`, used for system
- *    prompt injection. Never mutated mid-session — keeps prefix cache stable.
- *  - `memoryEntries` / `userEntries`: live state, mutated by tool calls,
- *    persisted to disk. Tool responses always reflect this live state.
+ *  - `_systemPromptSnapshot`: a sanitized prompt snapshot rebuilt explicitly
+ *    by `loadFromDisk()`.
+ *  - `memoryEntries` / `userEntries`: live state, refreshed by `read()`,
+ *    mutated by tool calls, and persisted to disk.
  */
 export class MemoryStore {
   readonly dir: string;
@@ -93,12 +93,8 @@ export class MemoryStore {
    */
   async loadFromDisk(): Promise<void> {
     await fs.mkdir(this.dir, { recursive: true });
-    this.memoryEntries = dedupe(await readEntriesFile(this.pathFor('memory')));
-    this.userEntries = dedupe(await readEntriesFile(this.pathFor('user')));
-    this.systemPromptSnapshot = {
-      memory: this.renderBlock('memory', sanitizeForSnapshot(this.memoryEntries, FILENAME.memory)),
-      user: this.renderBlock('user', sanitizeForSnapshot(this.userEntries, FILENAME.user)),
-    };
+    await this.refreshLiveEntries();
+    this.rebuildSystemPromptSnapshot();
     this.loaded = true;
   }
 
@@ -262,6 +258,8 @@ export class MemoryStore {
   async read(target: MemoryTarget): Promise<MemorySuccessResult> {
     if (!this.loaded) {
       await this.loadFromDisk();
+    } else {
+      await this.refreshLiveEntries(target);
     }
     return this.successResponse(target);
   }
@@ -304,6 +302,22 @@ export class MemoryStore {
     };
     if (message) result.message = message;
     return result;
+  }
+
+  private async refreshLiveEntries(target?: MemoryTarget): Promise<void> {
+    if (!target || target === 'memory') {
+      this.memoryEntries = dedupe(await readEntriesFile(this.pathFor('memory')));
+    }
+    if (!target || target === 'user') {
+      this.userEntries = dedupe(await readEntriesFile(this.pathFor('user')));
+    }
+  }
+
+  private rebuildSystemPromptSnapshot(): void {
+    this.systemPromptSnapshot = {
+      memory: this.renderBlock('memory', sanitizeForSnapshot(this.memoryEntries, FILENAME.memory)),
+      user: this.renderBlock('user', sanitizeForSnapshot(this.userEntries, FILENAME.user)),
+    };
   }
 
   private renderBlock(target: MemoryTarget, entries: string[]): string {
