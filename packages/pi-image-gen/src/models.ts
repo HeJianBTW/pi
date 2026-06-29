@@ -13,14 +13,12 @@ export type BuiltInModelEntry = {
 };
 
 export const BUILT_IN_MODELS: BuiltInModelEntry[] = [
-  // OpenAI image generation. The naming "gpt-image-2" the user mentioned does not
-  // currently exist in OpenAI's catalog; the closest stable id is "gpt-image-1".
-  // We accept both as aliases so prompts that ask for "gpt-image-2" still work.
+  // OpenAI image generation.
   {
-    id: 'gpt-image-1',
-    aliases: ['gpt-image', 'gpt-image-2'],
+    id: 'gpt-image-2',
+    aliases: ['gpt-image'],
     provider: 'openai',
-    remoteId: 'gpt-image-1',
+    remoteId: 'gpt-image-2',
   },
 
   // Google Gemini "Nano Banana" image generation. The `nano-banana` alias

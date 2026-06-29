@@ -95,7 +95,7 @@ async function generateWithImages(
   form.append('prompt', params.prompt);
   form.append('n', String(params.n ?? 1));
   if (params.size) form.append('size', params.size);
-  // OpenAI accepts repeated `image[]` for multi-image edits on gpt-image-1.
+  // OpenAI accepts repeated `image[]` for multi-image edits on gpt-image-2.
   const fieldName = inputs.length > 1 ? 'image[]' : 'image';
   for (const [i, input] of inputs.entries()) {
     const ext = input.mimeType.split('/')[1] ?? 'png';

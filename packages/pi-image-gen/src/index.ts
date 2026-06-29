@@ -81,7 +81,7 @@ export default function piImageGenExtension(pi: ExtensionAPI): void {
       image: Type.Optional(
         Type.Array(Type.String(), {
           description:
-            'Optional reference image(s) for image-to-image / edit / style transfer / character preservation. Each entry MUST be either (a) a file path — absolute or relative to the session cwd — or (b) an http(s) URL. Base64 strings and data: URIs are rejected; write the bytes to a file first if you have raw image data. For a single image pass ["path"]. Multi-image conditioning is supported by OpenAI gpt-image-1, Gemini, and Qwen sync models. To iterate on a previous output, pass that file path here.',
+            'Optional reference image(s) for image-to-image / edit / style transfer / character preservation. Each entry MUST be either (a) a file path — absolute or relative to the session cwd — or (b) an http(s) URL. Base64 strings and data: URIs are rejected; write the bytes to a file first if you have raw image data. For a single image pass ["path"]. Multi-image conditioning is supported by OpenAI gpt-image-2, Gemini, and Qwen sync models. To iterate on a previous output, pass that file path here.',
         }),
       ),
       n: Type.Optional(

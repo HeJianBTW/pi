@@ -13,13 +13,13 @@ describe('resolveModel', () => {
     expect(result.provider.apiKey).toBe('gem-test');
   });
 
-  it('routes gpt-image-2 alias to openai gpt-image-1', () => {
+  it('routes gpt-image alias to openai gpt-image-2', () => {
     process.env.OPENAI_API_KEY = 'oa-test';
-    const result = resolveModel('gpt-image-2', {});
+    const result = resolveModel('gpt-image', {});
     if ('error' in result) throw new Error(result.error);
     expect(result.provider.id).toBe('openai');
-    expect(result.remoteId).toBe('gpt-image-1');
-    expect(result.requestedId).toBe('gpt-image-2');
+    expect(result.remoteId).toBe('gpt-image-2');
+    expect(result.requestedId).toBe('gpt-image');
   });
 
   it('routes qwen-image-2 alias to dashscope', () => {
@@ -41,7 +41,7 @@ describe('resolveModel', () => {
         openai: { apiKey: `$${'{MY_KEY}'}`, baseUrl: 'https://proxy.example.com/v1' },
       },
     };
-    const result = resolveModel('gpt-image-1', settings);
+    const result = resolveModel('gpt-image-2', settings);
     if ('error' in result) throw new Error(result.error);
     expect(result.provider.apiKey).toBe('override-key');
     expect(result.provider.baseUrl).toBe('https://proxy.example.com/v1');

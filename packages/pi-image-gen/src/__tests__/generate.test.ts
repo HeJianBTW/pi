@@ -35,7 +35,7 @@ describe('generateImage', () => {
       { prompt: 'a cat', filename: 'cat-test' },
       {
         cwd,
-        settings: { defaultModel: 'gpt-image-1' },
+        settings: { defaultModel: 'gpt-image-2' },
         fetchImpl,
         now: () => new Date(Date.UTC(2026, 5, 4, 12, 0, 0)),
       },
@@ -117,7 +117,7 @@ describe('generateImage', () => {
       { prompt: 'x' },
       {
         cwd,
-        settings: { defaultModel: 'gpt-image-1' },
+        settings: { defaultModel: 'gpt-image-2' },
         fetchImpl,
         signal: ctrl.signal,
       },
@@ -150,7 +150,7 @@ describe('generateImage', () => {
       { prompt: 'make it green', image: [refPath], filename: 'edit-test' },
       {
         cwd,
-        settings: { defaultModel: 'gpt-image-1' },
+        settings: { defaultModel: 'gpt-image-2' },
         fetchImpl,
         now: () => new Date(Date.UTC(2026, 5, 5, 0, 0, 0)),
       },
@@ -174,7 +174,7 @@ describe('generateImage', () => {
 
     const result = await generateImage(
       { prompt: 'cat' },
-      { cwd, settings: { defaultModel: 'gpt-image-1' }, fetchImpl },
+      { cwd, settings: { defaultModel: 'gpt-image-2' }, fetchImpl },
     );
     expect(result.images).toHaveLength(1);
     expect(readFileSync(result.images[0]!.path)).toEqual(PNG_BYTES);
@@ -210,7 +210,7 @@ describe('generateImage', () => {
 
     const result = await generateImage(
       { prompt: 'x' },
-      { cwd, settings: { defaultModel: 'gpt-image-1' }, fetchImpl: wrappedFetch },
+      { cwd, settings: { defaultModel: 'gpt-image-2' }, fetchImpl: wrappedFetch },
     );
     expect(result.images).toHaveLength(2);
   });
