@@ -1,4 +1,4 @@
-export type ApiStyle = 'openai' | 'gemini' | 'dashscope' | 'openrouter';
+export type ApiStyle = 'openai' | 'gemini' | 'dashscope' | 'openrouter' | 'ark';
 
 /** Built-in provider id. Currently 1:1 with ApiStyle. */
 export type BuiltInProviderId = ApiStyle;
