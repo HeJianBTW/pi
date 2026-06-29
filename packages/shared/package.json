@@ -15,6 +15,10 @@
       "types": "./dist/settings.d.ts",
       "default": "./dist/settings.js"
     },
+    "./scheduler": {
+      "types": "./dist/scheduler.d.ts",
+      "default": "./dist/scheduler.js"
+    },
     "./package.json": {
       "default": "./package.json"
     }

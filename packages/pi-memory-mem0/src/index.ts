@@ -9,7 +9,7 @@
  * Supports ${ENV_VAR:-fallback} in all string values.
  */
 
-import { loadPiSettings, resolveHome } from '@amaster.ai/pi-shared/settings';
+import { loadPiSettings } from '@amaster.ai/pi-shared/settings';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Prefetch } from './prefetch.js';
 import { createMem0Provider, type Mem0Provider } from './provider.js';
@@ -56,7 +56,6 @@ export default function mem0Extension(pi: ExtensionAPI): void {
     try {
       provider = await createMem0Provider({
         config,
-        homeDir: resolveHome(),
         resolveProvider: async (providerName: string) => {
           const registry = ctx.modelRegistry as {
             find?: (

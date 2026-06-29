@@ -16,6 +16,8 @@ function mockProvider(overrides: Partial<Mem0Provider> = {}): Mem0Provider {
     add: vi.fn().mockResolvedValue({ results: [] }),
     search: vi.fn().mockResolvedValue([]),
     getAll: vi.fn().mockResolvedValue([]),
+    delete: vi.fn().mockResolvedValue(undefined),
+    flushSnapshot: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
 }
