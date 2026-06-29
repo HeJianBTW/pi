@@ -156,7 +156,7 @@ export ARK_API_KEY=...
 { "pi-image-gen": { "defaultModel": "seedream" } }
 ```
 
-> Ark rejects `size` values below ~3.7 megapixels — `1024x1024` will fail with `InvalidParameter`. Use `2048x2048` (or any size ≥ 3,686,400 pixels) instead. Other built-in providers default to `1024x1024`, so this is the one knob you need to remember when switching to Seedream.
+> Supported `size` values are model-dependent. Seedream 5.0 / 5.0 lite / 4.5 require 2K or larger (e.g. `2048x2048`, `1728x2304`, `2848x1600`) — `1024x1024` will fail with `InvalidParameter`. Seedream 4.0 is the only one that accepts 1K sizes. Full sizing matrix in the [official docs](https://www.volcengine.com/docs/82379/1824121). Other built-in providers default to `1024x1024`, so this is the one knob to remember when switching to Seedream ≥ 4.5.
 
 The default base URL is `https://ark.cn-beijing.volces.com/api/v3`. To use a different region (e.g. `ap-southeast`), override it:
 
