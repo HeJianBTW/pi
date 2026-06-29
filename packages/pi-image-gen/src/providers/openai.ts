@@ -1,5 +1,5 @@
 import { classifyHttpError, describeNetworkError } from '../errors.js';
-import { classifyImageOutput } from '../image-input.js';
+import { classifyImageOutput, sniffMime } from '../image-input.js';
 import type {
   GenerateImageParams,
   ImageProviderAdapter,
@@ -9,7 +9,7 @@ import type {
 } from '../types.js';
 import { withDefaultPath } from '../url.js';
 
-function bearerHeaders(provider: ResolvedProvider): Record<string, string> {
+export function bearerHeaders(provider: ResolvedProvider): Record<string, string> {
   const headers: Record<string, string> = {};
   if (provider.apiKey) headers.authorization = `Bearer ${provider.apiKey}`;
   if (provider.headers) Object.assign(headers, provider.headers);
@@ -17,7 +17,7 @@ function bearerHeaders(provider: ResolvedProvider): Record<string, string> {
 }
 
 /**
- * OpenAI-compatible image API. Used for OpenAI directly, OpenRouter, and any
+ * OpenAI-compatible image API. Used for OpenAI directly and any
  * customProvider with `api: 'openai'`.
  *
  * Two endpoints:
@@ -26,6 +26,9 @@ function bearerHeaders(provider: ResolvedProvider): Record<string, string> {
  *
  * The edit path is selected when the caller passes `inputs` (resolved
  * reference images). Mask is intentionally not exposed to keep scope small.
+ *
+ * OpenRouter is NOT OpenAI-compatible for images — it uses POST /api/v1/images
+ * (no `/generations` suffix). See providers/openrouter.ts.
  */
 export const openaiAdapter: ImageProviderAdapter = {
   async generate(
@@ -114,7 +117,7 @@ async function generateWithImages(
   return parseImagesResponse(res, url, provider);
 }
 
-async function parseImagesResponse(
+export async function parseImagesResponse(
   res: Response,
   url: string,
   provider: ResolvedProvider,
@@ -130,7 +133,9 @@ async function parseImagesResponse(
       `${provider.name} returned ${contentType || 'non-JSON'} from ${url}. The endpoint probably doesn't expose the OpenAI-compatible images API at this path. Body: ${preview}`,
     );
   }
-  let json: { data?: Array<{ url?: string; b64_json?: string; revised_prompt?: string }> };
+  let json: {
+    data?: Array<{ url?: string; b64_json?: string; revised_prompt?: string; media_type?: string }>;
+  };
   try {
     json = JSON.parse(text);
   } catch (error) {
@@ -144,7 +149,9 @@ async function parseImagesResponse(
     // there instead of a real URL.
     let payload: RawImageResult['data'] | null = null;
     if (entry.b64_json) {
-      payload = { kind: 'base64', bytes: entry.b64_json, mimeType: 'image/png' };
+      const decoded = Buffer.from(entry.b64_json, 'base64');
+      const mimeType = sniffMime(decoded) ?? entry.media_type ?? 'image/png';
+      payload = { kind: 'base64', bytes: entry.b64_json, mimeType };
     } else {
       const classified = classifyImageOutput(entry.url);
       if (classified) payload = classified;
@@ -162,7 +169,7 @@ async function parseImagesResponse(
   return out;
 }
 
-function missingKeyMessage(provider: ResolvedProvider): string {
+export function missingKeyMessage(provider: ResolvedProvider): string {
   if (provider.builtIn) {
     return `Provider "${provider.id}" has no API key. Tell the user to set OPENAI_API_KEY (or pi-image-gen.providers.${provider.id}.apiKey in settings.json).`;
   }

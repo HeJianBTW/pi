@@ -142,10 +142,12 @@ export OPENROUTER_API_KEY=...
 ```
 
 ```json
-{ "pi-image-gen": { "defaultModel": "openrouter/google/gemini-2.5-flash-image" } }
+{ "pi-image-gen": { "defaultModel": "openrouter/bytedance-seed/seedream-4.5" } }
 ```
 
-The string after `openrouter/` is the OpenRouter model slug; pass any image model OpenRouter supports.
+The string after `openrouter/` is the OpenRouter model slug; pass any image model OpenRouter supports (`google/gemini-3.1-flash-image`, `openai/gpt-image-2`, `bytedance-seed/seedream-4.5`, …).
+
+OpenRouter's image API is **not** OpenAI-compatible despite the family name — it lives at `POST /api/v1/images` (no `/generations` suffix) and uses JSON `input_references` for image-to-image. The extension targets the right endpoint automatically; no wire-shape config needed.
 
 ## Custom providers
 
@@ -299,6 +301,7 @@ Provider behavior:
 | OpenAI (`gpt-image-1`) | `POST /v1/images/edits` (multipart). Supports multi-image. |
 | Gemini (`gemini-3.x-flash-image`, `nano-banana`) | `inline_data` parts prepended to the user message. Supports multi-image. |
 | DashScope (`qwen-image-2.0`, `qwen-image-2.0-pro`) | `image` parts in `messages[].content`. |
+| OpenRouter | `POST /api/v1/images` with `input_references` JSON. Supports multi-image. |
 
 There is intentionally no `model` parameter on the tool — the active model is fixed by `pi-image-gen.defaultModel` in settings.
 
