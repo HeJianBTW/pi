@@ -9,7 +9,7 @@ describe('resolveModel', () => {
     if ('error' in result) throw new Error(result.error);
     expect(result.provider.id).toBe('gemini');
     expect(result.provider.api).toBe('gemini');
-    expect(result.remoteId).toBe('gemini-3.1-flash-image');
+    expect(result.remoteId).toBe('gemini-2.5-flash-image');
     expect(result.provider.apiKey).toBe('gem-test');
   });
 

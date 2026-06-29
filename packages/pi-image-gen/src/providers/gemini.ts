@@ -36,6 +36,9 @@ export const geminiAdapter: ImageProviderAdapter = {
     if (provider.headers) Object.assign(headers, provider.headers);
 
     const n = params.n ?? 1;
+    // Per https://ai.google.dev/gemini-api/docs/image-generation REST examples,
+    // request body uses snake_case (`inline_data`, `mime_type`). Google accepts
+    // both; we stay aligned with the docs.
     const userParts: Array<
       { text: string } | { inline_data: { mime_type: string; data: string } }
     > = [];
@@ -74,7 +77,10 @@ export const geminiAdapter: ImageProviderAdapter = {
     let json: {
       candidates?: Array<{
         content?: {
-          parts?: Array<{ inline_data?: { mime_type?: string; data?: string } }>;
+          parts?: Array<{
+            inlineData?: { mimeType?: string; data?: string };
+            inline_data?: { mime_type?: string; data?: string };
+          }>;
         };
       }>;
     };
@@ -87,13 +93,20 @@ export const geminiAdapter: ImageProviderAdapter = {
     const out: RawImageResult[] = [];
     for (const candidate of json.candidates ?? []) {
       for (const part of candidate.content?.parts ?? []) {
-        const inline = part.inline_data;
-        if (inline?.data) {
+        // Google's REST API returns camelCase `inlineData`; the gRPC/proto form
+        // is `inline_data`. Accept both — different gateways may pass either.
+        const inline = part.inlineData ?? part.inline_data;
+        const data = inline?.data;
+        const mimeType =
+          (inline as { mimeType?: string; mime_type?: string } | undefined)?.mimeType ??
+          (inline as { mimeType?: string; mime_type?: string } | undefined)?.mime_type ??
+          'image/png';
+        if (data) {
           out.push({
             data: {
               kind: 'base64',
-              bytes: inline.data,
-              mimeType: inline.mime_type ?? 'image/png',
+              bytes: data,
+              mimeType,
             },
           });
         }

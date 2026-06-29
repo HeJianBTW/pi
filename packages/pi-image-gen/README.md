@@ -7,7 +7,7 @@ Pi extension that adds an `image_generate` tool. Supported providers:
 | Provider                       | Model id (alias)                              | Env var               |
 | ------------------------------ | --------------------------------------------- | --------------------- |
 | OpenAI                         | `gpt-image-2` (alias `gpt-image`)               | `OPENAI_API_KEY`      |
-| Google Gemini ("Nano Banana")  | `gemini-3-pro-image` (alias `nano-banana-pro`), `gemini-3-pro-image-preview`, `gemini-3.1-flash-image` (alias `nano-banana`), `gemini-3.1-flash-image-preview`, `gemini-2.5-flash-image` (alias `nano-banana-2`), `gemini-2.0-flash-image` | `GEMINI_API_KEY`      |
+| Google Gemini ("Nano Banana")  | `gemini-3-pro-image` (alias `nano-banana-pro`), `gemini-3.1-flash-image` (alias `nano-banana-2`), `gemini-2.5-flash-image` (alias `nano-banana`) | `GEMINI_API_KEY` |
 | Alibaba DashScope (Qwen-Image) | `qwen-image-2.0-pro` (alias `qwen-image-pro`), `qwen-image-2.0` (alias `qwen-image-2`, `qwen-image`) | `DASHSCOPE_API_KEY` |
 | OpenRouter                     | any (use `openrouter/<vendor>/<id>`)          | `OPENROUTER_API_KEY`  |
 | Custom providers               | whatever you declare in settings              | (your choice, via `$VAR`) |
@@ -299,7 +299,7 @@ Provider behavior:
 | Provider | Image input route |
 |---|---|
 | OpenAI (`gpt-image-2`) | `POST /v1/images/edits` (multipart). Supports multi-image. |
-| Gemini (`gemini-3.x-flash-image`, `nano-banana`) | `inline_data` parts prepended to the user message. Supports multi-image. |
+| Gemini (`gemini-3-pro-image`, `gemini-3.1-flash-image`, `gemini-2.5-flash-image`) | `inline_data` parts prepended to the user message. Supports multi-image. |
 | DashScope (`qwen-image-2.0`, `qwen-image-2.0-pro`) | `image` parts in `messages[].content`. |
 | OpenRouter | `POST /api/v1/images` with `input_references` JSON. Supports multi-image. |
 
