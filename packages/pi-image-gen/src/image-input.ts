@@ -79,7 +79,7 @@ async function resolveOne(
   return { bytes, mimeType };
 }
 
-function sniffMime(bytes: Uint8Array): string | undefined {
+export function sniffMime(bytes: Uint8Array): string | undefined {
   for (const { mimeType, bytes: magic } of MAGIC_BYTES) {
     if (bytes.length < magic.length) continue;
     let match = true;

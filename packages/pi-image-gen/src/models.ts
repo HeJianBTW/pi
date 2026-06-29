@@ -13,19 +13,19 @@ export type BuiltInModelEntry = {
 };
 
 export const BUILT_IN_MODELS: BuiltInModelEntry[] = [
-  // OpenAI image generation. The naming "gpt-image-2" the user mentioned does not
-  // currently exist in OpenAI's catalog; the closest stable id is "gpt-image-1".
-  // We accept both as aliases so prompts that ask for "gpt-image-2" still work.
+  // OpenAI image generation.
   {
-    id: 'gpt-image-1',
-    aliases: ['gpt-image', 'gpt-image-2'],
+    id: 'gpt-image-2',
+    aliases: ['gpt-image'],
     provider: 'openai',
-    remoteId: 'gpt-image-1',
+    remoteId: 'gpt-image-2',
   },
 
-  // Google Gemini "Nano Banana" image generation. The `nano-banana` alias
-  // points at the most recent stable release; older variants stay addressable
-  // by their full id.
+  // Google Gemini "Nano Banana" image generation.
+  // Per https://ai.google.dev/gemini-api/docs/image-generation:
+  //   Nano Banana Pro → gemini-3-pro-image
+  //   Nano Banana 2   → gemini-3.1-flash-image
+  //   Nano Banana     → gemini-2.5-flash-image
   {
     id: 'gemini-3-pro-image',
     aliases: ['nano-banana-pro'],
@@ -33,31 +33,16 @@ export const BUILT_IN_MODELS: BuiltInModelEntry[] = [
     remoteId: 'gemini-3-pro-image',
   },
   {
-    id: 'gemini-3-pro-image-preview',
-    provider: 'gemini',
-    remoteId: 'gemini-3-pro-image-preview',
-  },
-  {
     id: 'gemini-3.1-flash-image',
-    aliases: ['nano-banana', 'nano-banana-3'],
+    aliases: ['nano-banana-2'],
     provider: 'gemini',
     remoteId: 'gemini-3.1-flash-image',
   },
   {
-    id: 'gemini-3.1-flash-image-preview',
-    provider: 'gemini',
-    remoteId: 'gemini-3.1-flash-image-preview',
-  },
-  {
     id: 'gemini-2.5-flash-image',
-    aliases: ['nano-banana-2', 'gemini-image'],
+    aliases: ['nano-banana'],
     provider: 'gemini',
     remoteId: 'gemini-2.5-flash-image',
-  },
-  {
-    id: 'gemini-2.0-flash-image',
-    provider: 'gemini',
-    remoteId: 'gemini-2.0-flash-image',
   },
 
   // Alibaba Qwen-Image / WanX series via DashScope. The `qwen-image-2` and

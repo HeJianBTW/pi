@@ -6,11 +6,19 @@ Pi extension that adds an `image_generate` tool. Supported providers:
 
 | Provider                       | Model id (alias)                              | Env var               |
 | ------------------------------ | --------------------------------------------- | --------------------- |
-| OpenAI                         | `gpt-image-1` (alias `gpt-image-2`)             | `OPENAI_API_KEY`      |
-| Google Gemini ("Nano Banana")  | `gemini-3-pro-image` (alias `nano-banana-pro`), `gemini-3-pro-image-preview`, `gemini-3.1-flash-image` (alias `nano-banana`), `gemini-3.1-flash-image-preview`, `gemini-2.5-flash-image` (alias `nano-banana-2`), `gemini-2.0-flash-image` | `GEMINI_API_KEY`      |
+| OpenAI                         | `gpt-image-2` (alias `gpt-image`)               | `OPENAI_API_KEY`      |
+| Google Gemini ("Nano Banana")  | `gemini-3-pro-image` (alias `nano-banana-pro`), `gemini-3.1-flash-image` (alias `nano-banana-2`), `gemini-2.5-flash-image` (alias `nano-banana`) | `GEMINI_API_KEY` |
 | Alibaba DashScope (Qwen-Image) | `qwen-image-2.0-pro` (alias `qwen-image-pro`), `qwen-image-2.0` (alias `qwen-image-2`, `qwen-image`) | `DASHSCOPE_API_KEY` |
 | OpenRouter                     | any (use `openrouter/<vendor>/<id>`)          | `OPENROUTER_API_KEY`  |
 | Custom providers               | whatever you declare in settings              | (your choice, via `$VAR`) |
+
+Upstream API docs (handy when debugging gateway behavior or adding new models):
+
+- OpenAI gpt-image-2 — [developers.openai.com/api/docs/models/gpt-image-2](https://developers.openai.com/api/docs/models/gpt-image-2)
+- Google Gemini image generation — [ai.google.dev/gemini-api/docs/image-generation](https://ai.google.dev/gemini-api/docs/image-generation)
+- Alibaba DashScope Qwen-Image (text-to-image) — [help.aliyun.com/zh/model-studio/text-to-image](https://help.aliyun.com/zh/model-studio/text-to-image)
+- Alibaba DashScope Qwen-Image-Edit — [help.aliyun.com/zh/model-studio/qwen-image-edit-guide](https://help.aliyun.com/zh/model-studio/qwen-image-edit-guide)
+- OpenRouter image API — [openrouter.ai/docs/api/api-reference/images/create-images](https://openrouter.ai/docs/api/api-reference/images/create-images)
 
 The env-var names match [pi.dev's provider table](https://pi.dev/docs/latest/providers) — if the agent already has a key set for a provider, this extension will reuse it. You don't need to introduce a new variable.
 
@@ -92,7 +100,7 @@ That's it. From the agent: `image_generate({ prompt: "a cyberpunk cat" })`.
 
 ## Built-in setup walkthrough
 
-### 1. OpenAI (`gpt-image-1` / `gpt-image-2`)
+### 1. OpenAI (`gpt-image-2`)
 
 ```sh
 export OPENAI_API_KEY=sk-...
@@ -142,10 +150,12 @@ export OPENROUTER_API_KEY=...
 ```
 
 ```json
-{ "pi-image-gen": { "defaultModel": "openrouter/google/gemini-2.5-flash-image" } }
+{ "pi-image-gen": { "defaultModel": "openrouter/bytedance-seed/seedream-4.5" } }
 ```
 
-The string after `openrouter/` is the OpenRouter model slug; pass any image model OpenRouter supports.
+The string after `openrouter/` is the OpenRouter model slug; pass any image model OpenRouter supports (`google/gemini-3.1-flash-image`, `openai/gpt-image-2`, `bytedance-seed/seedream-4.5`, …).
+
+OpenRouter's image API is **not** OpenAI-compatible despite the family name — it lives at `POST /api/v1/images` (no `/generations` suffix) and uses JSON `input_references` for image-to-image. The extension targets the right endpoint automatically; no wire-shape config needed.
 
 ## Custom providers
 
@@ -289,16 +299,17 @@ image_generate({ prompt: "a beaver chewing wood", filename: "beaver" })
   → /Users/.../.pi/images/beaver.png
 
 image_generate({ prompt: "now in watercolor style", image: ["/Users/.../.pi/images/beaver.png"] })
-  → /Users/.../.pi/images/gpt-image-1-20260605-...png  (edited)
+  → /Users/.../.pi/images/gpt-image-2-20260605-...png  (edited)
 ```
 
 Provider behavior:
 
 | Provider | Image input route |
 |---|---|
-| OpenAI (`gpt-image-1`) | `POST /v1/images/edits` (multipart). Supports multi-image. |
-| Gemini (`gemini-3.x-flash-image`, `nano-banana`) | `inline_data` parts prepended to the user message. Supports multi-image. |
+| OpenAI (`gpt-image-2`) | `POST /v1/images/edits` (multipart). Supports multi-image. |
+| Gemini (`gemini-3-pro-image`, `gemini-3.1-flash-image`, `gemini-2.5-flash-image`) | `inline_data` parts prepended to the user message. Supports multi-image. |
 | DashScope (`qwen-image-2.0`, `qwen-image-2.0-pro`) | `image` parts in `messages[].content`. |
+| OpenRouter | `POST /api/v1/images` with `input_references` JSON. Supports multi-image. |
 
 There is intentionally no `model` parameter on the tool — the active model is fixed by `pi-image-gen.defaultModel` in settings.
 

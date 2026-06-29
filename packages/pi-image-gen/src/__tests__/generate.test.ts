@@ -35,7 +35,7 @@ describe('generateImage', () => {
       { prompt: 'a cat', filename: 'cat-test' },
       {
         cwd,
-        settings: { defaultModel: 'gpt-image-1' },
+        settings: { defaultModel: 'gpt-image-2' },
         fetchImpl,
         now: () => new Date(Date.UTC(2026, 5, 4, 12, 0, 0)),
       },
@@ -117,7 +117,7 @@ describe('generateImage', () => {
       { prompt: 'x' },
       {
         cwd,
-        settings: { defaultModel: 'gpt-image-1' },
+        settings: { defaultModel: 'gpt-image-2' },
         fetchImpl,
         signal: ctrl.signal,
       },
@@ -150,7 +150,7 @@ describe('generateImage', () => {
       { prompt: 'make it green', image: [refPath], filename: 'edit-test' },
       {
         cwd,
-        settings: { defaultModel: 'gpt-image-1' },
+        settings: { defaultModel: 'gpt-image-2' },
         fetchImpl,
         now: () => new Date(Date.UTC(2026, 5, 5, 0, 0, 0)),
       },
@@ -174,7 +174,7 @@ describe('generateImage', () => {
 
     const result = await generateImage(
       { prompt: 'cat' },
-      { cwd, settings: { defaultModel: 'gpt-image-1' }, fetchImpl },
+      { cwd, settings: { defaultModel: 'gpt-image-2' }, fetchImpl },
     );
     expect(result.images).toHaveLength(1);
     expect(readFileSync(result.images[0]!.path)).toEqual(PNG_BYTES);
@@ -210,8 +210,65 @@ describe('generateImage', () => {
 
     const result = await generateImage(
       { prompt: 'x' },
-      { cwd, settings: { defaultModel: 'gpt-image-1' }, fetchImpl: wrappedFetch },
+      { cwd, settings: { defaultModel: 'gpt-image-2' }, fetchImpl: wrappedFetch },
     );
     expect(result.images).toHaveLength(2);
+  });
+
+  it('routes OpenRouter to POST /api/v1/images (not /images/generations)', async () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'pi-image-gen-'));
+    const settings: ImageGenSettings = {
+      defaultModel: 'google/gemini-3.1-flash-image',
+      customProviders: {
+        or: {
+          api: 'openrouter',
+          apiKey: 'or-test',
+          models: ['google/gemini-3.1-flash-image'],
+        },
+      },
+    };
+    const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
+    const fetchImpl: typeof fetch = (async (input, init) => {
+      const url = typeof input === 'string' ? input : (input as URL).toString();
+      calls.push({ url, body: JSON.parse(String(init?.body)) });
+      return fakeJsonResponse({ data: [{ b64_json: PNG_BYTES.toString('base64') }] });
+    }) as typeof fetch;
+
+    const result = await generateImage({ prompt: 'a cat' }, { cwd, settings, fetchImpl });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe('https://openrouter.ai/api/v1/images');
+    expect(calls[0]?.body.model).toBe('google/gemini-3.1-flash-image');
+    expect(result.images).toHaveLength(1);
+  });
+
+  it('OpenRouter image-to-image sends input_references in JSON body', async () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'pi-image-gen-'));
+    const settings: ImageGenSettings = {
+      defaultModel: 'google/gemini-3.1-flash-image',
+      customProviders: {
+        or: {
+          api: 'openrouter',
+          apiKey: 'or-test',
+          models: ['google/gemini-3.1-flash-image'],
+        },
+      },
+    };
+    const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
+    const fetchImpl: typeof fetch = (async (input, init) => {
+      const url = typeof input === 'string' ? input : (input as URL).toString();
+      calls.push({ url, body: JSON.parse(String(init?.body)) });
+      return fakeJsonResponse({ data: [{ b64_json: PNG_BYTES.toString('base64') }] });
+    }) as typeof fetch;
+
+    const refPath = join(cwd, 'ref.png');
+    writeFileSync(refPath, PNG_BYTES);
+    await generateImage({ prompt: 'make blue', image: [refPath] }, { cwd, settings, fetchImpl });
+
+    expect(calls[0]?.url).toBe('https://openrouter.ai/api/v1/images');
+    const refs = calls[0]?.body.input_references as Array<{
+      image_url: { url: string };
+    }>;
+    expect(refs).toHaveLength(1);
+    expect(refs[0]?.image_url.url.startsWith('data:image/png;base64,')).toBe(true);
   });
 });
