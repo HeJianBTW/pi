@@ -59,6 +59,34 @@ export const BUILT_IN_MODELS: BuiltInModelEntry[] = [
     provider: 'dashscope',
     remoteId: 'qwen-image-2.0',
   },
+
+  // ByteDance Seedream via Volcengine Ark. The `seedream` alias points at the
+  // latest stable Seedream release.
+  // Docs: https://www.volcengine.com/docs/82379/1824121
+  {
+    id: 'doubao-seedream-5-0-260128',
+    aliases: ['seedream-5', 'seedream'],
+    provider: 'ark',
+    remoteId: 'doubao-seedream-5-0-260128',
+  },
+  {
+    id: 'doubao-seedream-5-0-lite-260128',
+    aliases: ['seedream-5-lite'],
+    provider: 'ark',
+    remoteId: 'doubao-seedream-5-0-lite-260128',
+  },
+  {
+    id: 'doubao-seedream-4-5-251128',
+    aliases: ['seedream-4-5'],
+    provider: 'ark',
+    remoteId: 'doubao-seedream-4-5-251128',
+  },
+  {
+    id: 'doubao-seedream-4-0-250828',
+    aliases: ['seedream-4'],
+    provider: 'ark',
+    remoteId: 'doubao-seedream-4-0-250828',
+  },
 ];
 
 export const DEFAULT_BASE_URL: Record<BuiltInProviderId, string> = {
@@ -66,6 +94,7 @@ export const DEFAULT_BASE_URL: Record<BuiltInProviderId, string> = {
   gemini: 'https://generativelanguage.googleapis.com/v1beta',
   dashscope: 'https://dashscope.aliyuncs.com/api/v1',
   openrouter: 'https://openrouter.ai/api/v1',
+  ark: 'https://ark.cn-beijing.volces.com/api/v3',
 };
 
 export const DEFAULT_API_STYLE: Record<BuiltInProviderId, ApiStyle> = {
@@ -73,6 +102,7 @@ export const DEFAULT_API_STYLE: Record<BuiltInProviderId, ApiStyle> = {
   gemini: 'gemini',
   dashscope: 'dashscope',
   openrouter: 'openrouter',
+  ark: 'ark',
 };
 
 export const ENV_VARS: Record<BuiltInProviderId, string> = {
@@ -80,6 +110,7 @@ export const ENV_VARS: Record<BuiltInProviderId, string> = {
   gemini: 'GEMINI_API_KEY',
   dashscope: 'DASHSCOPE_API_KEY',
   openrouter: 'OPENROUTER_API_KEY',
+  ark: 'ARK_API_KEY',
 };
 
 export const PROVIDER_DISPLAY_NAME: Record<BuiltInProviderId, string> = {
@@ -87,4 +118,5 @@ export const PROVIDER_DISPLAY_NAME: Record<BuiltInProviderId, string> = {
   gemini: 'Google Gemini',
   dashscope: 'Alibaba DashScope',
   openrouter: 'OpenRouter',
+  ark: 'Volcengine Ark',
 };

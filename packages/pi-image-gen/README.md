@@ -9,6 +9,7 @@ Pi extension that adds an `image_generate` tool. Supported providers:
 | OpenAI                         | `gpt-image-2` (alias `gpt-image`)               | `OPENAI_API_KEY`      |
 | Google Gemini ("Nano Banana")  | `gemini-3-pro-image` (alias `nano-banana-pro`), `gemini-3.1-flash-image` (alias `nano-banana-2`), `gemini-2.5-flash-image` (alias `nano-banana`) | `GEMINI_API_KEY` |
 | Alibaba DashScope (Qwen-Image) | `qwen-image-2.0-pro` (alias `qwen-image-pro`), `qwen-image-2.0` (alias `qwen-image-2`, `qwen-image`) | `DASHSCOPE_API_KEY` |
+| Volcengine Ark (ByteDance Seedream) | `doubao-seedream-5-0-260128` (alias `seedream-5`, `seedream`), `doubao-seedream-5-0-lite-260128` (alias `seedream-5-lite`), `doubao-seedream-4-5-251128` (alias `seedream-4-5`), `doubao-seedream-4-0-250828` (alias `seedream-4`) | `ARK_API_KEY`         |
 | OpenRouter                     | any (use `openrouter/<vendor>/<id>`)          | `OPENROUTER_API_KEY`  |
 | Custom providers               | whatever you declare in settings              | (your choice, via `$VAR`) |
 
@@ -18,6 +19,7 @@ Upstream API docs (handy when debugging gateway behavior or adding new models):
 - Google Gemini image generation — [ai.google.dev/gemini-api/docs/image-generation](https://ai.google.dev/gemini-api/docs/image-generation)
 - Alibaba DashScope Qwen-Image (text-to-image) — [help.aliyun.com/zh/model-studio/text-to-image](https://help.aliyun.com/zh/model-studio/text-to-image)
 - Alibaba DashScope Qwen-Image-Edit — [help.aliyun.com/zh/model-studio/qwen-image-edit-guide](https://help.aliyun.com/zh/model-studio/qwen-image-edit-guide)
+- Volcengine Ark Seedream — [volcengine.com/docs/82379/1824121](https://www.volcengine.com/docs/82379/1824121)
 - OpenRouter image API — [openrouter.ai/docs/api/api-reference/images/create-images](https://openrouter.ai/docs/api/api-reference/images/create-images)
 
 The env-var names match [pi.dev's provider table](https://pi.dev/docs/latest/providers) — if the agent already has a key set for a provider, this extension will reuse it. You don't need to introduce a new variable.
@@ -70,6 +72,7 @@ That's it. From the agent: `image_generate({ prompt: "a cyberpunk cat" })`.
       "openai":     { "baseUrl": "https://my-proxy.example.com/v1", "apiKey": "${MY_OPENAI_KEY}" },
       "gemini":     { "headers": { "x-goog-trace": "pi-prod" } },
       "dashscope":  { "baseUrl": "https://dashscope-intl.aliyuncs.com/api/v1" },
+      "ark":        { "apiKey": "$ARK_API_KEY" },
       "openrouter": { "apiKey": "$OPENROUTER_API_KEY" }
     },
 
@@ -143,7 +146,32 @@ For the international DashScope endpoint, override the base URL:
 }
 ```
 
-### 4. OpenRouter (one key, many models)
+### 4. Volcengine Ark (ByteDance Seedream)
+
+```sh
+export ARK_API_KEY=...
+```
+
+```json
+{ "pi-image-gen": { "defaultModel": "seedream" } }
+```
+
+> Supported `size` values are model-dependent. Seedream 5.0 / 5.0 lite / 4.5 require 2K or larger (e.g. `2048x2048`, `1728x2304`, `2848x1600`) — `1024x1024` will fail with `InvalidParameter`. Seedream 4.0 is the only one that accepts 1K sizes. Full sizing matrix in the [official docs](https://www.volcengine.com/docs/82379/1824121). Other built-in providers default to `1024x1024`, so this is the one knob to remember when switching to Seedream ≥ 4.5.
+
+The default base URL is `https://ark.cn-beijing.volces.com/api/v3`. To use a different region (e.g. `ap-southeast`), override it:
+
+```json
+{
+  "pi-image-gen": {
+    "defaultModel": "seedream",
+    "providers": {
+      "ark": { "baseUrl": "https://ark.ap-southeast.bytepluses.com/api/v3" }
+    }
+  }
+}
+```
+
+### 5. OpenRouter (one key, many models)
 
 ```sh
 export OPENROUTER_API_KEY=...
@@ -165,14 +193,14 @@ Each custom provider declares:
 
 | Field      | Required | Notes                                                                                |
 | ---------- | -------- | ------------------------------------------------------------------------------------ |
-| `api` | yes      | One of `openai`, `gemini`, `dashscope`, `openrouter`. Picks the image-API wire shape. |
+| `api` | yes      | One of `openai`, `gemini`, `dashscope`, `openrouter`, `ark`. Picks the image-API wire shape. |
 | `baseUrl`  | yes      | API endpoint URL. `$VAR` syntax supported.                                           |
 | `apiKey`   | usually  | API key string. `$VAR` syntax supported.                                             |
 | `name`     | no       | Display name shown in `/image-gen list`.                                             |
 | `headers`  | no       | Extra headers merged into every request.                                             |
 | `models`   | no       | Optional model id/alias list. Omit to make this a **catch-all** — the provider will accept any unknown model id (passed through as the remote id). Provide a list only when you want aliases or want to route specific ids elsewhere. Each entry is a string or `{ id, alias?, name? }`. |
 
-> Note: pi.dev custom providers also have an `api` field, but its values (`openai-completions`, `anthropic-messages`, …) are LLM streaming formats that don't apply to image generation. The values here (`openai`, `gemini`, `dashscope`, `openrouter`) are image-API wire shapes — same field name, different namespace.
+> Note: pi.dev custom providers also have an `api` field, but its values (`openai-completions`, `anthropic-messages`, …) are LLM streaming formats that don't apply to image generation. The values here (`openai`, `gemini`, `dashscope`, `openrouter`, `ark`) are image-API wire shapes — same field name, different namespace.
 
 ### Example: self-hosted Stable Diffusion (OpenAI-compatible)
 

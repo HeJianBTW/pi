@@ -197,7 +197,7 @@ export type ConfiguredProvider = ResolvedProvider & {
 
 export function listConfiguredProviders(settings: ImageGenSettings): ConfiguredProvider[] {
   const out: ConfiguredProvider[] = [];
-  for (const id of ['openai', 'gemini', 'dashscope', 'openrouter'] as BuiltInProviderId[]) {
+  for (const id of ['openai', 'gemini', 'dashscope', 'openrouter', 'ark'] as BuiltInProviderId[]) {
     const provider = buildBuiltInProvider(id, settings);
     if (provider?.apiKey) out.push({ ...provider, catchAll: false, modelCount: 0 });
   }
@@ -213,6 +213,10 @@ export function listConfiguredProviders(settings: ImageGenSettings): ConfiguredP
 
 function isBuiltInProviderId(value: string): value is BuiltInProviderId {
   return (
-    value === 'openai' || value === 'gemini' || value === 'dashscope' || value === 'openrouter'
+    value === 'openai' ||
+    value === 'gemini' ||
+    value === 'dashscope' ||
+    value === 'openrouter' ||
+    value === 'ark'
   );
 }
