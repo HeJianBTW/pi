@@ -6,9 +6,9 @@ Pi extension that adds an `image_generate` tool. Supported providers:
 
 | Provider                       | Model id (alias)                              | Env var               |
 | ------------------------------ | --------------------------------------------- | --------------------- |
-| OpenAI                         | `gpt-image-2` (alias `gpt-image`)               | `OPENAI_API_KEY`      |
-| Google Gemini ("Nano Banana")  | `gemini-3-pro-image` (alias `nano-banana-pro`), `gemini-3.1-flash-image` (alias `nano-banana-2`), `gemini-2.5-flash-image` (alias `nano-banana`) | `GEMINI_API_KEY` |
-| Alibaba DashScope (Qwen-Image) | `qwen-image-2.0-pro` (alias `qwen-image-pro`), `qwen-image-2.0` (alias `qwen-image-2`, `qwen-image`) | `DASHSCOPE_API_KEY` |
+| OpenAI                         | `gpt-image-2`                                 | `OPENAI_API_KEY`      |
+| Google Gemini ("Nano Banana")  | `gemini-3-pro-image` (alias `nano-banana-pro`), `gemini-3.1-flash-image` (alias `nano-banana-2`), `gemini-3.1-flash-lite-image` (alias `nano-banana-2-lite`), `gemini-2.5-flash-image` (alias `nano-banana`) | `GEMINI_API_KEY` |
+| Alibaba DashScope (Qwen-Image) | `qwen-image-2.0-pro`, `qwen-image-2.0`          | `DASHSCOPE_API_KEY`   |
 | Volcengine Ark (ByteDance Seedream) | `doubao-seedream-5-0-260128` (alias `seedream-5`, `seedream`), `doubao-seedream-5-0-lite-260128` (alias `seedream-5-lite`), `doubao-seedream-4-5-251128` (alias `seedream-4-5`), `doubao-seedream-4-0-250828` (alias `seedream-4`) | `ARK_API_KEY`         |
 | OpenRouter                     | any (use `openrouter/<vendor>/<id>`)          | `OPENROUTER_API_KEY`  |
 | Custom providers               | whatever you declare in settings              | (your choice, via `$VAR`) |
@@ -130,7 +130,7 @@ export DASHSCOPE_API_KEY=...
 ```
 
 ```json
-{ "pi-image-gen": { "defaultModel": "qwen-image-2" } }
+{ "pi-image-gen": { "defaultModel": "qwen-image-2.0" } }
 ```
 
 For the international DashScope endpoint, override the base URL:
@@ -138,7 +138,7 @@ For the international DashScope endpoint, override the base URL:
 ```json
 {
   "pi-image-gen": {
-    "defaultModel": "qwen-image-2",
+    "defaultModel": "qwen-image-2.0",
     "providers": {
       "dashscope": { "baseUrl": "https://dashscope-intl.aliyuncs.com/api/v1" }
     }
@@ -335,7 +335,7 @@ Provider behavior:
 | Provider | Image input route |
 |---|---|
 | OpenAI (`gpt-image-2`) | `POST /v1/images/edits` (multipart). Supports multi-image. |
-| Gemini (`gemini-3-pro-image`, `gemini-3.1-flash-image`, `gemini-2.5-flash-image`) | `inline_data` parts prepended to the user message. Supports multi-image. |
+| Gemini (`gemini-3-pro-image`, `gemini-3.1-flash-image`, `gemini-3.1-flash-lite-image`, `gemini-2.5-flash-image`) | `inline_data` parts prepended to the user message. Supports multi-image. |
 | DashScope (`qwen-image-2.0`, `qwen-image-2.0-pro`) | `image` parts in `messages[].content`. |
 | OpenRouter | `POST /api/v1/images` with `input_references` JSON. Supports multi-image. |
 
