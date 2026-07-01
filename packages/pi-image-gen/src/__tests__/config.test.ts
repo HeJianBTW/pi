@@ -13,18 +13,18 @@ describe('resolveModel', () => {
     expect(result.provider.apiKey).toBe('gem-test');
   });
 
-  it('routes gpt-image alias to openai gpt-image-2', () => {
+  it('routes gpt-image-2 to openai', () => {
     process.env.OPENAI_API_KEY = 'oa-test';
-    const result = resolveModel('gpt-image', {});
+    const result = resolveModel('gpt-image-2', {});
     if ('error' in result) throw new Error(result.error);
     expect(result.provider.id).toBe('openai');
     expect(result.remoteId).toBe('gpt-image-2');
-    expect(result.requestedId).toBe('gpt-image');
+    expect(result.requestedId).toBe('gpt-image-2');
   });
 
-  it('routes qwen-image-2 alias to dashscope', () => {
+  it('routes qwen-image-2.0 to dashscope', () => {
     process.env.DASHSCOPE_API_KEY = 'ds-test';
-    const result = resolveModel('qwen-image-2', {});
+    const result = resolveModel('qwen-image-2.0', {});
     if ('error' in result) throw new Error(result.error);
     expect(result.provider.id).toBe('dashscope');
     expect(result.remoteId).toBe('qwen-image-2.0');

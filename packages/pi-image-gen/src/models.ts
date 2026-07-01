@@ -16,16 +16,16 @@ export const BUILT_IN_MODELS: BuiltInModelEntry[] = [
   // OpenAI image generation.
   {
     id: 'gpt-image-2',
-    aliases: ['gpt-image'],
     provider: 'openai',
     remoteId: 'gpt-image-2',
   },
 
   // Google Gemini "Nano Banana" image generation.
   // Per https://ai.google.dev/gemini-api/docs/image-generation:
-  //   Nano Banana Pro → gemini-3-pro-image
-  //   Nano Banana 2   → gemini-3.1-flash-image
-  //   Nano Banana     → gemini-2.5-flash-image
+  //   Nano Banana Pro      → gemini-3-pro-image
+  //   Nano Banana 2        → gemini-3.1-flash-image
+  //   Nano Banana 2 Lite   → gemini-3.1-flash-lite-image
+  //   Nano Banana          → gemini-2.5-flash-image
   {
     id: 'gemini-3-pro-image',
     aliases: ['nano-banana-pro'],
@@ -39,23 +39,26 @@ export const BUILT_IN_MODELS: BuiltInModelEntry[] = [
     remoteId: 'gemini-3.1-flash-image',
   },
   {
+    id: 'gemini-3.1-flash-lite-image',
+    aliases: ['nano-banana-2-lite'],
+    provider: 'gemini',
+    remoteId: 'gemini-3.1-flash-lite-image',
+  },
+  {
     id: 'gemini-2.5-flash-image',
     aliases: ['nano-banana'],
     provider: 'gemini',
     remoteId: 'gemini-2.5-flash-image',
   },
 
-  // Alibaba Qwen-Image / WanX series via DashScope. The `qwen-image-2` and
-  // `qwen-image` aliases point at the most recent stable Qwen image release.
+  // Alibaba Qwen-Image / WanX series via DashScope.
   {
     id: 'qwen-image-2.0-pro',
-    aliases: ['qwen-image-pro'],
     provider: 'dashscope',
     remoteId: 'qwen-image-2.0-pro',
   },
   {
     id: 'qwen-image-2.0',
-    aliases: ['qwen-image-2', 'qwen-image'],
     provider: 'dashscope',
     remoteId: 'qwen-image-2.0',
   },
