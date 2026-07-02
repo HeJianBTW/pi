@@ -549,16 +549,46 @@ function applyAmasterRuntimeAuth(config: AmasterAdapterConfig, event: unknown): 
     const paperclipCompanyId = process.env.PAPERCLIP_COMPANY_ID?.trim();
     if (paperclipCompanyId) config.companyId = paperclipCompanyId;
     delete config.apiKey;
+    config.authMode = 'agent_run';
+    config.authEnv = {
+      PAPERCLIP_API_KEY: paperclipApiKey,
+      AMASTER_BOARD_API_KEY: '',
+      ...optionalEnvValue('PAPERCLIP_RUN_ID', process.env.PAPERCLIP_RUN_ID),
+      ...optionalEnvValue('PAPERCLIP_API_URL', process.env.PAPERCLIP_API_URL),
+      ...optionalEnvValue('PAPERCLIP_COMPANY_ID', process.env.PAPERCLIP_COMPANY_ID),
+    };
     return;
   }
 
   const sessionAuth = amasterAuthFromSessionStart(event);
-  const apiKey = sessionAuth.apiKey ?? process.env.AMASTER_BOARD_API_KEY?.trim();
-  if (apiKey) config.apiKey = apiKey;
+  const apiKey =
+    sessionAuth.apiKey ?? process.env.AMASTER_BOARD_API_KEY?.trim() ?? config.apiKey?.trim();
+  if (apiKey) {
+    config.apiKey = apiKey;
+    config.authMode = 'board';
+    config.authEnv = {
+      AMASTER_BOARD_API_KEY: apiKey,
+      PAPERCLIP_API_KEY: '',
+      PAPERCLIP_RUN_ID: '',
+      PAPERCLIP_API_URL: '',
+      PAPERCLIP_COMPANY_ID: '',
+    };
+  } else {
+    config.authMode = 'none';
+    delete config.authEnv;
+  }
   const apiBase = sessionAuth.apiBase ?? process.env.AMASTER_EMPLOYEE_API_BASE?.trim();
   if (apiBase) config.apiBase = apiBase;
   const companyId = sessionAuth.companyId ?? process.env.AMASTER_EMPLOYEE_COMPANY_ID?.trim();
   if (companyId) config.companyId = companyId;
+}
+
+function optionalEnvValue<K extends string>(
+  key: K,
+  value: string | undefined,
+): Partial<Record<K, string>> {
+  const trimmed = value?.trim();
+  return trimmed ? ({ [key]: trimmed } as Record<K, string>) : {};
 }
 
 function amasterAuthFromSessionStart(event: unknown): {

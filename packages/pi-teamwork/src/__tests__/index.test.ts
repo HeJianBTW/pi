@@ -112,6 +112,43 @@ describe('AmasterAdapter', () => {
     await expect(issuePromise).resolves.toMatchObject({ id: 'ISS-1' });
   });
 
+  it('uses configured AMaster auth env instead of reading process env in the adapter', async () => {
+    const previousPaperclipApiKey = process.env.PAPERCLIP_API_KEY;
+    process.env.PAPERCLIP_API_KEY = 'agent-run-jwt';
+    try {
+      const calls: Array<{
+        env: Record<string, string> | undefined;
+      }> = [];
+      const adapter = new AmasterAdapter(
+        {
+          apiKey: 'session-key',
+          authMode: 'board',
+          authEnv: { AMASTER_BOARD_API_KEY: 'session-key', PAPERCLIP_API_KEY: '' },
+          companyId: 'company-1',
+        },
+        async (_cmd, _args, options) => {
+          calls.push({ env: options?.env });
+          return {
+            stdout: JSON.stringify({ issue: { id: 'ISS-1', title: 'Issue', status: 'todo' } }),
+            stderr: '',
+            code: 0,
+          };
+        },
+      );
+
+      await expect(adapter.getIssue('ISS-1')).resolves.toMatchObject({ id: 'ISS-1' });
+
+      expect(calls).toEqual([
+        {
+          env: { AMASTER_BOARD_API_KEY: 'session-key', PAPERCLIP_API_KEY: '' },
+        },
+      ]);
+    } finally {
+      if (previousPaperclipApiKey === undefined) delete process.env.PAPERCLIP_API_KEY;
+      else process.env.PAPERCLIP_API_KEY = previousPaperclipApiKey;
+    }
+  });
+
   it('passes workspace IDs through to AMaster company-aware CLI commands', async () => {
     const calls: string[][] = [];
     const exec: ExecFn = async (_cmd, args) => {
@@ -880,7 +917,8 @@ describe('piTeamworkExtension AMaster provider', () => {
         keyIsConfigured: false,
       }),
     ]);
-    expect(calls.some((call) => call.keyIsConfigured)).toBe(false);
+    expect(JSON.stringify(calls)).not.toContain('session-key');
+    expect(JSON.stringify(calls)).not.toContain('configured-key');
 
     if (previousSettings === undefined) delete process.env.PI_SETTINGS_DIR;
     else process.env.PI_SETTINGS_DIR = previousSettings;
@@ -985,6 +1023,100 @@ describe('piTeamworkExtension AMaster provider', () => {
         }),
       ]);
       expect(JSON.stringify(calls)).not.toContain('agent-run-jwt');
+      expect(JSON.stringify(calls)).not.toContain('session-key');
+      expect(JSON.stringify(calls)).not.toContain('configured-key');
+    } finally {
+      if (previousSettings === undefined) delete process.env.PI_SETTINGS_DIR;
+      else process.env.PI_SETTINGS_DIR = previousSettings;
+      if (previousPaperclipApiKey === undefined) delete process.env.PAPERCLIP_API_KEY;
+      else process.env.PAPERCLIP_API_KEY = previousPaperclipApiKey;
+      if (previousPaperclipApiUrl === undefined) delete process.env.PAPERCLIP_API_URL;
+      else process.env.PAPERCLIP_API_URL = previousPaperclipApiUrl;
+      if (previousPaperclipCompanyId === undefined) delete process.env.PAPERCLIP_COMPANY_ID;
+      else process.env.PAPERCLIP_COMPANY_ID = previousPaperclipCompanyId;
+      if (previousPaperclipRunId === undefined) delete process.env.PAPERCLIP_RUN_ID;
+      else process.env.PAPERCLIP_RUN_ID = previousPaperclipRunId;
+      await import('node:fs/promises').then(({ rm }) =>
+        rm(settingsDir, { recursive: true, force: true }),
+      );
+    }
+  });
+
+  it('does not re-read PAPERCLIP auth env after AMaster provider initialization', async () => {
+    const previousSettings = process.env.PI_SETTINGS_DIR;
+    const previousPaperclipApiKey = process.env.PAPERCLIP_API_KEY;
+    const previousPaperclipApiUrl = process.env.PAPERCLIP_API_URL;
+    const previousPaperclipCompanyId = process.env.PAPERCLIP_COMPANY_ID;
+    const previousPaperclipRunId = process.env.PAPERCLIP_RUN_ID;
+    const settingsDir = await createSettingsDir({
+      'pi-teamwork': {
+        provider: 'amaster',
+        amaster: {
+          apiBase: 'http://configured-amaster.test',
+          apiKey: 'configured-key',
+          companyId: 'configured-company',
+        },
+      },
+    });
+    process.env.PI_SETTINGS_DIR = settingsDir;
+    delete process.env.PAPERCLIP_API_KEY;
+    delete process.env.PAPERCLIP_API_URL;
+    delete process.env.PAPERCLIP_COMPANY_ID;
+    delete process.env.PAPERCLIP_RUN_ID;
+    try {
+      const tools = new Map<string, RegisteredTool>();
+      const pi = {
+        on: vi.fn(),
+        registerCommand: vi.fn(),
+        registerTool: vi.fn((tool: RegisteredTool) => tools.set(tool.name, tool)),
+        exec: vi.fn(async () => ({ stdout: '[]', stderr: '', code: 0 })),
+      };
+      piTeamworkExtension(pi as never);
+      const sessionStartHandler = pi.on.mock.calls.find((call) => call[0] === 'session_start')?.[1];
+
+      await sessionStartHandler(
+        { amasterEmployee: { apiKey: 'session-key' } },
+        {
+          cwd: settingsDir,
+          ui: {
+            setStatus: vi.fn(),
+            notify: vi.fn(),
+          },
+        },
+      );
+
+      process.env.PAPERCLIP_API_KEY = 'agent-run-jwt';
+      process.env.PAPERCLIP_API_URL = 'http://agent-run-amaster.test';
+      process.env.PAPERCLIP_COMPANY_ID = 'agent-run-company';
+      process.env.PAPERCLIP_RUN_ID = 'run-123';
+
+      const { calls } = await withFakeAmasterCli(async () => {
+        await tools
+          .get('user_directory_list')!
+          .execute('tool-1' as never, { workspaceId: 'company-2' } as never);
+      });
+
+      expect(calls).toEqual([
+        expect.objectContaining({
+          command: 'amaster-employee',
+          args: [
+            'user-directory',
+            'list',
+            '--api-base',
+            'http://configured-amaster.test',
+            '-C',
+            'company-2',
+            '--json',
+          ],
+          hasApiKey: true,
+          keyIsSession: true,
+          keyIsConfigured: false,
+          hasPaperclipApiKey: false,
+          boardKeyIsEmpty: false,
+        }),
+      ]);
+      expect(JSON.stringify(calls)).not.toContain('agent-run-jwt');
+      expect(JSON.stringify(calls)).not.toContain('session-key');
       expect(JSON.stringify(calls)).not.toContain('configured-key');
     } finally {
       if (previousSettings === undefined) delete process.env.PI_SETTINGS_DIR;

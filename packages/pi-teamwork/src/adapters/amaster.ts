@@ -14,6 +14,7 @@ import type {
 } from '../types.js';
 
 type ExecResult = Awaited<ReturnType<ExecFn>>;
+type AuthMode = NonNullable<AmasterAdapterConfig['authMode']>;
 
 export async function initAmasterProvider(
   config: AmasterAdapterConfig,
@@ -27,6 +28,8 @@ export class AmasterAdapter implements TeamworkProvider {
   private readonly binary = 'amaster-employee';
   private readonly runtimeBinary = 'amaster-runtime';
   private readonly apiKey?: string;
+  private readonly authMode: AuthMode;
+  private readonly authEnv: Record<string, string> | undefined;
   private readonly commonArgs: string[];
   private readonly defaultCompanyId?: string;
   private discoveredCompanyId: string | undefined;
@@ -38,6 +41,8 @@ export class AmasterAdapter implements TeamworkProvider {
   ) {
     const apiKey = config.apiKey?.trim();
     if (apiKey) this.apiKey = apiKey;
+    this.authMode = config.authMode ?? (this.apiKey ? 'board' : 'none');
+    this.authEnv = normalizeAuthEnv(config.authEnv);
     this.commonArgs = [];
     if (config.apiBase?.trim()) this.commonArgs.push('--api-base', config.apiBase.trim());
     if (config.context?.trim()) this.commonArgs.push('--context', config.context.trim());
@@ -207,11 +212,7 @@ export class AmasterAdapter implements TeamworkProvider {
       ok: teamwork.code === 0,
       runtimeOk: runtime.code === 0,
       authenticated: teamwork.code === 0,
-      authMode: execOptions?.env?.AMASTER_BOARD_API_KEY
-        ? 'board'
-        : execOptions?.env?.PAPERCLIP_API_KEY
-          ? 'agent_run'
-          : 'none',
+      authMode: this.authMode,
       localRuntimeAttached: runtime.code === 0 && /running|ready|attached/i.test(runtime.stdout),
       ...(teamwork.code !== 0 ? { error: classifyAmasterFailure('employee', teamwork) } : {}),
       ...(runtime.code !== 0 ? { runtimeError: classifyAmasterFailure('runtime', runtime) } : {}),
@@ -288,24 +289,7 @@ export class AmasterAdapter implements TeamworkProvider {
   }
 
   private amasterExecOptions(): ExecOptions | undefined {
-    const paperclipApiKey = process.env.PAPERCLIP_API_KEY?.trim();
-    if (paperclipApiKey) {
-      return {
-        env: {
-          PAPERCLIP_API_KEY: paperclipApiKey,
-          AMASTER_BOARD_API_KEY: '',
-          ...(process.env.PAPERCLIP_RUN_ID?.trim()
-            ? { PAPERCLIP_RUN_ID: process.env.PAPERCLIP_RUN_ID.trim() }
-            : {}),
-          ...(process.env.PAPERCLIP_API_URL?.trim()
-            ? { PAPERCLIP_API_URL: process.env.PAPERCLIP_API_URL.trim() }
-            : {}),
-          ...(process.env.PAPERCLIP_COMPANY_ID?.trim()
-            ? { PAPERCLIP_COMPANY_ID: process.env.PAPERCLIP_COMPANY_ID.trim() }
-            : {}),
-        },
-      };
-    }
+    if (this.authEnv && Object.keys(this.authEnv).length > 0) return { env: this.authEnv };
     if (this.apiKey) return { env: { AMASTER_BOARD_API_KEY: this.apiKey } };
     return undefined;
   }
@@ -321,6 +305,22 @@ export class AmasterAdapter implements TeamworkProvider {
     this.discoveredCompanyId = undefined;
     this.workspaceDiscoveryPromise = undefined;
   }
+}
+
+function normalizeAuthEnv(
+  env: Record<string, string> | undefined,
+): Record<string, string> | undefined {
+  if (!env) return undefined;
+  const normalized: Record<string, string> = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (value === '') {
+      normalized[key] = value;
+      continue;
+    }
+    const trimmed = value.trim();
+    if (trimmed) normalized[key] = trimmed;
+  }
+  return Object.keys(normalized).length > 0 ? normalized : undefined;
 }
 
 function parseJson(text: string): unknown {

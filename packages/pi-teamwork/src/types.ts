@@ -104,6 +104,8 @@ export type ExecFn = (
   options?: ExecOptions,
 ) => Promise<{ stdout: string; stderr: string; code: number }>;
 
+export type AmasterAuthMode = 'agent_run' | 'board' | 'none';
+
 export type MulticaAdapterConfig = {
   binary?: string;
   workspace?: string;
@@ -120,6 +122,8 @@ export type AmasterAdapterConfig = {
   authStore?: string;
   companyId?: string;
   apiKey?: string;
+  authMode?: AmasterAuthMode;
+  authEnv?: Record<string, string>;
 };
 
 export type TeamworkConfig = {
