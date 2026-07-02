@@ -83,7 +83,10 @@ export default function piTeamworkExtension(pi: ExtensionAPI): void {
       return;
     }
 
-    const exec: ExecFn = async (command, args) => {
+    const exec: ExecFn = async (command, args, options) => {
+      if (options?.env && Object.keys(options.env).length > 0) {
+        return execWithEnv(command, args, options.env, ctx.cwd);
+      }
       const result = await pi.exec(command, args, { cwd: ctx.cwd });
       return { stdout: result.stdout, stderr: result.stderr, code: result.code };
     };
@@ -91,29 +94,8 @@ export default function piTeamworkExtension(pi: ExtensionAPI): void {
     const providerName = config.provider ?? 'multica';
     if (providerName === 'amaster') {
       const amasterConfig: AmasterAdapterConfig = { ...(config.amaster ?? {}) };
-      const eventRecord =
-        _event && typeof _event === 'object' && !Array.isArray(_event)
-          ? (_event as unknown as { amasterEmployee?: unknown })
-          : undefined;
-      const amasterEmployee = eventRecord?.amasterEmployee;
-      const sessionApiKey =
-        amasterEmployee && typeof amasterEmployee === 'object' && !Array.isArray(amasterEmployee)
-          ? (amasterEmployee as Record<string, unknown>).apiKey
-          : undefined;
-      const apiKey =
-        typeof sessionApiKey === 'string' && sessionApiKey.trim()
-          ? sessionApiKey.trim()
-          : typeof amasterConfig.apiKey === 'string' && amasterConfig.apiKey.trim()
-            ? amasterConfig.apiKey.trim()
-            : undefined;
-      delete amasterConfig.apiKey;
-      const amasterExec: ExecFn = apiKey
-        ? (command, args) =>
-            command === 'amaster-employee'
-              ? execWithEnv(command, args, { AMASTER_BOARD_API_KEY: apiKey }, ctx.cwd)
-              : exec(command, args)
-        : exec;
-      const adapter = await initAmasterProvider(amasterConfig, amasterExec);
+      applyAmasterRuntimeAuth(amasterConfig, _event);
+      const adapter = await initAmasterProvider(amasterConfig, exec);
       if (generation !== sessionGeneration) return;
       provider = adapter;
       registerProviderTools(adapter);
@@ -557,6 +539,50 @@ function execWithEnv(
       finish({ stdout, stderr, code: code ?? 0 });
     });
   });
+}
+
+function applyAmasterRuntimeAuth(config: AmasterAdapterConfig, event: unknown): void {
+  const paperclipApiKey = process.env.PAPERCLIP_API_KEY?.trim();
+  if (paperclipApiKey) {
+    const paperclipApiBase = process.env.PAPERCLIP_API_URL?.trim();
+    if (paperclipApiBase) config.apiBase = paperclipApiBase;
+    const paperclipCompanyId = process.env.PAPERCLIP_COMPANY_ID?.trim();
+    if (paperclipCompanyId) config.companyId = paperclipCompanyId;
+    delete config.apiKey;
+    return;
+  }
+
+  const sessionAuth = amasterAuthFromSessionStart(event);
+  const apiKey = sessionAuth.apiKey ?? process.env.AMASTER_BOARD_API_KEY?.trim();
+  if (apiKey) config.apiKey = apiKey;
+  const apiBase = sessionAuth.apiBase ?? process.env.AMASTER_EMPLOYEE_API_BASE?.trim();
+  if (apiBase) config.apiBase = apiBase;
+  const companyId = sessionAuth.companyId ?? process.env.AMASTER_EMPLOYEE_COMPANY_ID?.trim();
+  if (companyId) config.companyId = companyId;
+}
+
+function amasterAuthFromSessionStart(event: unknown): {
+  apiKey?: string;
+  apiBase?: string;
+  companyId?: string;
+} {
+  if (!event || typeof event !== 'object' || Array.isArray(event)) return {};
+  const amasterEmployee = (event as Record<string, unknown>).amasterEmployee;
+  if (!amasterEmployee || typeof amasterEmployee !== 'object' || Array.isArray(amasterEmployee)) {
+    return {};
+  }
+  const record = amasterEmployee as Record<string, unknown>;
+  return {
+    ...optionalTrimmed('apiKey', record.apiKey),
+    ...optionalTrimmed('apiBase', record.apiBase),
+    ...optionalTrimmed('companyId', record.companyId),
+  };
+}
+
+function optionalTrimmed<K extends string>(key: K, value: unknown): Partial<Record<K, string>> {
+  if (typeof value !== 'string') return {};
+  const trimmed = value.trim();
+  return trimmed ? ({ [key]: trimmed } as Record<K, string>) : {};
 }
 
 function loadConfig(cwd: string): TeamworkConfig {

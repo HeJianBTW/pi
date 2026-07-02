@@ -2,6 +2,7 @@ import type {
   AmasterAdapterConfig,
   Comment,
   ExecFn,
+  ExecOptions,
   Issue,
   IssueCreateInput,
   IssueListFilter,
@@ -25,6 +26,7 @@ export class AmasterAdapter implements TeamworkProvider {
   readonly name = 'amaster';
   private readonly binary = 'amaster-employee';
   private readonly runtimeBinary = 'amaster-runtime';
+  private readonly apiKey?: string;
   private readonly commonArgs: string[];
   private readonly defaultCompanyId?: string;
   private discoveredCompanyId: string | undefined;
@@ -34,6 +36,8 @@ export class AmasterAdapter implements TeamworkProvider {
     config: AmasterAdapterConfig,
     private readonly exec: ExecFn,
   ) {
+    const apiKey = config.apiKey?.trim();
+    if (apiKey) this.apiKey = apiKey;
     this.commonArgs = [];
     if (config.apiBase?.trim()) this.commonArgs.push('--api-base', config.apiBase.trim());
     if (config.context?.trim()) this.commonArgs.push('--context', config.context.trim());
@@ -191,8 +195,9 @@ export class AmasterAdapter implements TeamworkProvider {
   }
 
   async status(): Promise<Record<string, unknown>> {
+    const execOptions = this.amasterExecOptions();
     const [teamwork, runtime] = await Promise.all([
-      this.runOptional(this.binary, withJson(this.buildArgsSync(['status']))),
+      this.runOptional(this.binary, withJson(this.buildArgsSync(['status'])), execOptions),
       this.runOptional(this.runtimeBinary, ['daemon', 'status']),
     ]);
     return {
@@ -202,6 +207,11 @@ export class AmasterAdapter implements TeamworkProvider {
       ok: teamwork.code === 0,
       runtimeOk: runtime.code === 0,
       authenticated: teamwork.code === 0,
+      authMode: execOptions?.env?.AMASTER_BOARD_API_KEY
+        ? 'board'
+        : execOptions?.env?.PAPERCLIP_API_KEY
+          ? 'agent_run'
+          : 'none',
       localRuntimeAttached: runtime.code === 0 && /running|ready|attached/i.test(runtime.stdout),
       ...(teamwork.code !== 0 ? { error: classifyAmasterFailure('employee', teamwork) } : {}),
       ...(runtime.code !== 0 ? { runtimeError: classifyAmasterFailure('runtime', runtime) } : {}),
@@ -209,16 +219,20 @@ export class AmasterAdapter implements TeamworkProvider {
   }
 
   private async runAmaster(args: string[]): Promise<string> {
-    const result = await this.exec(this.binary, args);
+    const result = await this.exec(this.binary, args, this.amasterExecOptions());
     if (result.code !== 0) {
       throw new Error(`amaster ${args[0]} failed: ${classifyAmasterFailure('employee', result)}`);
     }
     return result.stdout;
   }
 
-  private async runOptional(command: string, args: string[]): Promise<ExecResult> {
+  private async runOptional(
+    command: string,
+    args: string[],
+    options?: ExecOptions,
+  ): Promise<ExecResult> {
     try {
-      return await this.exec(command, args);
+      return await this.exec(command, args, options);
     } catch (error) {
       return {
         stdout: '',
@@ -271,6 +285,29 @@ export class AmasterAdapter implements TeamworkProvider {
     throw new Error(
       'Multiple AMaster workspaces are available; pass workspaceId from workspace_list.',
     );
+  }
+
+  private amasterExecOptions(): ExecOptions | undefined {
+    const paperclipApiKey = process.env.PAPERCLIP_API_KEY?.trim();
+    if (paperclipApiKey) {
+      return {
+        env: {
+          PAPERCLIP_API_KEY: paperclipApiKey,
+          AMASTER_BOARD_API_KEY: '',
+          ...(process.env.PAPERCLIP_RUN_ID?.trim()
+            ? { PAPERCLIP_RUN_ID: process.env.PAPERCLIP_RUN_ID.trim() }
+            : {}),
+          ...(process.env.PAPERCLIP_API_URL?.trim()
+            ? { PAPERCLIP_API_URL: process.env.PAPERCLIP_API_URL.trim() }
+            : {}),
+          ...(process.env.PAPERCLIP_COMPANY_ID?.trim()
+            ? { PAPERCLIP_COMPANY_ID: process.env.PAPERCLIP_COMPANY_ID.trim() }
+            : {}),
+        },
+      };
+    }
+    if (this.apiKey) return { env: { AMASTER_BOARD_API_KEY: this.apiKey } };
+    return undefined;
   }
 
   private primeDefaultCompanyCache(workspaces: Workspace[]): void {

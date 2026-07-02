@@ -626,6 +626,11 @@ describe('piTeamworkExtension AMaster provider', () => {
       hasApiKey: boolean;
       keyIsSession: boolean;
       keyIsConfigured: boolean;
+      hasPaperclipApiKey: boolean;
+      paperclipKeyIsAgentRun: boolean;
+      boardKeyIsEmpty: boolean;
+      paperclipApiBase: string | undefined;
+      paperclipCompanyId: string | undefined;
     }>;
   }> {
     const { chmod, mkdtemp, readFile, rm, writeFile } = await import('node:fs/promises');
@@ -645,6 +650,11 @@ describe('piTeamworkExtension AMaster provider', () => {
       '  hasApiKey: Boolean(process.env.AMASTER_BOARD_API_KEY),',
       "  keyIsSession: process.env.AMASTER_BOARD_API_KEY === 'session-key',",
       "  keyIsConfigured: process.env.AMASTER_BOARD_API_KEY === 'configured-key',",
+      '  hasPaperclipApiKey: Boolean(process.env.PAPERCLIP_API_KEY),',
+      "  paperclipKeyIsAgentRun: process.env.PAPERCLIP_API_KEY === 'agent-run-jwt',",
+      "  boardKeyIsEmpty: process.env.AMASTER_BOARD_API_KEY === '',",
+      '  paperclipApiBase: process.env.PAPERCLIP_API_URL,',
+      '  paperclipCompanyId: process.env.PAPERCLIP_COMPANY_ID,',
       "}) + '\\n');",
       "if (command === 'amaster-runtime') console.log('running');",
       "else if (args[0] === 'status') console.log(JSON.stringify({ ok: true }));",
@@ -674,6 +684,11 @@ describe('piTeamworkExtension AMaster provider', () => {
               hasApiKey: boolean;
               keyIsSession: boolean;
               keyIsConfigured: boolean;
+              hasPaperclipApiKey: boolean;
+              paperclipKeyIsAgentRun: boolean;
+              boardKeyIsEmpty: boolean;
+              paperclipApiBase: string | undefined;
+              paperclipCompanyId: string | undefined;
             },
         );
       return { result, calls };
@@ -865,14 +880,127 @@ describe('piTeamworkExtension AMaster provider', () => {
         keyIsConfigured: false,
       }),
     ]);
-    expect(JSON.stringify(calls)).not.toContain('session-key');
-    expect(JSON.stringify(calls)).not.toContain('configured-key');
+    expect(calls.some((call) => call.keyIsConfigured)).toBe(false);
 
     if (previousSettings === undefined) delete process.env.PI_SETTINGS_DIR;
     else process.env.PI_SETTINGS_DIR = previousSettings;
     await import('node:fs/promises').then(({ rm }) =>
       rm(settingsDir, { recursive: true, force: true }),
     );
+  });
+
+  it('prefers agent-run task-tools auth over board auth and config', async () => {
+    const previousSettings = process.env.PI_SETTINGS_DIR;
+    const previousPaperclipApiKey = process.env.PAPERCLIP_API_KEY;
+    const previousPaperclipApiUrl = process.env.PAPERCLIP_API_URL;
+    const previousPaperclipCompanyId = process.env.PAPERCLIP_COMPANY_ID;
+    const previousPaperclipRunId = process.env.PAPERCLIP_RUN_ID;
+    const settingsDir = await createSettingsDir({
+      'pi-teamwork': {
+        provider: 'amaster',
+        amaster: {
+          apiBase: 'http://configured-amaster.test',
+          apiKey: 'configured-key',
+          companyId: 'configured-company',
+        },
+      },
+    });
+    process.env.PI_SETTINGS_DIR = settingsDir;
+    process.env.PAPERCLIP_API_KEY = 'agent-run-jwt';
+    process.env.PAPERCLIP_API_URL = 'http://agent-run-amaster.test';
+    process.env.PAPERCLIP_COMPANY_ID = 'agent-run-company';
+    process.env.PAPERCLIP_RUN_ID = 'run-123';
+    try {
+      const tools = new Map<string, RegisteredTool>();
+      const pi = {
+        on: vi.fn(),
+        registerCommand: vi.fn(),
+        registerTool: vi.fn((tool: RegisteredTool) => tools.set(tool.name, tool)),
+        exec: vi.fn(async () => ({ stdout: '[]', stderr: '', code: 0 })),
+      };
+      piTeamworkExtension(pi as never);
+      const sessionStartHandler = pi.on.mock.calls.find((call) => call[0] === 'session_start')?.[1];
+
+      await sessionStartHandler(
+        {
+          amasterEmployee: {
+            apiKey: 'session-key',
+            apiBase: 'http://session.test',
+            companyId: 'session-company',
+          },
+        },
+        {
+          cwd: settingsDir,
+          ui: {
+            setStatus: vi.fn(),
+            notify: vi.fn(),
+          },
+        },
+      );
+
+      const { calls } = await withFakeAmasterCli(async () => {
+        await tools.get('teamwork_status')!.execute('tool-1' as never, {} as never);
+        await tools.get('issue_list')!.execute('tool-2' as never, {} as never);
+      });
+
+      expect(pi.exec).toHaveBeenCalledWith('amaster-runtime', ['daemon', 'status'], {
+        cwd: settingsDir,
+      });
+      const employeeCalls = calls.filter((call) => call.command === 'amaster-employee');
+      expect(employeeCalls).toEqual([
+        expect.objectContaining({
+          args: [
+            'status',
+            '--api-base',
+            'http://agent-run-amaster.test',
+            '-C',
+            'agent-run-company',
+            '--json',
+          ],
+          hasApiKey: false,
+          keyIsSession: false,
+          keyIsConfigured: false,
+          hasPaperclipApiKey: true,
+          paperclipKeyIsAgentRun: true,
+          boardKeyIsEmpty: true,
+          paperclipApiBase: 'http://agent-run-amaster.test',
+          paperclipCompanyId: 'agent-run-company',
+        }),
+        expect.objectContaining({
+          args: [
+            'issue',
+            'list',
+            '--api-base',
+            'http://agent-run-amaster.test',
+            '-C',
+            'agent-run-company',
+            '--json',
+          ],
+          hasApiKey: false,
+          keyIsSession: false,
+          keyIsConfigured: false,
+          hasPaperclipApiKey: true,
+          paperclipKeyIsAgentRun: true,
+          boardKeyIsEmpty: true,
+        }),
+      ]);
+      expect(JSON.stringify(calls)).not.toContain('agent-run-jwt');
+      expect(JSON.stringify(calls)).not.toContain('configured-key');
+    } finally {
+      if (previousSettings === undefined) delete process.env.PI_SETTINGS_DIR;
+      else process.env.PI_SETTINGS_DIR = previousSettings;
+      if (previousPaperclipApiKey === undefined) delete process.env.PAPERCLIP_API_KEY;
+      else process.env.PAPERCLIP_API_KEY = previousPaperclipApiKey;
+      if (previousPaperclipApiUrl === undefined) delete process.env.PAPERCLIP_API_URL;
+      else process.env.PAPERCLIP_API_URL = previousPaperclipApiUrl;
+      if (previousPaperclipCompanyId === undefined) delete process.env.PAPERCLIP_COMPANY_ID;
+      else process.env.PAPERCLIP_COMPANY_ID = previousPaperclipCompanyId;
+      if (previousPaperclipRunId === undefined) delete process.env.PAPERCLIP_RUN_ID;
+      else process.env.PAPERCLIP_RUN_ID = previousPaperclipRunId;
+      await import('node:fs/promises').then(({ rm }) =>
+        rm(settingsDir, { recursive: true, force: true }),
+      );
+    }
   });
 
   it('uses pi.exec with the session cwd when no AMaster api key is configured', async () => {
