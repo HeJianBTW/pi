@@ -2,6 +2,7 @@ import type {
   AmasterAdapterConfig,
   Comment,
   ExecFn,
+  ExecOptions,
   Issue,
   IssueCreateInput,
   IssueListFilter,
@@ -13,6 +14,7 @@ import type {
 } from '../types.js';
 
 type ExecResult = Awaited<ReturnType<ExecFn>>;
+type AuthMode = NonNullable<AmasterAdapterConfig['authMode']>;
 
 export async function initAmasterProvider(
   config: AmasterAdapterConfig,
@@ -25,6 +27,9 @@ export class AmasterAdapter implements TeamworkProvider {
   readonly name = 'amaster';
   private readonly binary = 'amaster-employee';
   private readonly runtimeBinary = 'amaster-runtime';
+  private readonly apiKey?: string;
+  private readonly authMode: AuthMode;
+  private readonly authEnv: Record<string, string> | undefined;
   private readonly commonArgs: string[];
   private readonly defaultCompanyId?: string;
   private discoveredCompanyId: string | undefined;
@@ -34,6 +39,10 @@ export class AmasterAdapter implements TeamworkProvider {
     config: AmasterAdapterConfig,
     private readonly exec: ExecFn,
   ) {
+    const apiKey = config.apiKey?.trim();
+    if (apiKey) this.apiKey = apiKey;
+    this.authMode = config.authMode ?? (this.apiKey ? 'board' : 'none');
+    this.authEnv = normalizeAuthEnv(config.authEnv);
     this.commonArgs = [];
     if (config.apiBase?.trim()) this.commonArgs.push('--api-base', config.apiBase.trim());
     if (config.context?.trim()) this.commonArgs.push('--context', config.context.trim());
@@ -191,8 +200,9 @@ export class AmasterAdapter implements TeamworkProvider {
   }
 
   async status(): Promise<Record<string, unknown>> {
+    const execOptions = this.amasterExecOptions();
     const [teamwork, runtime] = await Promise.all([
-      this.runOptional(this.binary, withJson(this.buildArgsSync(['status']))),
+      this.runOptional(this.binary, withJson(this.buildArgsSync(['status'])), execOptions),
       this.runOptional(this.runtimeBinary, ['daemon', 'status']),
     ]);
     return {
@@ -202,6 +212,7 @@ export class AmasterAdapter implements TeamworkProvider {
       ok: teamwork.code === 0,
       runtimeOk: runtime.code === 0,
       authenticated: teamwork.code === 0,
+      authMode: this.authMode,
       localRuntimeAttached: runtime.code === 0 && /running|ready|attached/i.test(runtime.stdout),
       ...(teamwork.code !== 0 ? { error: classifyAmasterFailure('employee', teamwork) } : {}),
       ...(runtime.code !== 0 ? { runtimeError: classifyAmasterFailure('runtime', runtime) } : {}),
@@ -209,16 +220,20 @@ export class AmasterAdapter implements TeamworkProvider {
   }
 
   private async runAmaster(args: string[]): Promise<string> {
-    const result = await this.exec(this.binary, args);
+    const result = await this.exec(this.binary, args, this.amasterExecOptions());
     if (result.code !== 0) {
       throw new Error(`amaster ${args[0]} failed: ${classifyAmasterFailure('employee', result)}`);
     }
     return result.stdout;
   }
 
-  private async runOptional(command: string, args: string[]): Promise<ExecResult> {
+  private async runOptional(
+    command: string,
+    args: string[],
+    options?: ExecOptions,
+  ): Promise<ExecResult> {
     try {
-      return await this.exec(command, args);
+      return await this.exec(command, args, options);
     } catch (error) {
       return {
         stdout: '',
@@ -273,6 +288,12 @@ export class AmasterAdapter implements TeamworkProvider {
     );
   }
 
+  private amasterExecOptions(): ExecOptions | undefined {
+    if (this.authEnv && Object.keys(this.authEnv).length > 0) return { env: this.authEnv };
+    if (this.apiKey) return { env: { AMASTER_BOARD_API_KEY: this.apiKey } };
+    return undefined;
+  }
+
   private primeDefaultCompanyCache(workspaces: Workspace[]): void {
     if (this.defaultCompanyId) return;
     if (workspaces.length === 1) {
@@ -284,6 +305,22 @@ export class AmasterAdapter implements TeamworkProvider {
     this.discoveredCompanyId = undefined;
     this.workspaceDiscoveryPromise = undefined;
   }
+}
+
+function normalizeAuthEnv(
+  env: Record<string, string> | undefined,
+): Record<string, string> | undefined {
+  if (!env) return undefined;
+  const normalized: Record<string, string> = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (value === '') {
+      normalized[key] = value;
+      continue;
+    }
+    const trimmed = value.trim();
+    if (trimmed) normalized[key] = trimmed;
+  }
+  return Object.keys(normalized).length > 0 ? normalized : undefined;
 }
 
 function parseJson(text: string): unknown {
