@@ -1,0 +1,20 @@
+{
+  "name": "@amaster.ai/pi-eval",
+  "version": "0.0.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "fetch:locomo": "tsx scripts/fetch-locomo.ts",
+    "eval:memory:mem0": "tsx memory/run-mem0.ts",
+    "eval:memory:curated": "tsx memory/run-memory.ts",
+    "judge:llm": "tsx scripts/judge-llm.ts"
+  },
+  "dependencies": {
+    "@amaster.ai/pi-memory": "workspace:*",
+    "@amaster.ai/pi-memory-mem0": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.0"
+  }
+}

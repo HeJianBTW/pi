@@ -4,7 +4,12 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Prefetch } from '../prefetch.js';
 import type { KeyResolver, Mem0Provider, ProviderResolver } from '../provider.js';
-import { mapApiToMem0Provider, SqliteSnapshotStore } from '../provider.js';
+import {
+  formatObservedAt,
+  mapApiToMem0Provider,
+  rewriteObservationDate,
+  SqliteSnapshotStore,
+} from '../provider.js';
 import { createMem0Tools } from '../tools.js';
 
 // ---------------------------------------------------------------------------
@@ -665,5 +670,55 @@ describe('createMem0Provider additional scenarios', () => {
 
     expect(__capturedMem0Config).toBeDefined();
     expect(__capturedMem0Config!.disableHistory).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// observedAt helpers
+// ---------------------------------------------------------------------------
+
+describe('formatObservedAt', () => {
+  it('formats a Date to YYYY-MM-DD', () => {
+    expect(formatObservedAt(new Date(Date.UTC(2023, 4, 8)))).toBe('2023-05-08');
+  });
+
+  it('formats an ISO string to YYYY-MM-DD', () => {
+    expect(formatObservedAt('2023-05-08T13:56:00Z')).toBe('2023-05-08');
+  });
+
+  it('returns the raw string for an unparseable value', () => {
+    expect(formatObservedAt('not a date')).toBe('not a date');
+  });
+});
+
+describe('rewriteObservationDate', () => {
+  const prompt = [
+    '## New Messages',
+    'Caroline: I went to a group yesterday.',
+    '',
+    '## Observation Date',
+    '2026-07-03',
+    '',
+    '## Current Date',
+    '2026-07-03',
+    '',
+    '# Output:',
+  ].join('\n');
+
+  it('rewrites both Observation Date and Current Date to the given date', () => {
+    const out = rewriteObservationDate(prompt, '2023-05-08');
+    expect(out).toContain('## Observation Date\n2023-05-08');
+    expect(out).toContain('## Current Date\n2023-05-08');
+    expect(out).not.toContain('2026-07-03');
+  });
+
+  it('leaves the message body untouched', () => {
+    const out = rewriteObservationDate(prompt, '2023-05-08');
+    expect(out).toContain('Caroline: I went to a group yesterday.');
+  });
+
+  it('is a no-op when the sections are absent', () => {
+    const plain = 'no date sections here';
+    expect(rewriteObservationDate(plain, '2023-05-08')).toBe(plain);
   });
 });

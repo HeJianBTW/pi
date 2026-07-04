@@ -29,6 +29,7 @@ User ←→ Agent ←→ Mem0 Memory (in-memory vector search)
 - **LLM extraction**: Configured provider extracts facts from conversations
 - **Persistence**: After each `add()`, all memories are asynchronously snapshotted to SQLite. On restart, memories are restored from the snapshot.
 - **Provider mapping**: Custom providers are automatically mapped to mem0-compatible providers (e.g. `openai`) via the pi model registry's `api` field.
+- **Observation date**: `add()` accepts an optional `observedAt` (Date or string). In OSS mode it grounds mem0's extraction prompt so relative time references ("yesterday", "last week") resolve against the conversation's date rather than the system clock — important when ingesting historical conversations. Omit it and mem0 falls back to the current date (correct for live turns).
 
 ## Quick Start
 
