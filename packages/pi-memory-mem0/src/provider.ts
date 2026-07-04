@@ -23,7 +23,7 @@ import type { AddResult, Mem0ExtensionConfig, MemoryItem } from './types.js';
 export interface Mem0Provider {
   add(
     messages: Array<{ role: string; content: string }>,
-    opts: { userId: string; infer?: boolean },
+    opts: { userId: string; infer?: boolean; observedAt?: Date | string },
   ): Promise<AddResult | null>;
 
   search(query: string, opts: { userId: string; topK?: number }): Promise<MemoryItem[]>;
@@ -39,6 +39,31 @@ export interface Mem0Provider {
 // ---------------------------------------------------------------------------
 // Normalizers
 // ---------------------------------------------------------------------------
+
+/**
+ * Format an observedAt value as YYYY-MM-DD for mem0's Observation Date field.
+ * mem0's extraction prompt grounds relative times ("yesterday", "last week")
+ * to this date. When not supplied mem0 falls back to system now — wrong for
+ * ingesting historical conversations.
+ */
+export function formatObservedAt(v: Date | string): string {
+  const d = typeof v === 'string' ? new Date(v) : v;
+  if (Number.isNaN(d.getTime())) return String(v);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Rewrite the "## Observation Date" and "## Current Date" sections of mem0's
+ * extraction user-prompt to a fixed date. mem0 has no public parameter for
+ * this — its own prompt documents an Observation Date it never lets callers
+ * set — so OSSProvider.add intercepts the LLM call and runs the prompt through
+ * this before forwarding. Exported for unit testing.
+ */
+export function rewriteObservationDate(content: string, dateStr: string): string {
+  let c = content.replace(/## Observation Date\n[^\n]*/, `## Observation Date\n${dateStr}`);
+  c = c.replace(/## Current Date\n[^\n]*/, `## Current Date\n${dateStr}`);
+  return c;
+}
 
 function normalizeMemoryItem(raw: Record<string, unknown>): MemoryItem {
   return {
@@ -96,11 +121,18 @@ class PlatformProvider implements Mem0Provider {
 
   async add(
     messages: Array<{ role: string; content: string }>,
-    opts: { userId: string; infer?: boolean },
+    opts: { userId: string; infer?: boolean; observedAt?: Date | string },
   ): Promise<AddResult | null> {
     await this.ensureClient();
     const addOpts: Record<string, unknown> = { userId: opts.userId };
     if (opts.infer === false) addOpts.infer = false;
+    // Platform mem0 exposes a `timestamp` field on add(); pass observedAt
+    // through as an ISO string. (OSS mode honors observedAt via prompt
+    // rewriting instead — see OSSProvider.add.)
+    if (opts.observedAt) {
+      const d = new Date(opts.observedAt);
+      if (!Number.isNaN(d.getTime())) addOpts.timestamp = d.toISOString();
+    }
     // biome-ignore lint/suspicious/noExplicitAny: mem0ai/oss lacks type definitions
     const result = await (this.client as any).add(messages, addOpts);
     return result as AddResult;
@@ -265,6 +297,19 @@ class OSSProvider implements Mem0Provider {
   private initPromise: Promise<void> | null = null;
   private snapshot: SqliteSnapshotStore | null = null;
   private syncingSnapshot = false;
+  /**
+   * mem0's Memory instance shares one LLM object across all add() calls. To
+   * honor observedAt we temporarily wrap `llm.generateResponse` (see add), and
+   * that wrapper is global state on the instance — so concurrent add()s would
+   * stomp each other's date. This mutex serializes the wrap/call/restore
+   * window.
+   *
+   * ponytail: global mutex around the ~3-10s window that includes mem0's LLM
+   * call. Callers expecting true concurrency across users will see add()s
+   * serialize when observedAt is passed. Acceptable — the alternative is one
+   * Memory instance per userId (heavy init).
+   */
+  private addMutex: Promise<unknown> = Promise.resolve();
 
   constructor(
     private readonly ossConfig: Mem0ExtensionConfig['oss'] | undefined,
@@ -430,15 +475,56 @@ class OSSProvider implements Mem0Provider {
 
   async add(
     messages: Array<{ role: string; content: string }>,
-    opts: { userId: string; infer?: boolean },
+    opts: { userId: string; infer?: boolean; observedAt?: Date | string },
   ): Promise<AddResult | null> {
     await this.ensureMemory();
     const addOpts: Record<string, unknown> = { userId: opts.userId };
     if (opts.infer === false) addOpts.infer = false;
-    // biome-ignore lint/suspicious/noExplicitAny: mem0ai/oss lacks type definitions
-    const result = await (this.memory as any).add(messages, addOpts);
-    this.asyncSnapshotSync(opts.userId);
-    return result as AddResult;
+
+    // Serialize add() when observedAt is used. mem0 never exposes the
+    // observationDate parameter its own prompt documents — so we intercept
+    // `this.llm.generateResponse` and rewrite the "## Observation Date" line
+    // in the user prompt from today to the caller-supplied date. Parallel
+    // adds would stomp the wrapper, so we mutex.
+    const gate = this.addMutex;
+    let release: (v: unknown) => void = () => {};
+    this.addMutex = new Promise((res) => {
+      release = res;
+    });
+    try {
+      await gate;
+      // biome-ignore lint/suspicious/noExplicitAny: mem0ai/oss lacks type definitions
+      const mem = this.memory as any;
+      let restoreLlm: (() => void) | undefined;
+      if (opts.observedAt) {
+        const dateStr = formatObservedAt(opts.observedAt);
+        const llm = mem.llm;
+        const originalGenerate = llm.generateResponse.bind(llm);
+        llm.generateResponse = async (
+          msgs: Array<{ role: string; content: string }>,
+          ...rest: unknown[]
+        ) => {
+          const patched = msgs.map((m) =>
+            m.role === 'user' && typeof m.content === 'string'
+              ? { ...m, content: rewriteObservationDate(m.content, dateStr) }
+              : m,
+          );
+          return originalGenerate(patched, ...rest);
+        };
+        restoreLlm = () => {
+          llm.generateResponse = originalGenerate;
+        };
+      }
+      try {
+        const result = await mem.add(messages, addOpts);
+        this.asyncSnapshotSync(opts.userId);
+        return result as AddResult;
+      } finally {
+        restoreLlm?.();
+      }
+    } finally {
+      release(undefined);
+    }
   }
 
   async search(query: string, opts: { userId: string; topK?: number }): Promise<MemoryItem[]> {
