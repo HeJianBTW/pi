@@ -1,0 +1,169 @@
+name: Memory Eval
+
+# Manual-only. Benchmarks pi-memory (curated write loop) and pi-memory-mem0
+# (passive extraction) against LoCoMo, then LLM-judges the result. Runs on the
+# self-hosted runner and talks to the custom provider behind
+# PI_INTEGRATION_BASE_URL / PI_INTEGRATION_API_KEY.
+on:
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: Which memory runner to evaluate
+        type: choice
+        default: mem0
+        options: [mem0, curated, both]
+      samples:
+        description: Number of LoCoMo samples (each is a long multi-session conversation)
+        type: string
+        default: '2'
+      topk:
+        description: mem0 retrieval top-k (ignored by curated)
+        type: string
+        default: '10'
+      extract_model:
+        description: Extraction / write-loop model (provider is deepseek-integration)
+        type: string
+        default: deepseek-v4-flash
+      judge_model:
+        description: LLM-judge model
+        type: string
+        default: deepseek-v4-pro
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+jobs:
+  memory-eval:
+    name: Memory eval (LoCoMo)
+    runs-on:
+      - instance-hnpsq9go
+      - linux
+      - x64
+    timeout-minutes: 240
+    env:
+      PI_INTEGRATION_BASE_URL: ${{ secrets.PI_INTEGRATION_BASE_URL }}
+      PI_INTEGRATION_API_KEY: ${{ secrets.PI_INTEGRATION_API_KEY }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pi build environment
+        uses: ./.github/actions/setup-pi-build
+        with:
+          # mem0 OSS mode stores vectors in SQLite via better-sqlite3; the
+          # prebuilt binding must be present after a cache restore.
+          prebuild-better-sqlite3: 'true'
+          set-pi-agent-dir: 'true'
+
+      - name: Guard — require provider secrets
+        run: |
+          set -euo pipefail
+          if [ -z "${PI_INTEGRATION_BASE_URL}" ] || [ -z "${PI_INTEGRATION_API_KEY}" ]; then
+            echo "::error::PI_INTEGRATION_BASE_URL / PI_INTEGRATION_API_KEY not set — cannot run eval"
+            exit 1
+          fi
+
+      - name: Write eval models.json from secrets
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/eval"
+          # The runners resolve provider baseUrl+apiKey by name from this file
+          # (--provider deepseek-integration). apiKey is written literally from
+          # the secret; the file lives under RUNNER_TEMP and is not uploaded.
+          cat > "$RUNNER_TEMP/eval/models.json" <<EOF
+          {
+            "providers": {
+              "deepseek-integration": {
+                "baseUrl": "${PI_INTEGRATION_BASE_URL}",
+                "api": "openai-completions",
+                "apiKey": "${PI_INTEGRATION_API_KEY}"
+              }
+            }
+          }
+          EOF
+          echo "MODELS_PATH=$RUNNER_TEMP/eval/models.json" >> "$GITHUB_ENV"
+
+      - name: Fetch LoCoMo
+        run: pnpm --filter @amaster.ai/pi-eval fetch:locomo
+
+      - name: Build memory packages
+        run: |
+          set -euo pipefail
+          pnpm --filter @amaster.ai/pi-shared build
+          pnpm --filter @amaster.ai/pi-memory build
+          pnpm --filter @amaster.ai/pi-memory-mem0 build
+
+      - name: Eval — pi-memory-mem0
+        if: inputs.runner == 'mem0' || inputs.runner == 'both'
+        run: |
+          set -euo pipefail
+          pnpm --filter @amaster.ai/pi-eval eval:memory:mem0 -- \
+            --mode oss \
+            --samples "${{ inputs.samples }}" \
+            --topk "${{ inputs.topk }}" \
+            --concurrency 2 \
+            --llm-provider deepseek-integration \
+            --embed-provider deepseek-integration \
+            --llm-model "${{ inputs.extract_model }}" \
+            --models "$MODELS_PATH"
+          pnpm --filter @amaster.ai/pi-eval judge:llm -- \
+            --input results/mem0-locomo-oss.json \
+            --llm-provider deepseek-integration \
+            --llm-model "${{ inputs.judge_model }}" \
+            --concurrency 6 \
+            --models "$MODELS_PATH"
+
+      - name: Eval — pi-memory (curated write loop)
+        if: inputs.runner == 'curated' || inputs.runner == 'both'
+        run: |
+          set -euo pipefail
+          pnpm --filter @amaster.ai/pi-eval eval:memory:curated -- \
+            --samples "${{ inputs.samples }}" \
+            --concurrency 2 \
+            --provider deepseek-integration \
+            --model "${{ inputs.extract_model }}" \
+            --models "$MODELS_PATH"
+          pnpm --filter @amaster.ai/pi-eval judge:llm -- \
+            --input results/memory-locomo.json \
+            --llm-provider deepseek-integration \
+            --llm-model "${{ inputs.judge_model }}" \
+            --concurrency 6 \
+            --models "$MODELS_PATH"
+
+      - name: Summarize
+        if: always()
+        run: |
+          set -euo pipefail
+          dir=tests/eval/results
+          {
+            echo "## Memory eval results"
+            echo ""
+            echo "| File | judge recall | literal recall | n |"
+            echo "|------|-------------:|---------------:|--:|"
+            for f in "$dir"/*-judged.json "$dir"/mem0-locomo-oss.json "$dir"/memory-locomo.json; do
+              [ -f "$f" ] || continue
+              node -e '
+                const d = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+                const s = d.summary || {};
+                const jr = s.recallJudge != null ? s.recallJudge.toFixed(4) : "—";
+                const lr = s.recall != null ? s.recall.toFixed(4) : "—";
+                console.log(`| ${require("path").basename(process.argv[1])} | ${jr} | ${lr} | ${s.n ?? "—"} |`);
+              ' "$f"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: memory-eval-results
+          path: tests/eval/results/*.json
+          if-no-files-found: warn
+          retention-days: 14
