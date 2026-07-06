@@ -24,6 +24,17 @@ describe('resolveProvider', () => {
     }
   });
 
+  it('resolves firecrawl with env var', () => {
+    process.env.FIRECRAWL_API_KEY = 'test-fc-key';
+    const result = resolveProvider('firecrawl', {});
+    expect(result).not.toHaveProperty('error');
+    if (!('error' in result)) {
+      expect(result.id).toBe('firecrawl');
+      expect(result.baseUrl).toBe('https://api.firecrawl.dev');
+      expect(result.apiKey).toBe('test-fc-key');
+    }
+  });
+
   it('resolves kimi with env var and default model', () => {
     process.env.MOONSHOT_API_KEY = 'test-kimi-key';
     const result = resolveProvider('kimi', {});
@@ -308,5 +319,15 @@ describe('resolveFetchProvider', () => {
     const result = resolveFetchProvider(settings);
     expect(result).not.toBeNull();
     expect(result!.id).toBe('tavily');
+  });
+
+  it('supports firecrawl as fetch provider', () => {
+    const settings: WebToolSettings = {
+      fetch: { provider: 'firecrawl' },
+      providers: { firecrawl: { apiKey: 'fc-key' } },
+    };
+    const result = resolveFetchProvider(settings);
+    expect(result).not.toBeNull();
+    expect(result!.id).toBe('firecrawl');
   });
 });

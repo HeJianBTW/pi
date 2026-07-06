@@ -2,6 +2,7 @@
 export type BuiltInProviderId =
   | 'tavily'
   | 'brave'
+  | 'firecrawl'
   | 'kimi'
   | 'mimo'
   | 'zai'
