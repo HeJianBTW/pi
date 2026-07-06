@@ -18,7 +18,7 @@
  */
 
 import { Agent, type AgentTool } from '@earendil-works/pi-agent-core';
-import { streamSimple } from '@earendil-works/pi-ai';
+import { streamSimple } from '@earendil-works/pi-ai/compat';
 import { AuthStorage, ModelRegistry } from '@earendil-works/pi-coding-agent';
 import type { MemoryStore } from './store.js';
 import { createMemoryTools } from './tools.js';

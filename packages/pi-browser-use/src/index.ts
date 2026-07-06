@@ -1,5 +1,6 @@
 import { loadPiSettings, type PiSettingsOptions } from '@amaster.ai/pi-shared/settings';
-import { type TextContent as AiTextContent, complete } from '@earendil-works/pi-ai';
+import type { TextContent as AiTextContent } from '@earendil-works/pi-ai';
+import { complete } from '@earendil-works/pi-ai/compat';
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';

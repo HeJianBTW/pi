@@ -9,7 +9,8 @@
  * Both extension mode and CLI mode resolve credentials from Pi's model registry.
  */
 
-import { type TextContent as AiTextContent, complete } from '@earendil-works/pi-ai';
+import type { TextContent as AiTextContent } from '@earendil-works/pi-ai';
+import { complete } from '@earendil-works/pi-ai/compat';
 import { AuthStorage, ModelRegistry } from '@earendil-works/pi-coding-agent';
 import type { VisionModelConfig } from './config.js';
 import type { DevToolsClient } from './index.js';
