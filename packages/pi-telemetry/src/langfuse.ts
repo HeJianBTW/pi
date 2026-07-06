@@ -113,13 +113,16 @@ export class LangfuseSdkRuntimeEventExporter implements RuntimeEventExporter {
     }
     if (isLlmGenerationEvent(redactedEvent)) {
       this.publishLlmGenerationEvent(redactedEvent);
+      await this.flushIfTerminalEvent(redactedEvent);
       return;
     }
     if (isToolEvent(redactedEvent)) {
       this.publishToolEvent(redactedEvent);
+      await this.flushIfTerminalEvent(redactedEvent);
       return;
     }
     this.publishLifecycleEvent(redactedEvent);
+    await this.flushIfTerminalEvent(redactedEvent);
   }
 
   async flush(): Promise<void> {
@@ -128,6 +131,19 @@ export class LangfuseSdkRuntimeEventExporter implements RuntimeEventExporter {
 
   async close(): Promise<void> {
     await this.client.shutdownAsync();
+  }
+
+  private async flushIfTerminalEvent(event: RuntimeTelemetryEvent): Promise<void> {
+    if (!isTerminalTelemetryEvent(event)) {
+      return;
+    }
+    try {
+      await this.client.flushAsync();
+    } catch (error) {
+      console.warn(
+        `Langfuse telemetry flush failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 
   private publishLifecycleEvent(event: RuntimeLifecycleEvent): void {
@@ -1335,6 +1351,30 @@ function isToolEvent(event: RuntimeTelemetryEvent): event is RuntimeToolEvent {
 
 function isLlmGenerationEvent(event: RuntimeTelemetryEvent): event is RuntimeLlmGenerationEvent {
   return 'llmGenerationId' in event;
+}
+
+function isTerminalTelemetryEvent(event: RuntimeTelemetryEvent): boolean {
+  if (isToolEvent(event) || isLlmGenerationEvent(event)) {
+    return event.status !== 'started';
+  }
+  switch (event.type) {
+    case 'chat_turn_started':
+    case 'subagent_spawned':
+    case 'subagent_started':
+      return false;
+    case 'chat_turn_steered':
+    case 'chat_turn_steer_delivered':
+    case 'chat_turn_followup_queued':
+    case 'chat_turn_followup_delivered':
+    case 'chat_turn_completed':
+    case 'chat_turn_failed':
+    case 'subagent_completed':
+    case 'subagent_failed':
+    case 'subagent_cancelled':
+      return true;
+    default:
+      assertNever(event.type);
+  }
 }
 
 function parseBoolean(value: string | undefined): boolean {
