@@ -167,6 +167,53 @@ describe('webFetch - all providers', () => {
     );
   });
 
+  it('firecrawl: scrapes via v2/scrape API with markdown format', async () => {
+    const settings: WebToolSettings = {
+      fetch: { provider: 'firecrawl' },
+      providers: { firecrawl: { apiKey: 'fc-key' } },
+    };
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        success: true,
+        data: {
+          markdown: '# Firecrawl\n\nScraped content',
+          metadata: { title: 'Firecrawl Home', sourceURL: 'https://firecrawl.dev/' },
+        },
+      }),
+    });
+
+    const result = await webFetch({ url: 'https://firecrawl.dev' }, settings);
+
+    expect(result.title).toBe('Firecrawl Home');
+    expect(result.url).toBe('https://firecrawl.dev/');
+    expect(result.content).toContain('Scraped content');
+
+    const [url, opts] = mockFetch.mock.calls[0]!;
+    expect(url).toBe('https://api.firecrawl.dev/v2/scrape');
+    expect(opts.headers.Authorization).toBe('Bearer fc-key');
+    const body = JSON.parse(opts.body);
+    expect(body.url).toBe('https://firecrawl.dev');
+    expect(body.formats).toEqual(['markdown']);
+    expect(body.onlyMainContent).toBe(true);
+  });
+
+  it('firecrawl: throws on HTTP error', async () => {
+    const settings: WebToolSettings = {
+      fetch: { provider: 'firecrawl' },
+      providers: { firecrawl: { apiKey: 'key' } },
+    };
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 500,
+      text: async () => 'Server error',
+    });
+
+    await expect(webFetch({ url: 'https://example.com' }, settings)).rejects.toThrow(
+      'Firecrawl Scrape API error 500',
+    );
+  });
+
   it('uses custom baseUrl for fetch provider', async () => {
     const settings: WebToolSettings = {
       fetch: { provider: 'openrouter' },

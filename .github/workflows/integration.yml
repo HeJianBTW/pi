@@ -198,7 +198,7 @@ jobs:
   # setup because self-hosted matrix jobs don't share workspace state.
   # ──────────────────────────────────────────────────────────────────────
   extension-tool-matrix:
-    name: Extension E2E (${{ matrix.extension }})
+    name: Extension E2E (${{ matrix.extension }}${{ matrix.provider && format('-{0}', matrix.provider) || '' }})
     needs: pi-runtime
     if: >
       (github.event_name != 'pull_request' ||
@@ -233,6 +233,16 @@ jobs:
             tools: web_fetch
             prompt: "Use web_fetch on https://www.baidu.com once. Tell me the page title in one sentence."
             assert_pattern: "(baidu|百度|bing|google|search|title)"
+          # Firecrawl provider E2E — exercises web_search (/v2/search) and
+          # web_fetch (/v2/scrape) against the real Firecrawl API. Uses the
+          # same pi-web-access extension but a distinct matrix `provider` key
+          # so the settings step below injects Firecrawl config only here.
+          # Gated on FIRECRAWL_API_KEY: skips cleanly until the secret is set.
+          - extension: pi-web-access
+            provider: firecrawl
+            tools: web_search,web_fetch
+            prompt: "Step 1 — use web_search once with query='Firecrawl web scraping API'. Step 2 — use web_fetch once on https://docs.firecrawl.dev/. Report the search result count and the fetched page title in one sentence."
+            assert_pattern: "(firecrawl|scrap|crawl|docs|title|result)"
           - extension: pi-image-gen
             tools: image_generate
             prompt: "Use image_generate to generate a test image with prompt 'a solid red square'. Report the generated file path."
@@ -245,6 +255,7 @@ jobs:
       PI_INTEGRATION_BASE_URL: ${{ secrets.PI_INTEGRATION_BASE_URL }}
       PI_INTEGRATION_API_KEY: ${{ secrets.PI_INTEGRATION_API_KEY }}
       PI_INTEGRATION_MULTICA_TOKEN: ${{ secrets.PI_INTEGRATION_MULTICA_TOKEN }}
+      FIRECRAWL_API_KEY: ${{ secrets.FIRECRAWL_API_KEY }}
       PI_OFFLINE: '0'
 
     steps:
@@ -266,6 +277,41 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$PI_CODING_AGENT_DIR"
+
+          # pi-web-access settings vary by matrix `provider`: the default
+          # entry only wires the summary model (fetch falls back to Jina),
+          # while the firecrawl entry configures Firecrawl as both the search
+          # and fetch provider so web_search (/v2/search) and web_fetch
+          # (/v2/scrape) hit the real API. The apiKey pulls FIRECRAWL_API_KEY
+          # from the environment at pi runtime via ${ENV_VAR} interpolation.
+          # (Single-quoted heredoc-var: ${FIRECRAWL_API_KEY} stays literal —
+          # bash does not recursively expand a variable's contents, so pi's
+          # own ${ENV_VAR} resolver sees the placeholder verbatim.)
+          if [ "${{ matrix.provider }}" = "firecrawl" ]; then
+            WEB_ACCESS_SETTINGS='{
+              "search": { "provider": "firecrawl" },
+              "fetch": {
+                "provider": "firecrawl",
+                "summary": {
+                  "provider": "deepseek-integration",
+                  "model": "deepseek-v4-flash"
+                }
+              },
+              "providers": {
+                "firecrawl": { "apiKey": "${FIRECRAWL_API_KEY}" }
+              }
+            }'
+          else
+            WEB_ACCESS_SETTINGS='{
+              "fetch": {
+                "summary": {
+                  "provider": "deepseek-integration",
+                  "model": "deepseek-v4-flash"
+                }
+              }
+            }'
+          fi
+
 
           # NOTE on ordering: this step writes settings.json BEFORE the
           # `pi install` step below. `pi install` appends to settings.json's
@@ -323,14 +369,7 @@ jobs:
                 "autoInstall": true
               }
             },
-            "pi-web-access": {
-              "fetch": {
-                "summary": {
-                  "provider": "deepseek-integration",
-                  "model": "deepseek-v4-flash"
-                }
-              }
-            },
+            "pi-web-access": ${WEB_ACCESS_SETTINGS},
             "pi-scheduler": {
               "dataDir": "${RUNNER_TEMP}/pi-scheduler"
             },
@@ -432,6 +471,12 @@ jobs:
         if: env.PI_INTEGRATION_BASE_URL != '' && env.PI_INTEGRATION_API_KEY != ''
         run: |
           set -euo pipefail
+          # The firecrawl matrix entry needs a real Firecrawl API key. Skip it
+          # cleanly (rather than fail) when the secret isn't configured yet.
+          if [ "${{ matrix.provider }}" = "firecrawl" ] && [ -z "${FIRECRAWL_API_KEY:-}" ]; then
+            echo "::warning::FIRECRAWL_API_KEY secret unset — skipping Firecrawl E2E."
+            exit 0
+          fi
           unset HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY
           unset http_proxy https_proxy all_proxy no_proxy
           set +e

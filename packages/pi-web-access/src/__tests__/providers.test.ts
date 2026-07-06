@@ -216,6 +216,125 @@ describe('search - all providers', () => {
     expect(opts.headers['anthropic-version']).toBe('2023-06-01');
   });
 
+  it('firecrawl: calls v2/search API with Bearer token', async () => {
+    const settings: WebToolSettings = {
+      search: { provider: 'firecrawl' },
+      providers: { firecrawl: { apiKey: 'fc-key' } },
+    };
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        success: true,
+        data: {
+          web: [
+            {
+              title: 'Result 1',
+              url: 'https://example.com',
+              description: 'Example description',
+              position: 1,
+            },
+            {
+              title: 'Result 2',
+              url: 'https://other.com',
+              description: 'Other description',
+              position: 2,
+            },
+          ],
+        },
+      }),
+    });
+
+    const result = await search({ query: 'test query' }, settings);
+
+    expect(result.provider).toBe('firecrawl');
+    expect(result.query).toBe('test query');
+    expect(result.results).toHaveLength(2);
+    expect(result.results[0]!.title).toBe('Result 1');
+    expect(result.results[0]!.url).toBe('https://example.com');
+    expect(result.results[0]!.content).toBe('Example description');
+
+    const [url, opts] = mockFetch.mock.calls[0]!;
+    expect(url).toBe('https://api.firecrawl.dev/v2/search');
+    expect(opts.headers.Authorization).toBe('Bearer fc-key');
+    const body = JSON.parse(opts.body);
+    expect(body.query).toBe('test query');
+    expect(body.sources).toEqual(['web']);
+  });
+
+  it('firecrawl: maps timeRange to tbs and passes limit', async () => {
+    const settings: WebToolSettings = {
+      search: { provider: 'firecrawl' },
+      providers: { firecrawl: { apiKey: 'key' } },
+    };
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ success: true, data: { web: [] } }),
+    });
+
+    await search({ query: 'test', timeRange: 'week', maxResults: 10 }, settings);
+
+    const body = JSON.parse(mockFetch.mock.calls[0]![1].body);
+    expect(body.tbs).toBe('qdr:w');
+    expect(body.limit).toBe(10);
+  });
+
+  it('firecrawl: uses news source and snippet when topic is news', async () => {
+    const settings: WebToolSettings = {
+      search: { provider: 'firecrawl' },
+      providers: { firecrawl: { apiKey: 'key' } },
+    };
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        success: true,
+        data: {
+          news: [{ title: 'News Item', url: 'https://news.com', snippet: 'Breaking news' }],
+        },
+      }),
+    });
+
+    const result = await search({ query: 'test', topic: 'news' }, settings);
+
+    expect(result.results).toHaveLength(1);
+    expect(result.results[0]!.title).toBe('News Item');
+    expect(result.results[0]!.content).toBe('Breaking news');
+
+    const body = JSON.parse(mockFetch.mock.calls[0]![1].body);
+    expect(body.sources).toEqual(['news']);
+  });
+
+  it('firecrawl: passes domain filters', async () => {
+    const settings: WebToolSettings = {
+      search: { provider: 'firecrawl' },
+      providers: { firecrawl: { apiKey: 'key' } },
+    };
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ success: true, data: { web: [] } }),
+    });
+
+    await search({ query: 'test', includeDomains: ['example.com'] }, settings);
+
+    const body = JSON.parse(mockFetch.mock.calls[0]![1].body);
+    expect(body.includeDomains).toEqual(['example.com']);
+  });
+
+  it('firecrawl: throws on HTTP error', async () => {
+    const settings: WebToolSettings = {
+      search: { provider: 'firecrawl' },
+      providers: { firecrawl: { apiKey: 'key' } },
+    };
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 402,
+      text: async () => 'Payment required',
+    });
+
+    await expect(search({ query: 'test' }, settings)).rejects.toThrow(
+      'Firecrawl Search API error 402',
+    );
+  });
+
   it('brave: calls web search API with X-Subscription-Token', async () => {
     const settings: WebToolSettings = {
       search: { provider: 'brave' },
