@@ -1,4 +1,5 @@
-import { type TextContent as AiTextContent, complete } from '@earendil-works/pi-ai';
+import type { TextContent as AiTextContent } from '@earendil-works/pi-ai';
+import { complete } from '@earendil-works/pi-ai/compat';
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import type { VisionModelConfig } from './config.js';
 

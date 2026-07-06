@@ -7,7 +7,7 @@
 
 import type { ConversationTurn } from '@amaster.ai/pi-shared';
 import { Agent } from '@earendil-works/pi-agent-core';
-import { streamSimple } from '@earendil-works/pi-ai';
+import { streamSimple } from '@earendil-works/pi-ai/compat';
 import { MemoryStore } from './store.js';
 import { createMemoryTools } from './tools.js';
 

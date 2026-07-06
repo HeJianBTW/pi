@@ -55,7 +55,7 @@
     "typebox": "*"
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "0.74.0",
+    "@earendil-works/pi-coding-agent": "0.80.3",
     "typebox": "*",
     "vitest": "^4.0.0"
   },

@@ -24,7 +24,7 @@ vi.mock('@earendil-works/pi-coding-agent', () => {
   };
 });
 
-vi.mock('@earendil-works/pi-ai', () => ({
+vi.mock('@earendil-works/pi-ai/compat', () => ({
   complete: vi.fn(() =>
     Promise.resolve({
       content: [{ type: 'text', text: 'Analysis result' }],
@@ -175,7 +175,7 @@ describe('createFetchVisionCaller', () => {
 
     expect(result).toBe('Analysis result');
 
-    const { complete } = await import('@earendil-works/pi-ai');
+    const { complete } = await import('@earendil-works/pi-ai/compat');
     expect(complete).toHaveBeenCalled();
   });
 
@@ -198,7 +198,7 @@ describe('createFetchVisionCaller', () => {
   });
 
   test('passes image data and mimeType to complete()', async () => {
-    const piAi = await import('@earendil-works/pi-ai');
+    const piAi = await import('@earendil-works/pi-ai/compat');
     (piAi.complete as any).mockClear();
 
     const caller = createFetchVisionCaller({ provider: 'openai', model: 'gpt-4o' });
