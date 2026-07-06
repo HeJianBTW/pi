@@ -233,6 +233,44 @@ describe('telemetry', () => {
     expect(client.flushed).toBe(1);
   });
 
+  it('flushes Langfuse SDK telemetry after point-in-time lifecycle events', async () => {
+    const client = new FakeLangfuseSdkClient();
+    const exporter = new LangfuseSdkRuntimeEventExporter(
+      {
+        enabled: true,
+        publicKey: 'public',
+        secretKey: 'secret',
+        baseUrl: 'https://langfuse.example.com',
+        flushAt: 10,
+        flushIntervalMs: 60_000,
+      },
+      client,
+    );
+
+    await exporter.publish({
+      id: 'turn-start',
+      traceId,
+      type: 'chat_turn_started',
+      sessionId: 'session-1',
+      conversationId: 'conversation-1',
+      createdAt: '2026-05-02T00:00:00.000Z',
+      details: { input: 'hello' },
+    });
+    expect(client.flushed).toBe(0);
+
+    await exporter.publish({
+      id: 'turn-steered',
+      traceId,
+      type: 'chat_turn_steered',
+      sessionId: 'session-1',
+      conversationId: 'conversation-1',
+      createdAt: '2026-05-02T00:00:01.000Z',
+      details: { input: 'use claude', turnMode: 'steer' },
+    });
+
+    expect(client.flushed).toBe(1);
+  });
+
   it('exports completed spans through a generic OTEL traces endpoint', async () => {
     expect(
       resolveOtelConfig({

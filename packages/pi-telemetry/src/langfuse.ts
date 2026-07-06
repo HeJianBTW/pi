@@ -1357,13 +1357,24 @@ function isTerminalTelemetryEvent(event: RuntimeTelemetryEvent): boolean {
   if (isToolEvent(event) || isLlmGenerationEvent(event)) {
     return event.status !== 'started';
   }
-  return (
-    event.type === 'chat_turn_completed' ||
-    event.type === 'chat_turn_failed' ||
-    event.type === 'subagent_completed' ||
-    event.type === 'subagent_failed' ||
-    event.type === 'subagent_cancelled'
-  );
+  switch (event.type) {
+    case 'chat_turn_started':
+    case 'subagent_spawned':
+    case 'subagent_started':
+      return false;
+    case 'chat_turn_steered':
+    case 'chat_turn_steer_delivered':
+    case 'chat_turn_followup_queued':
+    case 'chat_turn_followup_delivered':
+    case 'chat_turn_completed':
+    case 'chat_turn_failed':
+    case 'subagent_completed':
+    case 'subagent_failed':
+    case 'subagent_cancelled':
+      return true;
+    default:
+      assertNever(event.type);
+  }
 }
 
 function parseBoolean(value: string | undefined): boolean {
