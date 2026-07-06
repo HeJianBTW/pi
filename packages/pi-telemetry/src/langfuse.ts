@@ -113,13 +113,16 @@ export class LangfuseSdkRuntimeEventExporter implements RuntimeEventExporter {
     }
     if (isLlmGenerationEvent(redactedEvent)) {
       this.publishLlmGenerationEvent(redactedEvent);
+      await this.flushIfTerminalEvent(redactedEvent);
       return;
     }
     if (isToolEvent(redactedEvent)) {
       this.publishToolEvent(redactedEvent);
+      await this.flushIfTerminalEvent(redactedEvent);
       return;
     }
     this.publishLifecycleEvent(redactedEvent);
+    await this.flushIfTerminalEvent(redactedEvent);
   }
 
   async flush(): Promise<void> {
@@ -128,6 +131,19 @@ export class LangfuseSdkRuntimeEventExporter implements RuntimeEventExporter {
 
   async close(): Promise<void> {
     await this.client.shutdownAsync();
+  }
+
+  private async flushIfTerminalEvent(event: RuntimeTelemetryEvent): Promise<void> {
+    if (!isTerminalTelemetryEvent(event)) {
+      return;
+    }
+    try {
+      await this.client.flushAsync();
+    } catch (error) {
+      console.warn(
+        `Langfuse telemetry flush failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 
   private publishLifecycleEvent(event: RuntimeLifecycleEvent): void {
@@ -1335,6 +1351,19 @@ function isToolEvent(event: RuntimeTelemetryEvent): event is RuntimeToolEvent {
 
 function isLlmGenerationEvent(event: RuntimeTelemetryEvent): event is RuntimeLlmGenerationEvent {
   return 'llmGenerationId' in event;
+}
+
+function isTerminalTelemetryEvent(event: RuntimeTelemetryEvent): boolean {
+  if (isToolEvent(event) || isLlmGenerationEvent(event)) {
+    return event.status !== 'started';
+  }
+  return (
+    event.type === 'chat_turn_completed' ||
+    event.type === 'chat_turn_failed' ||
+    event.type === 'subagent_completed' ||
+    event.type === 'subagent_failed' ||
+    event.type === 'subagent_cancelled'
+  );
 }
 
 function parseBoolean(value: string | undefined): boolean {
