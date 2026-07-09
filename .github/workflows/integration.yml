@@ -247,6 +247,15 @@ jobs:
             tools: image_generate
             prompt: "Use image_generate to generate a test image with prompt 'a solid red square'. Report the generated file path."
             assert_pattern: "(image|generated|.png|.jpg|.webp|pi-images)"
+          # Seedream 5.0 lite variant — same extension/tool, distinct matrix
+          # `provider` key so the settings step below points defaultModel at
+          # the Seedream lite model id. Routes through the same ci-gateway
+          # catch-all customProvider as the default entry.
+          - extension: pi-image-gen
+            provider: seedream-lite
+            tools: image_generate
+            prompt: "Use image_generate to generate a test image with prompt 'a solid red square'. Report the generated file path."
+            assert_pattern: "(image|generated|.png|.jpg|.webp|pi-images)"
           - extension: pi-browser-use
             tools: browser_navigate_page,browser_take_snapshot
             prompt: "Use browser_navigate_page to go to https://example.com then use browser_take_snapshot to get page content. Tell me the page title."
@@ -310,6 +319,20 @@ jobs:
                 }
               }
             }'
+          fi
+
+
+          # pi-image-gen defaultModel varies by matrix `provider`: the
+          # seedream-lite entry points at the Seedream 5.0 lite model id,
+          # everything else uses qwen-image-2.0. Both fall through to the
+          # ci-gateway catch-all customProvider (no ARK/DASHSCOPE key in CI),
+          # so the id is sent verbatim as the remote model id over the
+          # OpenAI-shaped wire. Use the full versioned id (not the alias) so
+          # the gateway receives the exact remote model name.
+          if [ "${{ matrix.provider }}" = "seedream-lite" ]; then
+            IMAGE_GEN_MODEL="doubao-seedream-5-0-lite-260128"
+          else
+            IMAGE_GEN_MODEL="qwen-image-2.0"
           fi
 
 
@@ -389,7 +412,7 @@ jobs:
               }
             },
             "pi-image-gen": {
-              "defaultModel": "qwen-image-2.0",
+              "defaultModel": "${IMAGE_GEN_MODEL}",
               "outputDir": "${RUNNER_TEMP}/pi-images",
               "customProviders": {
                 "ci-gateway": {

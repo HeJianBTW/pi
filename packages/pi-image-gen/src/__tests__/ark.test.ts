@@ -36,6 +36,14 @@ describe('ark provider (Volcengine Seedream)', () => {
     expect(result.remoteId).toBe('doubao-seedream-4-0-250828');
   });
 
+  it('routes seedream-5-pro alias to the 5.0 pro model', () => {
+    process.env.ARK_API_KEY = 'ark-test';
+    const result = resolveModel('seedream-5-pro', {});
+    if ('error' in result) throw new Error(result.error);
+    expect(result.provider.id).toBe('ark');
+    expect(result.remoteId).toBe('doubao-seedream-5-0-pro-260128');
+  });
+
   it('text-to-image posts to /images/generations with prompt/n/size as JSON', async () => {
     const cwd = mkdtempSync(join(tmpdir(), 'pi-image-gen-ark-'));
     process.env.ARK_API_KEY = 'ark-test';
