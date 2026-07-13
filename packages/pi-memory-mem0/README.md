@@ -143,7 +143,9 @@ When using an external vector store, the SQLite snapshot is not needed (the vect
 | `useRegistryKeys` | boolean | `true` | Whether OSS mode resolves keys from pi registry |
 | `oss.llm` | object | OpenAI gpt-4.1-nano | OSS extraction model |
 | `oss.embedder` | object | OpenAI text-embedding-3-small | OSS embedding model |
-| `oss.vectorStore` | object | `memory` (in-memory) | Custom vector store config |
+| `oss.vectorStore` | object | `memory` (`:memory:`) | Custom vector store config |
+| `oss.historyStore` | object | SQLite at `<home>/memories/mem0-history.db` | Custom mem0 history store config |
+| `oss.historyDbPath` | string | `<home>/memories/mem0-history.db` | Shortcut for SQLite history DB path |
 | `oss.snapshotDbPath` | string | `<home>/memories/mem0-snapshot.db` | SQLite snapshot file path |
 | `oss.disableHistory` | boolean | `false` | Disable mem0 operation history |
 
@@ -152,8 +154,8 @@ When using an external vector store, the SQLite snapshot is not needed (the vect
 | Mode | Vector Data | Snapshot | History |
 |------|-------------|----------|---------|
 | Platform | Mem0 Cloud | N/A | Cloud-managed |
-| Open-Source (default) | In-memory | `<home>/memories/mem0-snapshot.db` | `~/.mem0/history.db` |
-| Open-Source (qdrant) | Qdrant server | Not used | `~/.mem0/history.db` |
+| Open-Source (default) | In-memory | `<home>/memories/mem0-snapshot.db` | `<home>/memories/mem0-history.db` |
+| Open-Source (qdrant) | Qdrant server | Not used | `<home>/memories/mem0-history.db` |
 
 The `home` directory is resolved via `resolveHome()` from `@amaster.ai/pi-shared/settings` (defaults to `~/.pi/agent`).
 
