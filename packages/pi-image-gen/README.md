@@ -9,7 +9,7 @@ Pi extension that adds an `image_generate` tool. Supported providers:
 | OpenAI                         | `gpt-image-2`                                 | `OPENAI_API_KEY`      |
 | Google Gemini ("Nano Banana")  | `gemini-3-pro-image` (alias `nano-banana-pro`), `gemini-3.1-flash-image` (alias `nano-banana-2`), `gemini-3.1-flash-lite-image` (alias `nano-banana-2-lite`), `gemini-2.5-flash-image` (alias `nano-banana`) | `GEMINI_API_KEY` |
 | Alibaba DashScope (Qwen-Image) | `qwen-image-2.0-pro`, `qwen-image-2.0`          | `DASHSCOPE_API_KEY`   |
-| Volcengine Ark (ByteDance Seedream) | `doubao-seedream-5-0-260128` (alias `seedream-5`, `seedream`), `doubao-seedream-5-0-lite-260128` (alias `seedream-5-lite`), `doubao-seedream-4-5-251128` (alias `seedream-4-5`), `doubao-seedream-4-0-250828` (alias `seedream-4`) | `ARK_API_KEY`         |
+| Volcengine Ark (ByteDance Seedream) | `doubao-seedream-5-0-pro-260128` (alias `seedream-5-pro`), `doubao-seedream-5-0-260128` (alias `seedream-5`, `seedream`), `doubao-seedream-5-0-lite-260128` (alias `seedream-5-lite`), `doubao-seedream-4-5-251128` (alias `seedream-4-5`), `doubao-seedream-4-0-250828` (alias `seedream-4`) | `ARK_API_KEY`         |
 | OpenRouter                     | any (use `openrouter/<vendor>/<id>`)          | `OPENROUTER_API_KEY`  |
 | Custom providers               | whatever you declare in settings              | (your choice, via `$VAR`) |
 

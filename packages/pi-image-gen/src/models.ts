@@ -17,7 +17,6 @@ export const BUILT_IN_MODELS: BuiltInModelEntry[] = [
   {
     id: 'gpt-image-2',
     provider: 'openai',
-    remoteId: 'gpt-image-2',
   },
 
   // Google Gemini "Nano Banana" image generation.
@@ -30,65 +29,60 @@ export const BUILT_IN_MODELS: BuiltInModelEntry[] = [
     id: 'gemini-3-pro-image',
     aliases: ['nano-banana-pro'],
     provider: 'gemini',
-    remoteId: 'gemini-3-pro-image',
   },
   {
     id: 'gemini-3.1-flash-image',
     aliases: ['nano-banana-2'],
     provider: 'gemini',
-    remoteId: 'gemini-3.1-flash-image',
   },
   {
     id: 'gemini-3.1-flash-lite-image',
     aliases: ['nano-banana-2-lite'],
     provider: 'gemini',
-    remoteId: 'gemini-3.1-flash-lite-image',
   },
   {
     id: 'gemini-2.5-flash-image',
     aliases: ['nano-banana'],
     provider: 'gemini',
-    remoteId: 'gemini-2.5-flash-image',
   },
 
   // Alibaba Qwen-Image / WanX series via DashScope.
   {
     id: 'qwen-image-2.0-pro',
     provider: 'dashscope',
-    remoteId: 'qwen-image-2.0-pro',
   },
   {
     id: 'qwen-image-2.0',
     provider: 'dashscope',
-    remoteId: 'qwen-image-2.0',
   },
 
   // ByteDance Seedream via Volcengine Ark. The `seedream` alias points at the
   // latest stable Seedream release.
   // Docs: https://www.volcengine.com/docs/82379/1824121
   {
+    id: 'doubao-seedream-5-0-pro-260128',
+    aliases: ['seedream-5-pro'],
+    provider: 'ark',
+  },
+  {
     id: 'doubao-seedream-5-0-260128',
     aliases: ['seedream-5', 'seedream'],
     provider: 'ark',
-    remoteId: 'doubao-seedream-5-0-260128',
   },
   {
     id: 'doubao-seedream-5-0-lite-260128',
     aliases: ['seedream-5-lite'],
     provider: 'ark',
-    remoteId: 'doubao-seedream-5-0-lite-260128',
   },
   {
     id: 'doubao-seedream-4-5-251128',
     aliases: ['seedream-4-5'],
     provider: 'ark',
-    remoteId: 'doubao-seedream-4-5-251128',
   },
   {
     id: 'doubao-seedream-4-0-250828',
     aliases: ['seedream-4'],
     provider: 'ark',
-    remoteId: 'doubao-seedream-4-0-250828',
   },
 ];
 
