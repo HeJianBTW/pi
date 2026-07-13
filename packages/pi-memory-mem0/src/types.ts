@@ -19,6 +19,10 @@ export interface Mem0ExtensionConfig {
     embedder?: { provider: string; config?: Record<string, unknown> };
     llm?: { provider: string; config?: Record<string, unknown> };
     vectorStore?: { provider: string; config?: Record<string, unknown> };
+    /** Mem0 OSS history store config. Default: sqlite at <home>/memories/mem0-history.db */
+    historyStore?: { provider: string; config?: Record<string, unknown> };
+    /** Shortcut for sqlite history DB path. Default: <home>/memories/mem0-history.db */
+    historyDbPath?: string;
     /** Path to SQLite file for memory snapshot persistence. Default: <home>/memories/mem0-snapshot.db */
     snapshotDbPath?: string;
     disableHistory?: boolean;

@@ -581,8 +581,12 @@ describe('createMem0Provider additional scenarios', () => {
     });
 
     expect(__capturedMem0Config).toBeDefined();
-    const vs = __capturedMem0Config!.vectorStore as { provider: string };
+    const vs = __capturedMem0Config!.vectorStore as {
+      provider: string;
+      config: Record<string, unknown>;
+    };
     expect(vs.provider).toBe('memory');
+    expect(vs.config.dbPath).toBe(':memory:');
   });
 
   it('respects custom vectorStore config', async () => {
@@ -604,6 +608,48 @@ describe('createMem0Provider additional scenarios', () => {
     };
     expect(vs.provider).toBe('qdrant');
     expect(vs.config.url).toBe('http://localhost:6333');
+  });
+
+  it('defaults historyStore to the Pi memories directory', async () => {
+    const { createMem0Provider: create } = await import('../provider.js');
+
+    await create({
+      config: { mode: 'open-source' },
+    });
+
+    expect(__capturedMem0Config).toBeDefined();
+    const historyStore = __capturedMem0Config!.historyStore as {
+      provider: string;
+      config: Record<string, unknown>;
+    };
+    expect(historyStore.provider).toBe('sqlite');
+    expect(String(historyStore.config.historyDbPath).replace(/\\/g, '/')).toContain(
+      '/memories/mem0-history.db',
+    );
+  });
+
+  it('respects custom historyStore config', async () => {
+    const { createMem0Provider: create } = await import('../provider.js');
+
+    await create({
+      config: {
+        mode: 'open-source',
+        oss: {
+          historyStore: {
+            provider: 'sqlite',
+            config: { historyDbPath: '/tmp/custom-mem0-history.db' },
+          },
+        },
+      },
+    });
+
+    expect(__capturedMem0Config).toBeDefined();
+    const historyStore = __capturedMem0Config!.historyStore as {
+      provider: string;
+      config: Record<string, unknown>;
+    };
+    expect(historyStore.provider).toBe('sqlite');
+    expect(historyStore.config.historyDbPath).toBe('/tmp/custom-mem0-history.db');
   });
 
   it('does not inject baseURL when resolveProvider returns no baseUrl', async () => {

@@ -381,8 +381,27 @@ class OSSProvider implements Mem0Provider {
     } else {
       config.vectorStore = {
         provider: 'memory',
-        config: { collectionName: 'pi_mem0' },
+        config: {
+          collectionName: 'pi_mem0',
+          dbPath: ':memory:',
+        },
       };
+    }
+
+    if (this.ossConfig?.historyStore) {
+      config.historyStore = this.ossConfig.historyStore;
+    } else {
+      config.historyStore = {
+        provider: 'sqlite',
+        config: {
+          historyDbPath:
+            this.ossConfig?.historyDbPath ?? join(resolveHome(), 'memories', 'mem0-history.db'),
+        },
+      };
+    }
+
+    if (this.ossConfig?.historyDbPath) {
+      config.historyDbPath = this.ossConfig.historyDbPath;
     }
 
     if (this.ossConfig?.disableHistory) {
