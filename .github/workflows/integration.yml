@@ -227,13 +227,13 @@ jobs:
             assert_pattern: "(0|task|tasks|empty|none)"
           # pi-goal registers no LLM tool — it is driven by the /goal command
           # (TUI) or the --goal flag (CLI). Print mode can't dispatch slash
-          # commands, so this entry uses `goal_flag` to pass a startup
-          # condition via `--goal`. The extension sets the goal and injects an
-          # activation message; the assistant acknowledges the condition, which
-          # the assert pattern matches. maxIterations=1 in settings bounds the
-          # continuation loop so CI can't spin.
+          # commands and won't run an agent turn without a prompt, so this entry
+          # uses `--goal '' -p <prompt>`: the prompt drives one real agent run
+          # (whose reply we assert on) and, at before_agent_start, pi-goal
+          # derives a goal from that same prompt. maxIterations=1 in settings
+          # bounds the continuation loop so CI can't spin.
           - extension: pi-goal
-            goal_flag: "reply with the exact token ci-goal-ok and nothing else"
+            prompt: "Reply with exactly the token ci-goal-ok and nothing else."
             assert_pattern: "ci-goal-ok"
           - extension: pi-teamwork
             tools: workspace_list
@@ -532,8 +532,10 @@ jobs:
           # observed to occasionally hang >5min on tool-call prompts. Stage B
           # smoke keeps xhigh per the original spec.
           if [ "${{ matrix.extension }}" = "pi-goal" ]; then
-            # pi-goal has no LLM tool and no prompt: --goal sets the goal at
-            # startup, whose activation message triggers a turn. No -p / --tools.
+            # pi-goal has no LLM tool. --goal '' enables auto-derivation; -p
+            # drives one real agent run (print mode won't run a turn without a
+            # prompt). pi-goal derives the goal from the prompt at
+            # before_agent_start; we assert on the assistant's reply.
             output="$(pi \
               --provider deepseek-integration \
               --model deepseek-v4-flash \
@@ -541,7 +543,8 @@ jobs:
               --no-session \
               --no-context-files \
               --mode json \
-              --goal '${{ matrix.goal_flag }}' 2>&1)"
+              --goal '' \
+              -p '${{ matrix.prompt }}' 2>&1)"
             rc=$?
           else
             output="$(pi \
