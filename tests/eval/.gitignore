@@ -1,2 +1,4 @@
 datasets/
 results/
+# chrome-devtools-mcp / take_snapshot can dump a snapshot file into cwd during a run
+snapshot.txt
