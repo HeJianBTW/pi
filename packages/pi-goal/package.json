@@ -1,0 +1,78 @@
+{
+  "name": "@amaster.ai/pi-goal",
+  "version": "0.1.0-beta.0",
+  "description": "Pi extension that derives a goal from the conversation and keeps the agent working until the condition is met",
+  "keywords": ["pi-package", "pi", "extension", "goal", "autonomous", "stop-condition"],
+  "license": "Apache-2.0",
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./extension": {
+      "types": "./dist/extension.d.ts",
+      "default": "./dist/extension.js"
+    },
+    "./package.json": {
+      "default": "./package.json"
+    }
+  },
+  "pi": {
+    "image": "https://raw.githubusercontent.com/TGYD-helige/pi/master/packages/pi-goal/preview.png",
+    "extensions": [
+      "./dist/index.js"
+    ]
+  },
+  "files": [
+    "dist",
+    "preview.png",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TGYD-helige/pi.git",
+    "directory": "packages/pi-goal"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b --pretty false",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@amaster.ai/pi-shared": "workspace:*"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-agent-core": ">=0.74.0",
+    "@earendil-works/pi-ai": ">=0.80.3",
+    "@earendil-works/pi-coding-agent": ">=0.74.0",
+    "typebox": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-agent-core": {
+      "optional": true
+    },
+    "@earendil-works/pi-ai": {
+      "optional": true
+    },
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    },
+    "typebox": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@earendil-works/pi-agent-core": "0.80.3",
+    "@earendil-works/pi-ai": "0.80.3",
+    "@earendil-works/pi-coding-agent": "0.80.3",
+    "typebox": "*",
+    "vitest": "^4.0.0"
+  }
+}
