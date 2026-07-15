@@ -16,6 +16,56 @@ Modeled on Claude Code's stop-condition mechanism, with a token/iteration budget
 
 Goal state is session-scoped and held in memory (no cross-session persistence), matching Claude Code's behavior.
 
+## Pi lifecycle (how the engine hooks in)
+
+The goal engine is driven by Pi's lifecycle events. For one `pi -p '<prompt>'`
+run (non-interactive), events fire in this order:
+
+```
+session_start                                 ← session-level, once
+  │   pi-goal: load config, read the --goal flag
+  ▼
+[ per user prompt — the "agent-level" block below repeats ]
+  │
+  before_agent_start  { prompt, systemPrompt } ← carries the user's input for this turn, once per prompt
+  │
+  agent_start         { }
+  │
+  ├─ [ per turn, may repeat ]
+  │    turn_start       { turnIndex }
+  │    message_start    { message (user) }
+  │    message_end      { message (user) }
+  │    message_start    { message (assistant) }
+  │    message_end      { message (assistant) }
+  │    turn_end         { turnIndex, message, toolResults }  ← pi-goal buffers messages here
+  │
+  agent_end           { messages: [...] }       ← engine evaluates + stops/continues, once per prompt
+  │   If a goal is active: build a transcript from `messages`, ask the
+  │   evaluator ok / impossible / not-yet. Not-yet → sendUserMessage(continue)
+  │   → triggers a new agent run (back to before_agent_start).
+  │
+  agent_settled       { }                        ← this prompt is fully done
+  ▼
+[ interactive: wait for next input · print mode: process exits here ]
+
+session_shutdown                               ← on exit/switch; pi-goal clears state
+```
+
+Events pi-goal uses:
+
+| Event | What pi-goal does | Notes |
+|-------|-------------------|-------|
+| `session_start` | Load config; read the `--goal` flag | Session-level, fires once |
+| `before_agent_start` | If a `--goal` derivation is pending, derive the condition from `event.prompt` (this turn's user input) + buffered transcript, then set + activate the goal | Fires once per prompt; the right anchor for auto-derivation since no transcript exists yet at `session_start` |
+| `turn_end` | Buffer `event.message` into the rolling transcript | Feeds derive/evaluate |
+| `agent_end` | If a goal is active, run the engine: evaluate → mark achieved/impossible or `sendUserMessage` to continue | Engine core |
+| `session_shutdown` | Clear the goal and the buffered transcript | Cleanup |
+
+Note on derivation timing: a condition can only be derived once there is
+conversation to derive from. `session_start` is too early (no transcript
+yet); `before_agent_start` is the first point that carries the user's prompt
+for the turn, so auto-derivation keys off it rather than firing at startup.
+
 ## Usage
 
 ```
@@ -23,6 +73,14 @@ Goal state is session-scoped and held in memory (no cross-session persistence), 
 /goal               No active goal → derive one from the conversation (with confirmation).
                     Active goal → show its status.
 /goal clear         Clear the active goal (also: stop, off, reset, none, cancel).
+```
+
+The slash command is for interactive (TUI) use; print mode can't dispatch it.
+For the CLI / non-interactive runs, use the `--goal` flag instead:
+
+```
+pi --goal '<condition>' -p '<prompt>'   Set an explicit goal, then run the prompt.
+pi --goal '' -p '<prompt>'              Derive the goal from the prompt (at before_agent_start).
 ```
 
 ## Configuration

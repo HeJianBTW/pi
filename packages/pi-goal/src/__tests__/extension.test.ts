@@ -79,6 +79,7 @@ describe('goalExtension wiring', () => {
       expect.objectContaining({ type: 'string' }),
     );
     expect(pi.eventHandlers.session_start).toBeDefined();
+    expect(pi.eventHandlers.before_agent_start).toBeDefined();
     expect(pi.eventHandlers.agent_end).toBeDefined();
     expect(pi.eventHandlers.session_shutdown).toBeDefined();
   });
@@ -99,6 +100,49 @@ describe('goalExtension wiring', () => {
     const ctx = createMockCtx();
     await pi.eventHandlers.session_start![0]!({ type: 'session_start' }, ctx);
     expect(pi.sendUserMessage).not.toHaveBeenCalled();
+  });
+
+  it('defers empty --goal derivation to before_agent_start, using the prompt', async () => {
+    const pi = createMockPi(''); // bare --goal (empty value)
+    goalExtension(pi as never, injected);
+    const ctx = createMockCtx();
+
+    // session_start must NOT derive yet — no transcript exists.
+    await pi.eventHandlers.session_start![0]!({ type: 'session_start' }, ctx);
+    expect(deriveCondition).not.toHaveBeenCalled();
+    expect(pi.sendUserMessage).not.toHaveBeenCalled();
+
+    // First before_agent_start carries the prompt → derive and activate.
+    deriveCondition.mockResolvedValue('The login endpoint returns 200 for valid credentials');
+    await pi.eventHandlers.before_agent_start![0]!(
+      { type: 'before_agent_start', prompt: 'make the login endpoint work' },
+      ctx,
+    );
+    expect(deriveCondition).toHaveBeenCalledTimes(1);
+    // The current turn's prompt must be part of the derivation transcript.
+    expect(deriveCondition.mock.calls[0]?.[0]?.transcript).toContain(
+      'make the login endpoint work',
+    );
+    expect(pi.sendUserMessage).toHaveBeenCalledWith(
+      expect.stringContaining('The login endpoint returns 200 for valid credentials'),
+    );
+  });
+
+  it('only derives once even across multiple before_agent_start events', async () => {
+    const pi = createMockPi('');
+    goalExtension(pi as never, injected);
+    const ctx = createMockCtx();
+    await pi.eventHandlers.session_start![0]!({ type: 'session_start' }, ctx);
+    deriveCondition.mockResolvedValue('some derived condition');
+    await pi.eventHandlers.before_agent_start![0]!(
+      { type: 'before_agent_start', prompt: 'first' },
+      ctx,
+    );
+    await pi.eventHandlers.before_agent_start![0]!(
+      { type: 'before_agent_start', prompt: 'second' },
+      ctx,
+    );
+    expect(deriveCondition).toHaveBeenCalledTimes(1);
   });
 
   it('sets an explicit goal and injects an activation message', async () => {

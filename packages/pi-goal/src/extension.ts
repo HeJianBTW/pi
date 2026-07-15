@@ -117,6 +117,10 @@ export default function goalExtension(
   let registry: GoalModelRegistry | undefined;
   let latestMessages: unknown[] = [];
   let engineRunning = false;
+  // Set when `--goal` was passed with an empty value: derivation is deferred to
+  // the first before_agent_start, where the user's prompt is available. At
+  // session_start there is no transcript yet, so deriving there yields nothing.
+  let pendingDerive = false;
 
   pi.on('session_start', async (_event, ctx) => {
     const fileConfig = loadSettings(ctx.cwd);
@@ -126,16 +130,28 @@ export default function goalExtension(
 
     // --goal <condition> flag: set the goal at startup (print mode can't dispatch
     // the /goal slash command, so the flag is the CLI entry point). An empty
-    // string (bare --goal) triggers derivation, mirroring no-arg /goal.
+    // string (bare --goal) defers derivation to before_agent_start, where the
+    // user's prompt for the turn is available to derive from.
     const flagValue = pi.getFlag('goal');
     if (typeof flagValue === 'string') {
       const condition = flagValue.trim();
       if (condition && !isClearKeyword(condition)) {
         setExplicitGoal(condition, ctx);
       } else if (!condition) {
-        await deriveAndSet(ctx);
+        pendingDerive = true;
       }
     }
+  });
+
+  // First user prompt: if a --goal derivation is pending, derive the condition
+  // now — event.prompt carries what the user wants this turn, which is the
+  // signal to derive from. Fires once per prompt; we clear the flag after.
+  pi.on('before_agent_start', async (event, ctx) => {
+    if (!pendingDerive) return;
+    pendingDerive = false;
+    const evt = event as unknown as { prompt?: unknown };
+    const prompt = typeof evt.prompt === 'string' ? evt.prompt : '';
+    await deriveAndSet(ctx, prompt);
   });
 
   // Keep the freshest full message list for the engine; agent_end also carries it.
@@ -176,6 +192,7 @@ export default function goalExtension(
     state.clear();
     latestMessages = [];
     registry = undefined;
+    pendingDerive = false;
   });
 
   pi.registerFlag('goal', {
@@ -241,7 +258,7 @@ export default function goalExtension(
     }
   }
 
-  async function deriveAndSet(ctx: ExtensionContext): Promise<void> {
+  async function deriveAndSet(ctx: ExtensionContext, extraContext = ''): Promise<void> {
     if (!config.model || !registry) {
       ctx.ui.notify(
         'No evaluator model configured. Set `pi-goal.model` in settings, or use `/goal <condition>`.',
@@ -250,10 +267,16 @@ export default function goalExtension(
       return;
     }
     ctx.ui.notify('Deriving a goal from the conversation…', 'info');
+    // Fold the current turn's prompt (when derivation was triggered by --goal
+    // before any turn has run) into the buffered transcript, so there is always
+    // something to derive from even on a fresh session.
+    const buffered = buildTranscript(latestMessages, config.transcriptMaxChars);
+    const extra = extraContext.trim() ? `[user] ${extraContext.trim()}` : '';
+    const transcript = [buffered, extra].filter(Boolean).join('\n\n');
     const condition = await deriveCondition({
       registry,
       modelConfig: config.model,
-      transcript: buildTranscript(latestMessages, config.transcriptMaxChars),
+      transcript,
       ...(ctx.signal ? { signal: ctx.signal } : {}),
     });
     if (!condition) {
