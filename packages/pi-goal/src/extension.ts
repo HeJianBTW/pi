@@ -151,7 +151,10 @@ export default function goalExtension(
     pendingDerive = false;
     const evt = event as unknown as { prompt?: unknown };
     const prompt = typeof evt.prompt === 'string' ? evt.prompt : '';
-    await deriveAndSet(ctx, prompt);
+    // activate=false: the agent is about to run this prompt, so don't inject an
+    // activation message (it would throw "already processing"). The run reaches
+    // agent_end on its own, where the engine evaluates the goal.
+    await deriveAndSet(ctx, prompt, false);
   });
 
   // Keep the freshest full message list for the engine; agent_end also carries it.
@@ -258,7 +261,11 @@ export default function goalExtension(
     }
   }
 
-  async function deriveAndSet(ctx: ExtensionContext, extraContext = ''): Promise<void> {
+  async function deriveAndSet(
+    ctx: ExtensionContext,
+    extraContext = '',
+    activate = true,
+  ): Promise<void> {
     if (!config.model || !registry) {
       ctx.ui.notify(
         'No evaluator model configured. Set `pi-goal.model` in settings, or use `/goal <condition>`.',
@@ -301,7 +308,14 @@ export default function goalExtension(
     try {
       const goal = state.set(condition, 'derived', tokenBudgetOpts());
       ctx.ui.setStatus(STATUS_KEY, formatStatus(goal));
-      pi.sendUserMessage(buildActivationMessage(goal.condition));
+      // Only inject the activation nudge when the agent is idle (interactive
+      // /goal). When deriving at before_agent_start, the agent is already about
+      // to run the user's prompt — injecting here throws "Agent is already
+      // processing a prompt". That run naturally reaches agent_end, where the
+      // engine evaluates the goal.
+      if (activate) {
+        pi.sendUserMessage(buildActivationMessage(goal.condition));
+      }
     } catch (err) {
       ctx.ui.notify(err instanceof Error ? err.message : 'Failed to set goal.', 'error');
     }

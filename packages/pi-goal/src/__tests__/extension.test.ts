@@ -112,7 +112,7 @@ describe('goalExtension wiring', () => {
     expect(deriveCondition).not.toHaveBeenCalled();
     expect(pi.sendUserMessage).not.toHaveBeenCalled();
 
-    // First before_agent_start carries the prompt → derive and activate.
+    // First before_agent_start carries the prompt → derive and set the goal.
     deriveCondition.mockResolvedValue('The login endpoint returns 200 for valid credentials');
     await pi.eventHandlers.before_agent_start![0]!(
       { type: 'before_agent_start', prompt: 'make the login endpoint work' },
@@ -123,9 +123,11 @@ describe('goalExtension wiring', () => {
     expect(deriveCondition.mock.calls[0]?.[0]?.transcript).toContain(
       'make the login endpoint work',
     );
-    expect(pi.sendUserMessage).toHaveBeenCalledWith(
-      expect.stringContaining('The login endpoint returns 200 for valid credentials'),
-    );
+    // Goal is active…
+    expect(ctx.ui.setStatus).toHaveBeenLastCalledWith('pi-goal', expect.stringContaining('active'));
+    // …but no activation message is injected here — the agent is about to run
+    // this prompt; injecting would throw "already processing".
+    expect(pi.sendUserMessage).not.toHaveBeenCalled();
   });
 
   it('only derives once even across multiple before_agent_start events', async () => {
