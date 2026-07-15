@@ -19,7 +19,10 @@ export interface DeriveOptions {
  */
 export async function deriveCondition(opts: DeriveOptions): Promise<string | null> {
   const { registry, modelConfig, transcript, signal } = opts;
-  if (!transcript.trim()) return null;
+  if (!transcript.trim()) {
+    console.error('[pi-goal] derive: empty transcript, nothing to derive from');
+    return null;
+  }
 
   const raw = await completeOnce(
     registry,
@@ -28,10 +31,17 @@ export async function deriveCondition(opts: DeriveOptions): Promise<string | nul
     buildDeriveUserPrompt(transcript),
     signal,
   );
-  if (raw === null) return null;
+  if (raw === null) {
+    console.error('[pi-goal] derive: model unavailable or call failed');
+    return null;
+  }
 
   const condition = normalizeCondition(raw);
-  if (!condition || condition.toUpperCase() === 'NONE') return null;
+  if (!condition || condition.toUpperCase() === 'NONE') {
+    console.error('[pi-goal] derive: no actionable objective inferred (NONE)');
+    return null;
+  }
+  console.error(`[pi-goal] derived condition: ${condition}`);
   return condition;
 }
 

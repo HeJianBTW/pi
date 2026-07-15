@@ -24,6 +24,16 @@ describe('deriveCondition', () => {
     expect(result).toBe('All unit tests pass and lint is clean');
   });
 
+  it('logs the derived condition to stderr', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    completeOnce.mockResolvedValue('All tests pass');
+    await deriveCondition({ registry, modelConfig, transcript: 'work' });
+    expect(spy).toHaveBeenCalledWith(
+      expect.stringContaining('[pi-goal] derived condition: All tests pass'),
+    );
+    spy.mockRestore();
+  });
+
   it('strips wrapping quotes/backticks and takes the first line', () => {
     completeOnce.mockResolvedValue('"The build succeeds"\nextra chatter');
     return deriveCondition({ registry, modelConfig, transcript: 'work' }).then((r) =>

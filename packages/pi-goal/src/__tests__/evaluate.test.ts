@@ -1,5 +1,44 @@
-import { describe, expect, it } from 'vitest';
-import { parseVerdict } from '../evaluate.js';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const completeOnce = vi.fn();
+vi.mock('../llm.js', () => ({ completeOnce: (...args: unknown[]) => completeOnce(...args) }));
+
+import { evaluateCondition, parseVerdict } from '../evaluate.js';
+import type { GoalModelRegistry } from '../llm.js';
+
+describe('evaluateCondition', () => {
+  const registry: GoalModelRegistry = {
+    find: () => ({}),
+    getApiKeyAndHeaders: async () => ({ ok: true }),
+  };
+  const base = {
+    registry,
+    modelConfig: { provider: 'p', model: 'm' },
+    condition: 'c',
+    transcript: 't',
+  };
+
+  beforeEach(() => completeOnce.mockReset());
+
+  it('returns null and logs when the model call fails', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    completeOnce.mockResolvedValue(null);
+    expect(await evaluateCondition(base)).toBeNull();
+    expect(spy).toHaveBeenCalledWith(
+      expect.stringContaining('[pi-goal] evaluate: model unavailable'),
+    );
+    spy.mockRestore();
+  });
+
+  it('logs the verdict to stderr', async () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    completeOnce.mockResolvedValue('{"ok": true, "reason": "done"}');
+    const v = await evaluateCondition(base);
+    expect(v).toEqual({ ok: true, impossible: false, reason: 'done' });
+    expect(spy).toHaveBeenCalledWith(expect.stringContaining('[pi-goal] evaluation: ok=true'));
+    spy.mockRestore();
+  });
+});
 
 describe('parseVerdict', () => {
   it('parses a clean "met" verdict', () => {

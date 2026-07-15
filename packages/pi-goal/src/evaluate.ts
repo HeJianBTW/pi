@@ -37,9 +37,16 @@ export async function evaluateCondition(opts: EvaluateOptions): Promise<GoalVerd
     buildEvaluateUserPrompt(condition, transcript, omittedCount ?? 0),
     signal,
   );
-  if (raw === null) return null;
+  if (raw === null) {
+    console.error('[pi-goal] evaluate: model unavailable or call failed');
+    return null;
+  }
 
-  return parseVerdict(raw);
+  const verdict = parseVerdict(raw);
+  console.error(
+    `[pi-goal] evaluation: ok=${verdict.ok} impossible=${verdict.impossible} reason=${verdict.reason}`,
+  );
+  return verdict;
 }
 
 /** Parse the JSON verdict leniently; unparseable output → conservative "not yet". */

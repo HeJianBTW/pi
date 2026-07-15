@@ -607,6 +607,25 @@ jobs:
             exit 1
           fi
 
+          # pi-goal: the generic assert above only proves the assistant echoed
+          # the token the prompt asked for — it does not prove the goal engine
+          # ran. Assert the engine's stderr diagnostics (merged via 2>&1) show
+          # it derived a condition. Derivation happens at before_agent_start, so
+          # it always completes before the run ends — a hard gate. Evaluation
+          # runs in the async agent_end handler, which print mode may not await
+          # before exit, so it is a soft check (warn only).
+          if [ "${{ matrix.extension }}" = "pi-goal" ]; then
+            echo "--- pi-goal engine diagnostics ---"
+            grep -E '\[pi-goal\] (derived condition|evaluation):' <<<"$output" || true
+            if ! grep -qE '\[pi-goal\] derived condition:' <<<"$output"; then
+              echo "::error::pi-goal: no 'derived condition' in output — auto-derivation did not run."
+              exit 1
+            fi
+            if ! grep -qE '\[pi-goal\] evaluation: ok=' <<<"$output"; then
+              echo "::warning::pi-goal: no 'evaluation' line — agent_end evaluation may not have completed before print-mode exit."
+            fi
+          fi
+
       - name: Verify pi-memory-mem0 captured turn (memory job only)
         if: matrix.extension == 'pi-memory' && env.PI_INTEGRATION_BASE_URL != ''
         run: |
