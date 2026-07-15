@@ -33,7 +33,7 @@ describe('parseVerdict', () => {
     const v = parseVerdict('I think it is probably fine, hard to say.');
     expect(v.ok).toBe(false);
     expect(v.impossible).toBe(false);
-    expect(v.reason).toMatch(/continu/i);
+    expect(v.reason).toMatch(/insufficient evidence/i);
   });
 
   it('fills a default reason when reason is missing', () => {

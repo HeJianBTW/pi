@@ -9,22 +9,45 @@ interface MessageLike {
   content: unknown;
 }
 
-export function buildTranscript(messages: unknown[], maxChars: number): string {
+export interface TranscriptResult {
+  /** Formatted transcript, oldest included message first. */
+  text: string;
+  /** Count of text-bearing messages dropped because of the char cap. */
+  omitted: number;
+}
+
+/**
+ * Build the transcript and report how many text-bearing messages were dropped
+ * to fit the cap. The evaluator uses `omitted` to decide whether to warn that
+ * evidence may live in the truncated prefix (see buildTruncationNote).
+ */
+export function buildTranscriptWithMeta(messages: unknown[], maxChars: number): TranscriptResult {
   const lines: string[] = [];
   let total = 0;
+  let included = 0;
+  let textMessages = 0;
 
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i] as MessageLike | undefined;
     if (!msg || typeof msg.role !== 'string') continue;
     const text = extractText(msg.content);
     if (!text) continue;
+    textMessages += 1;
     const line = `[${msg.role}] ${text}`;
-    if (total + line.length > maxChars && lines.length > 0) break;
+    if (total + line.length > maxChars && lines.length > 0) {
+      // Cap hit: this and every older text message is omitted.
+      continue;
+    }
     lines.unshift(line);
     total += line.length;
+    included += 1;
   }
 
-  return lines.join('\n\n');
+  return { text: lines.join('\n\n'), omitted: Math.max(0, textMessages - included) };
+}
+
+export function buildTranscript(messages: unknown[], maxChars: number): string {
+  return buildTranscriptWithMeta(messages, maxChars).text;
 }
 
 export function extractText(content: unknown): string {

@@ -10,7 +10,7 @@ import { evaluateCondition } from './evaluate.js';
 import { type ActiveGoal, GoalState, isClearKeyword, MAX_CONDITION_LENGTH } from './goal-state.js';
 import type { GoalModelRegistry } from './llm.js';
 import { buildActivationMessage, buildContinueMessage } from './prompts.js';
-import { buildTranscript } from './transcript.js';
+import { buildTranscript, buildTranscriptWithMeta } from './transcript.js';
 
 const STATUS_KEY = 'pi-goal';
 
@@ -48,7 +48,10 @@ export async function runGoalEngine(
   if (!goal || goal.status !== 'active') return 'skipped';
   if (!config.model) return 'skipped'; // engine disabled without a model
 
-  const transcript = buildTranscript(messages, config.transcriptMaxChars);
+  const { text: transcript, omitted } = buildTranscriptWithMeta(
+    messages,
+    config.transcriptMaxChars,
+  );
   if (!transcript) return 'skipped';
 
   const verdict = await evaluateCondition({
@@ -56,6 +59,7 @@ export async function runGoalEngine(
     modelConfig: config.model,
     condition: goal.condition,
     transcript,
+    omittedCount: omitted,
     ...(deps.signal ? { signal: deps.signal } : {}),
   });
   // Model unavailable / call failed: do nothing this round (degrade quietly).

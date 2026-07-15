@@ -54,6 +54,7 @@ Prefer a small, cheap model for `model` — the evaluator runs after every agent
 ## Relationship to Claude Code / Codex
 
 - **Engine (from Claude Code):** goal = a stop condition; Pi keeps going until an evaluator judges it met. Passive — it drives continuation off `agent_end`, not a background scheduler.
-- **Auto-derivation:** you don't have to phrase the condition; it's inferred and confirmed.
+- **Prompts (from Claude Code):** the evaluator and activation prompts are adapted almost verbatim from Claude Code's own stop-hook prompts — including the quote-the-evidence requirement, the "insufficient evidence in transcript" fallback, the impossible-judgment discipline (the assistant's claim is *evidence, not proof*), and the truncated-transcript note.
+- **Auto-derivation:** you don't have to phrase the condition; it's inferred and confirmed. (No CC analogue — CC always takes an explicit condition.)
 - **Budget backstop (from Codex):** token + iteration limits prevent runaway loops.
 - **Not included:** Codex's idle auto-resume, pause/resume dialogs, file-backed objectives, and cross-session persistence.

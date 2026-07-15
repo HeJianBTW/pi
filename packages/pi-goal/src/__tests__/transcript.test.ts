@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildTranscript, extractText } from '../transcript.js';
+import { buildTranscript, buildTranscriptWithMeta, extractText } from '../transcript.js';
 
 describe('extractText', () => {
   it('returns trimmed string content', () => {
@@ -55,5 +55,38 @@ describe('buildTranscript', () => {
   it('always keeps at least the newest message even if over cap', () => {
     const messages = [{ role: 'user', content: 'X'.repeat(100) }];
     expect(buildTranscript(messages, 10)).toContain('X'.repeat(100));
+  });
+});
+
+describe('buildTranscriptWithMeta', () => {
+  it('reports zero omitted when everything fits', () => {
+    const messages = [
+      { role: 'user', content: 'a' },
+      { role: 'assistant', content: 'b' },
+    ];
+    const result = buildTranscriptWithMeta(messages, 1000);
+    expect(result.omitted).toBe(0);
+    expect(result.text).toContain('[user] a');
+  });
+
+  it('counts text-bearing messages dropped by the cap', () => {
+    const messages = [
+      { role: 'user', content: 'AAAAAAAAAA' },
+      { role: 'assistant', content: 'BBBBBBBBBB' },
+      { role: 'user', content: 'CCCCCCCCCC' },
+    ];
+    const result = buildTranscriptWithMeta(messages, 30);
+    // Newest survives; at least one older text message is dropped.
+    expect(result.text).toContain('CCCCCCCCCC');
+    expect(result.omitted).toBeGreaterThan(0);
+  });
+
+  it('does not count text-less messages as omitted', () => {
+    const messages = [
+      { role: 'assistant', content: [{ type: 'tool_use', name: 'x' }] },
+      { role: 'user', content: 'hi' },
+    ];
+    const result = buildTranscriptWithMeta(messages, 1000);
+    expect(result.omitted).toBe(0);
   });
 });

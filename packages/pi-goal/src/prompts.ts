@@ -1,10 +1,11 @@
 /**
  * Prompt templates for the goal engine.
  *
- * - Derive: turn recent conversation into one measurable completion condition.
- * - Evaluate: judge whether a condition is met (JSON verdict), modeled on
- *   Claude Code's stop-condition evaluator.
- * - Activation / continue: messages injected into the main agent to drive it.
+ * The evaluator and activation prompts are adapted almost verbatim from Claude
+ * Code's own stop-hook prompts (agent-prompt-hook-condition-evaluator-stop,
+ * system-reminder-session-stop-hook-active), tuned only where pi's mechanics
+ * differ (a `/goal` command instead of CC's). The derive prompt has no CC
+ * analogue — CC always takes an explicit condition — so it is ours.
  */
 
 export const DERIVE_SYSTEM_PROMPT = `You infer a single, concrete completion condition from a coding conversation.
@@ -22,37 +23,52 @@ export function buildDeriveUserPrompt(transcript: string): string {
   return `## Recent conversation\n\n${transcript}\n\n---\nInfer the single measurable completion condition, or output NONE.`;
 }
 
-export const EVALUATE_SYSTEM_PROMPT = `You are evaluating a stop condition for a coding agent. Based on the conversation transcript, judge whether the user-provided condition is now satisfied.
+/**
+ * Stop-condition evaluator. Adapted from Claude Code's
+ * `agent-prompt-hook-condition-evaluator-stop` — the quote-evidence
+ * requirement, the "insufficient evidence in transcript" fallback, and the
+ * impossible-judgment discipline all come from CC's original wording.
+ */
+export const EVALUATE_SYSTEM_PROMPT = `You are evaluating a stop-condition hook. Read the conversation transcript carefully, then judge whether the user-provided condition is satisfied.
 
-Respond with a JSON object and NOTHING else. Shapes:
-- Met:        {"ok": true, "reason": "<why it is satisfied>"}
-- Not yet:    {"ok": false, "reason": "<what still remains>"}
-- Impossible: {"ok": false, "impossible": true, "reason": "<why it cannot be achieved>"}
+Your response must be a JSON object with one of these shapes:
+- {"ok": true, "reason": "<quote evidence from the transcript that satisfies the condition>"}
+- {"ok": false, "reason": "<quote what is missing or what blocks the condition>"}
+- {"ok": false, "impossible": true, "reason": "<explain why the condition can never be satisfied>"}
 
-Guidance:
-- Only report ok:true when the condition is genuinely and verifiably met by the work shown.
-- Use impossible sparingly — only when the condition can never be satisfied (contradictory, blocked by an external hard limit), not merely because it is unfinished.
-- Keep "reason" to one sentence.`;
+Always include a "reason" field, quoting specific text from the transcript whenever possible. If the transcript does not contain clear evidence that the condition is satisfied, return {"ok": false, "reason": "insufficient evidence in transcript"}.
 
-export function buildEvaluateUserPrompt(condition: string, transcript: string): string {
-  return `## Conversation transcript\n\n${transcript}\n\n## Condition\n\n${condition}\n\n---\nHas the condition been satisfied? Reply with the JSON verdict only.`;
+Only use {"ok": false, "impossible": true} when the condition is genuinely unachievable in this session — for example: the condition is self-contradictory, it depends on a resource or capability that is unavailable, or the assistant has explicitly tried, exhausted reasonable approaches, and stated it cannot be done. Apply your own judgment when deciding this — the assistant claiming the goal is impossible is evidence, not proof; independently confirm the condition is genuinely unachievable rather than deferring to the assistant's self-assessment. Do not use it just because the goal has not been reached yet or because progress is slow. When in doubt, return {"ok": false} without "impossible".`;
+
+/**
+ * Note prepended to the transcript when older messages were dropped to fit the
+ * evaluator's char cap. Adapted from CC's
+ * `system-prompt-hook-evaluator-truncated-transcript-note`: if the evidence
+ * might be in the omitted prefix, the evaluator should return insufficient
+ * evidence rather than guess.
+ */
+export function buildTruncationNote(omittedCount: number): string {
+  return `[Earlier conversation truncated to fit the evaluator's context window — ${omittedCount} earlier message(s) omitted. Evaluate the condition against the recent transcript below; if the required evidence may be in the omitted prefix, return {"ok": false, "reason": "insufficient evidence in transcript"}.]`;
 }
 
-/** Injected once when a goal is set, so the main agent starts working toward it. */
+export function buildEvaluateUserPrompt(
+  condition: string,
+  transcript: string,
+  omittedCount = 0,
+): string {
+  const note = omittedCount > 0 ? `${buildTruncationNote(omittedCount)}\n\n` : '';
+  return `## Conversation transcript\n\n${note}${transcript}\n\n## Condition\n\n${condition}\n\n---\nHas the condition been satisfied? Reply with the JSON verdict only.`;
+}
+
+/**
+ * Injected once when a goal is set, so the main agent starts working toward it.
+ * Adapted from CC's `system-reminder-session-stop-hook-active`.
+ */
 export function buildActivationMessage(condition: string): string {
-  return [
-    `A goal is now active with condition: "${condition}".`,
-    'Briefly acknowledge it, then immediately start (or continue) working toward it — treat the condition itself as your directive and do not pause to ask what to do.',
-    'You will be checked against this condition when you finish; work will resume automatically until it holds.',
-    'It clears automatically once the condition is met — do not tell the user to clear it after success.',
-  ].join(' ');
+  return `A goal is now active with condition: "${condition}". Briefly acknowledge the goal, then immediately start (or continue) working toward it — treat the condition itself as your directive and do not pause to ask the user what to do. Work will be blocked from stopping until the condition holds. It auto-clears once the condition is met — do not tell the user to run \`/goal clear\` after success; that's only for clearing a goal early.`;
 }
 
 /** Injected after a not-yet-met evaluation to drive the next round of work. */
 export function buildContinueMessage(condition: string, reason: string): string {
-  return [
-    `The goal is not yet met. Goal condition: "${condition}".`,
-    `What still remains: ${reason}`,
-    'Continue working toward the condition now.',
-  ].join(' ');
+  return `The goal condition is not yet met: "${condition}". ${reason} Continue working toward the condition now — do not stop until it holds.`;
 }

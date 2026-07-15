@@ -34,7 +34,13 @@ export {
   buildContinueMessage,
   buildDeriveUserPrompt,
   buildEvaluateUserPrompt,
+  buildTruncationNote,
   DERIVE_SYSTEM_PROMPT,
   EVALUATE_SYSTEM_PROMPT,
 } from './prompts.js';
-export { buildTranscript, extractText } from './transcript.js';
+export {
+  buildTranscript,
+  buildTranscriptWithMeta,
+  extractText,
+  type TranscriptResult,
+} from './transcript.js';

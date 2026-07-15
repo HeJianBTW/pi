@@ -17,6 +17,8 @@ export interface EvaluateOptions {
   modelConfig: GoalModelConfig;
   condition: string;
   transcript: string;
+  /** Text-bearing messages dropped to fit the cap; surfaced to the evaluator. */
+  omittedCount?: number;
   signal?: AbortSignal;
 }
 
@@ -26,13 +28,13 @@ export interface EvaluateOptions {
  * than null, so the engine keeps working instead of silently giving up.
  */
 export async function evaluateCondition(opts: EvaluateOptions): Promise<GoalVerdict | null> {
-  const { registry, modelConfig, condition, transcript, signal } = opts;
+  const { registry, modelConfig, condition, transcript, omittedCount, signal } = opts;
 
   const raw = await completeOnce(
     registry,
     modelConfig,
     EVALUATE_SYSTEM_PROMPT,
-    buildEvaluateUserPrompt(condition, transcript),
+    buildEvaluateUserPrompt(condition, transcript, omittedCount ?? 0),
     signal,
   );
   if (raw === null) return null;
@@ -44,7 +46,11 @@ export async function evaluateCondition(opts: EvaluateOptions): Promise<GoalVerd
 export function parseVerdict(raw: string): GoalVerdict {
   const parsed = extractJsonObject(raw);
   if (!parsed) {
-    return { ok: false, impossible: false, reason: 'Could not parse evaluation; continuing.' };
+    return {
+      ok: false,
+      impossible: false,
+      reason: 'insufficient evidence in transcript (unparseable evaluation)',
+    };
   }
   const ok = parsed.ok === true;
   const impossible = parsed.impossible === true && !ok;
