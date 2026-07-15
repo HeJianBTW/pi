@@ -542,6 +542,7 @@ jobs:
               --no-context-files \
               --mode json \
               --goal '${{ matrix.goal_flag }}' 2>&1)"
+            rc=$?
           else
             output="$(pi \
               --provider deepseek-integration \
@@ -552,8 +553,8 @@ jobs:
               --tools '${{ matrix.tools }}' \
               --mode json \
               -p '${{ matrix.prompt }}' 2>&1)"
+            rc=$?
           fi
-          rc=$?
           set -e
           echo "--- raw event stream (${{ matrix.extension }}, exit=$rc) ---"
           echo "$output"
