@@ -15,19 +15,19 @@ After each conversation turn, user + assistant messages are automatically sent t
 | Mode | Vector Store | Persistence | Dependencies | Use Case |
 |------|-------------|-------------|--------------|----------|
 | `platform` | Mem0 Cloud | Cloud-managed | `MEM0_API_KEY` | Quick start, multi-device sync |
-| `open-source` | In-memory | SQLite snapshot | LLM + Embedding API | Data privacy, no external services |
+| `open-source` | Mem0 OSS vector store | Vector-store managed | LLM + Embedding API | Data privacy, no Mem0 Cloud |
 
 ## Architecture (Open-Source Mode)
 
 ```
-User ←→ Agent ←→ Mem0 Memory (in-memory vector search)
+User ←→ Agent ←→ Mem0 OSS Memory
                         ↕
-               SQLite Snapshot Store (disk persistence)
+            Mem0 OSS Vector Store (source of truth)
 ```
 
-- **Vector search**: `mem0ai` OSS `MemoryVectorStore` (in-memory cosine similarity)
+- **Vector search**: `mem0ai` OSS `MemoryVectorStore`. Despite the provider name `memory`, it is backed by SQLite; `dbPath` selects an in-process SQLite database or a SQLite file.
 - **LLM extraction**: Configured provider extracts facts from conversations
-- **Persistence**: After each `add()`, all memories are asynchronously snapshotted to SQLite. On restart, memories are restored from the snapshot.
+- **Persistence**: The default `dbPath` is `<home>/memories/mem0-vectors.db`, so Mem0 writes vectors and payloads directly to a durable SQLite file. No second snapshot is maintained.
 - **Provider mapping**: Custom providers are automatically mapped to mem0-compatible providers (e.g. `openai`) via the pi model registry's `api` field.
 - **Observation date**: `add()` accepts an optional `observedAt` (Date or string). In OSS mode it grounds mem0's extraction prompt so relative time references ("yesterday", "last week") resolve against the conversation's date rather than the system clock — important when ingesting historical conversations. Omit it and mem0 falls back to the current date (correct for live turns).
 
@@ -129,7 +129,7 @@ For production workloads that need a dedicated vector database:
 
 Supported vector store providers: `memory` (default), `qdrant`, `redis`, `pgvector`, `supabase`.
 
-When using an external vector store, the SQLite snapshot is not needed (the vector store handles its own persistence).
+The configured vector store always owns persistence. To request an intentionally ephemeral SQLite database, set the `memory` provider's `config.dbPath` to `":memory:"`; no snapshot fallback is created.
 
 ## Configuration Reference
 
@@ -143,19 +143,19 @@ When using an external vector store, the SQLite snapshot is not needed (the vect
 | `useRegistryKeys` | boolean | `true` | Whether OSS mode resolves keys from pi registry |
 | `oss.llm` | object | OpenAI gpt-4.1-nano | OSS extraction model |
 | `oss.embedder` | object | OpenAI text-embedding-3-small | OSS embedding model |
-| `oss.vectorStore` | object | `memory` (`:memory:`) | Custom vector store config |
+| `oss.vectorStore` | object | `memory` at `<home>/memories/mem0-vectors.db` | Custom vector store config |
 | `oss.historyStore` | object | SQLite at `<home>/memories/mem0-history.db` | Custom mem0 history store config |
 | `oss.historyDbPath` | string | `<home>/memories/mem0-history.db` | Shortcut for SQLite history DB path |
-| `oss.snapshotDbPath` | string | `<home>/memories/mem0-snapshot.db` | SQLite snapshot file path |
 | `oss.disableHistory` | boolean | `false` | Disable mem0 operation history |
 
 ## Data Storage
 
-| Mode | Vector Data | Snapshot | History |
-|------|-------------|----------|---------|
-| Platform | Mem0 Cloud | N/A | Cloud-managed |
-| Open-Source (default) | In-memory | `<home>/memories/mem0-snapshot.db` | `<home>/memories/mem0-history.db` |
-| Open-Source (qdrant) | Qdrant server | Not used | `<home>/memories/mem0-history.db` |
+| Mode | Vector Data | History |
+|------|-------------|---------|
+| Platform | Mem0 Cloud | Cloud-managed |
+| Open-Source (default) | `<home>/memories/mem0-vectors.db` | `<home>/memories/mem0-history.db` |
+| Open-Source (`memory`, `dbPath: ":memory:"`) | Process-local SQLite; lost on restart | `<home>/memories/mem0-history.db` |
+| Open-Source (Qdrant) | Qdrant server | `<home>/memories/mem0-history.db` |
 
 The `home` directory is resolved via `resolveHome()` from `@amaster.ai/pi-shared/settings` (defaults to `~/.pi/agent`).
 
@@ -174,7 +174,7 @@ This happens transparently — just configure the provider name as it appears in
 
 ## Installation Notes
 
-Open-Source mode depends on `better-sqlite3` (native addon, transitive dependency of `mem0ai`) for history and snapshot persistence.
+The default Open-Source mode depends on `better-sqlite3` (native addon, transitive dependency of `mem0ai`) for both the vector store and history. This remains true for `dbPath: ":memory:"`: it changes where SQLite stores pages, not which vector-store implementation is used.
 
 **For pi-agent users**: pi-agent's `package.json` includes `better-sqlite3` in `pnpm.onlyBuiltDependencies` — it compiles automatically during `pnpm install`. No extra steps needed.
 
@@ -188,7 +188,7 @@ Open-Source mode depends on `better-sqlite3` (native addon, transitive dependenc
 }
 ```
 
-**Graceful degradation**: If `better-sqlite3` fails to load (e.g. Node version mismatch in Electron), the extension still works — history and snapshot are automatically disabled, running in pure in-memory mode.
+If `better-sqlite3` fails to load (for example, because of a Node ABI mismatch), the default `memory` vector store cannot start. An external vector store can still be used with history disabled or configured to a working provider.
 
 ## Tools
 
@@ -229,4 +229,4 @@ const result = await dedupMemories({
 // result: { total: 42, duplicatesRemoved: 3 }
 ```
 
-Normalizes entries (case-insensitive, whitespace-collapsed), identifies exact duplicates, deletes the older ones via `provider.delete()`, and flushes the SQLite snapshot so deletions persist across process restarts.
+Normalizes entries (case-insensitive, whitespace-collapsed), identifies exact duplicates, and deletes the older ones through the configured provider. In OSS mode those deletes go directly to the vector store.

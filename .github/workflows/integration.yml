@@ -400,7 +400,12 @@ jobs:
               "mode": "open-source",
               "userId": "ci-integration",
               "oss": {
-                "snapshotDbPath": "${RUNNER_TEMP}/pi-mem0/snapshot.db",
+                "vectorStore": {
+                  "provider": "memory",
+                  "config": {
+                    "dbPath": "${RUNNER_TEMP}/pi-mem0/mem0-vectors.db"
+                  }
+                },
                 "embedder": {
                   "provider": "deepseek-integration",
                   "config": { "model": "text-embedding-v4" }
@@ -576,49 +581,48 @@ jobs:
         if: matrix.extension == 'pi-memory' && env.PI_INTEGRATION_BASE_URL != ''
         run: |
           set -euo pipefail
-          # mem0 (open-source mode) writes the SQLite snapshot to the path
-          # configured in settings.json (oss.snapshotDbPath = $RUNNER_TEMP/...).
+          # mem0 (open-source mode) writes vectors directly to the SQLite path
+          # configured in settings.json (oss.vectorStore.config.dbPath).
           # The matrix prompt explicitly drives mem0_save (which awaits
           # provider.add()) so by the time pi exits the memory should be
           # persisted. Three assertions:
-          #   1. Snapshot db exists with non-trivial size
-          #   2. `memories` table exists (full OSS init succeeded)
+          #   1. Vector db exists with non-trivial size
+          #   2. `vectors` table exists (full OSS init succeeded)
           #   3. The `ci-mem0-marker` row is actually written (mem0_save ran)
-          DB="${RUNNER_TEMP}/pi-mem0/snapshot.db"
+          DB="${RUNNER_TEMP}/pi-mem0/mem0-vectors.db"
           if [ ! -f "$DB" ]; then
-            echo "::error::mem0 snapshot db not created at $DB — mem0 OSS init failed."
+            echo "::error::mem0 vector db not created at $DB — mem0 OSS init failed."
             exit 1
           fi
           SIZE=$(stat -c%s "$DB" 2>/dev/null || stat -f%z "$DB")
-          echo "Snapshot db size: $SIZE bytes"
+          echo "Vector db size: $SIZE bytes"
           if [ "$SIZE" -lt 1024 ]; then
-            echo "::error::Snapshot db is suspiciously small ($SIZE bytes). mem0 likely failed before schema creation."
+            echo "::error::Vector db is suspiciously small ($SIZE bytes). mem0 likely failed before schema creation."
             exit 1
           fi
           if ! command -v sqlite3 >/dev/null 2>&1; then
             echo "::warning::sqlite3 CLI not present on runner; row-level assertions skipped."
             exit 0
           fi
-          echo "--- mem0 snapshot tables ---"
+          echo "--- mem0 vector tables ---"
           sqlite3 "$DB" '.tables'
-          echo "--- mem0 memories schema ---"
-          sqlite3 "$DB" '.schema memories'
+          echo "--- mem0 vectors schema ---"
+          sqlite3 "$DB" '.schema vectors'
           echo "--- mem0 stored memories (full dump) ---"
-          sqlite3 -header -column "$DB" 'SELECT user_id, memory FROM memories ORDER BY id;' || \
-            sqlite3 "$DB" 'SELECT user_id, memory FROM memories;'
-          ROWS=$(sqlite3 "$DB" 'SELECT COUNT(*) FROM memories;')
+          sqlite3 -header -column "$DB" 'SELECT id, payload FROM vectors ORDER BY id;'
+          ROWS=$(sqlite3 "$DB" 'SELECT COUNT(*) FROM vectors;')
           echo "Row count: $ROWS"
           if [ "$ROWS" -lt 1 ]; then
-            echo "::error::mem0 memories table is empty — the mem0_save tool did not persist anything."
+            echo "::error::mem0 vectors table is empty — the mem0_save tool did not persist anything."
             exit 1
           fi
-          if ! sqlite3 "$DB" 'SELECT memory FROM memories;' | grep -qi 'ci-mem0-marker'; then
+          if ! sqlite3 "$DB" 'SELECT payload FROM vectors;' | grep -qi 'ci-mem0-marker'; then
             echo "::error::Expected 'ci-mem0-marker' in mem0 stored memories — mem0_save tool wrote, but the marker is missing."
             exit 1
           fi
           echo "✓ mem0 OSS pipeline verified end-to-end."
 
-      - name: Verify pi-memory mem0 dedup snapshot (memory job only)
+      - name: Verify pi-memory mem0 vector dedup (memory job only)
         if: matrix.extension == 'pi-memory' && env.PI_INTEGRATION_BASE_URL != '' && env.PI_INTEGRATION_API_KEY != ''
         run: |
           set -euo pipefail
@@ -627,15 +631,31 @@ jobs:
             exit 0
           fi
 
+          DB="${RUNNER_TEMP}/pi-mem0/mem0-vectors.db"
+          sqlite3 "$DB" <<'SQL'
+          INSERT OR REPLACE INTO vectors (id, vector, payload) VALUES
+            ('ci-dedup-1', zeroblob(6144), '{"user_id":"ci-integration","data":"ci-dedup-marker duplicate fact","updatedAt":"2026-07-15T00:00:00.000Z"}'),
+            ('ci-dedup-2', zeroblob(6144), '{"user_id":"ci-integration","data":"ci-dedup-marker duplicate fact","updatedAt":"2026-07-15T00:00:01.000Z"}'),
+            ('ci-retain-1', zeroblob(6144), '{"user_id":"ci-integration","data":"ci-retain-marker user likes black coffee","updatedAt":"2026-07-15T00:00:00.000Z"}'),
+            ('ci-unique-1', zeroblob(6144), '{"user_id":"ci-integration","data":"ci-unique-marker user uses pnpm","updatedAt":"2026-07-15T00:00:00.000Z"}');
+          SQL
+
           node --input-type=module <<'NODE'
-          import { SqliteSnapshotStore } from './packages/pi-memory-mem0/dist/provider.js';
           import { dedupMemories } from './packages/pi-memory-mem0/dist/dedup.js';
 
           const config = {
             mode: 'open-source',
             userId: 'ci-integration',
             oss: {
-              snapshotDbPath: `${process.env.RUNNER_TEMP}/pi-mem0/snapshot.db`,
+              disableHistory: true,
+              vectorStore: {
+                provider: 'memory',
+                config: {
+                  collectionName: 'pi_mem0',
+                  dbPath: `${process.env.RUNNER_TEMP}/pi-mem0/mem0-vectors.db`,
+                  dimension: 1536
+                }
+              },
               embedder: {
                 provider: 'openai',
                 config: {
@@ -655,41 +675,31 @@ jobs:
             }
           };
 
-          const snapshot = new SqliteSnapshotStore(config.oss.snapshotDbPath);
-          snapshot.replaceAll('ci-integration', [
-            { id: 'ci-dedup-1', memory: 'ci-dedup-marker duplicate fact' },
-            { id: 'ci-dedup-2', memory: 'ci-dedup-marker duplicate fact' },
-            { id: 'ci-retain-1', memory: 'ci-retain-marker user likes black coffee' },
-            { id: 'ci-unique-1', memory: 'ci-unique-marker user uses pnpm' }
-          ]);
-          snapshot.close();
-
           const result = await dedupMemories({ userId: 'ci-integration', config });
           if (result.duplicatesRemoved < 1) {
             throw new Error(`Expected at least one duplicate removed, got ${JSON.stringify(result)}`);
           }
           NODE
 
-          DB="${RUNNER_TEMP}/pi-mem0/snapshot.db"
-          COUNT=$(sqlite3 "$DB" "SELECT COUNT(*) FROM memories WHERE memory = 'ci-dedup-marker duplicate fact';")
+          COUNT=$(sqlite3 "$DB" "SELECT COUNT(*) FROM vectors WHERE instr(payload, 'ci-dedup-marker duplicate fact') > 0;")
           echo "Dedup marker row count: $COUNT"
           if [ "$COUNT" -ne 1 ]; then
-            echo "::error::Expected exactly one dedup marker after snapshot flush, got $COUNT"
+            echo "::error::Expected exactly one dedup marker after provider deletion, got $COUNT"
             exit 1
           fi
-          RETAIN_COUNT=$(sqlite3 "$DB" "SELECT COUNT(*) FROM memories WHERE memory = 'ci-retain-marker user likes black coffee';")
+          RETAIN_COUNT=$(sqlite3 "$DB" "SELECT COUNT(*) FROM vectors WHERE instr(payload, 'ci-retain-marker user likes black coffee') > 0;")
           echo "Retain marker row count: $RETAIN_COUNT"
           if [ "$RETAIN_COUNT" -ne 1 ]; then
             echo "::error::Expected retain marker to survive dedup, got $RETAIN_COUNT"
             exit 1
           fi
-          UNIQUE_COUNT=$(sqlite3 "$DB" "SELECT COUNT(*) FROM memories WHERE memory = 'ci-unique-marker user uses pnpm';")
+          UNIQUE_COUNT=$(sqlite3 "$DB" "SELECT COUNT(*) FROM vectors WHERE instr(payload, 'ci-unique-marker user uses pnpm') > 0;")
           echo "Unique marker row count: $UNIQUE_COUNT"
           if [ "$UNIQUE_COUNT" -ne 1 ]; then
             echo "::error::Expected unique marker to survive dedup, got $UNIQUE_COUNT"
             exit 1
           fi
-          echo "✓ pi-memory mem0 dedup snapshot verification passed."
+          echo "✓ pi-memory mem0 vector dedup verification passed."
 
       - name: Verify image file generated (pi-image-gen only)
         if: matrix.extension == 'pi-image-gen' && env.PI_INTEGRATION_BASE_URL != ''

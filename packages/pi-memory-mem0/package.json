@@ -51,7 +51,7 @@
   },
   "dependencies": {
     "@amaster.ai/pi-shared": "workspace:*",
-    "mem0ai": "^3.0.6"
+    "mem0ai": "3.0.7"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": ">=0.74.0",

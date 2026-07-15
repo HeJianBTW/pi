@@ -41,7 +41,7 @@ export default function mem0Extension(pi: ExtensionAPI): void {
   let prefetch: Prefetch | undefined;
   let userId = '';
   let lastUserText = '';
-  let syncing = false;
+  let pendingWrite: Promise<void> = Promise.resolve();
 
   pi.on('session_start', async (_event, ctx) => {
     const config = loadConfig(ctx.cwd);
@@ -118,23 +118,21 @@ export default function mem0Extension(pi: ExtensionAPI): void {
     const text = extractText(msg);
     if (!text || msg.role !== 'assistant') return;
 
-    if (!syncing) {
-      syncing = true;
-      const userText = lastUserText;
-      lastUserText = '';
-      provider
-        .add(
+    const userText = lastUserText;
+    lastUserText = '';
+    const activeProvider = provider;
+    pendingWrite = pendingWrite
+      .catch(() => {})
+      .then(async () => {
+        await activeProvider.add(
           [
             { role: 'user', content: userText },
             { role: 'assistant', content: text },
           ],
           { userId },
-        )
-        .catch(() => {})
-        .finally(() => {
-          syncing = false;
-        });
-    }
+        );
+      })
+      .catch(() => {});
   });
 
   pi.on('before_agent_start', async (event) => {
@@ -149,10 +147,11 @@ export default function mem0Extension(pi: ExtensionAPI): void {
   });
 
   pi.on('session_shutdown', async () => {
+    await pendingWrite;
     provider = undefined;
     prefetch = undefined;
     lastUserText = '';
-    syncing = false;
+    pendingWrite = Promise.resolve();
   });
 
   pi.registerCommand('mem0', {

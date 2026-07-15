@@ -3,16 +3,15 @@
  *
  * Uses the `mem0ai` npm SDK which handles:
  * - Platform mode: REST API calls to api.mem0.ai
- * - OSS mode: in-memory vector store + LLM extraction via configured provider
+ * - OSS mode: vector storage + LLM extraction via configured providers
  *
- * In OSS mode, a SQLite snapshot layer persists memories to disk so they survive
- * process restarts. On init, memories are restored from SQLite into the in-memory
- * vector store. After each add(), a full snapshot is asynchronously written back.
+ * The mem0 OSS `memory` vector store is itself SQLite-backed. This extension
+ * configures it with a file under Pi home by default and lets mem0 own persistence
+ * directly.
  */
 
-import { mkdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { resolveHome } from '@amaster.ai/pi-shared/settings';
 import type { AddResult, Mem0ExtensionConfig, MemoryItem } from './types.js';
 
@@ -31,9 +30,6 @@ export interface Mem0Provider {
   getAll(opts: { userId: string }): Promise<MemoryItem[]>;
 
   delete(memoryId: string): Promise<void>;
-
-  /** Flush any pending snapshot writes. No-op for platform mode. */
-  flushSnapshot(userId: string): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -163,105 +159,9 @@ class PlatformProvider implements Mem0Provider {
     // biome-ignore lint/suspicious/noExplicitAny: mem0ai/oss lacks type definitions
     await (this.client as any).delete(memoryId);
   }
-
-  async flushSnapshot(): Promise<void> {
-    // Platform mode persists server-side, no local snapshot to flush.
-  }
-}
-// SQLite Snapshot Store — persists mem0 memories to disk for restart recovery
-// ---------------------------------------------------------------------------
-
-interface SqliteDatabase {
-  pragma(sql: string): void;
-  exec(sql: string): void;
-  prepare(sql: string): {
-    // biome-ignore lint/suspicious/noExplicitAny: better-sqlite3 untyped return
-    all(...args: unknown[]): any[];
-    run(...args: unknown[]): void;
-  };
-  transaction<T>(fn: () => T): () => T;
-  close(): void;
 }
 
-export class SqliteSnapshotStore {
-  private db: SqliteDatabase;
-
-  constructor(dbPath: string) {
-    mkdirSync(dirname(dbPath), { recursive: true });
-    const req = createRequire(import.meta.url);
-    const mem0OssPath = req.resolve('mem0ai/oss');
-    const reqFromMem0 = createRequire(mem0OssPath);
-    const BS3 = reqFromMem0('better-sqlite3');
-    this.db = new BS3(dbPath);
-    this.db.pragma('journal_mode = WAL');
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS memories (
-        id TEXT PRIMARY KEY,
-        user_id TEXT NOT NULL,
-        memory TEXT NOT NULL,
-        created_at TEXT,
-        updated_at TEXT
-      )
-    `);
-  }
-
-  loadAll(
-    userId: string,
-  ): Array<{ id: string; memory: string; created_at?: string; updated_at?: string }> {
-    return this.db
-      .prepare('SELECT id, memory, created_at, updated_at FROM memories WHERE user_id = ?')
-      .all(userId);
-  }
-
-  loadAllUsers(): Array<{ userId: string; items: Array<{ id: string; memory: string }> }> {
-    const rows: Array<{ user_id: string; id: string; memory: string }> = this.db
-      .prepare('SELECT user_id, id, memory FROM memories')
-      .all();
-    const grouped = new Map<string, Array<{ id: string; memory: string }>>();
-    for (const row of rows) {
-      let list = grouped.get(row.user_id);
-      if (!list) {
-        list = [];
-        grouped.set(row.user_id, list);
-      }
-      list.push({ id: row.id, memory: row.memory });
-    }
-    return Array.from(grouped.entries()).map(([userId, items]) => ({ userId, items }));
-  }
-
-  replaceAll(userId: string, items: MemoryItem[]): void {
-    const del = this.db.prepare('DELETE FROM memories WHERE user_id = ?');
-    const ins = this.db.prepare(
-      'INSERT OR REPLACE INTO memories (id, user_id, memory, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
-    );
-    const tx = this.db.transaction(() => {
-      del.run(userId);
-      for (const item of items) {
-        ins.run(item.id, userId, item.memory, item.created_at ?? null, item.updated_at ?? null);
-      }
-    });
-    tx();
-  }
-
-  close(): void {
-    try {
-      this.db.close();
-    } catch {
-      /* ignore */
-    }
-  }
-
-  static tryCreate(dbPath: string): SqliteSnapshotStore | null {
-    try {
-      return new SqliteSnapshotStore(dbPath);
-    } catch {
-      return null;
-    }
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Open-Source Provider (in-memory vector store + SQLite snapshot persistence)
+// Open-Source Provider
 // ---------------------------------------------------------------------------
 
 /** Optional key resolver — pulls API keys from pi's model registry. */
@@ -295,8 +195,6 @@ export function mapApiToMem0Provider(api: string | undefined, fallback: string):
 class OSSProvider implements Mem0Provider {
   private memory: unknown;
   private initPromise: Promise<void> | null = null;
-  private snapshot: SqliteSnapshotStore | null = null;
-  private syncingSnapshot = false;
   /**
    * mem0's Memory instance shares one LLM object across all add() calls. To
    * honor observedAt we temporarily wrap `llm.generateResponse` (see add), and
@@ -315,7 +213,6 @@ class OSSProvider implements Mem0Provider {
     private readonly ossConfig: Mem0ExtensionConfig['oss'] | undefined,
     private readonly resolveKey?: KeyResolver,
     private readonly resolveProvider?: ProviderResolver,
-    private readonly snapshotDbPath?: string,
   ) {}
 
   private async ensureMemory(): Promise<void> {
@@ -376,15 +273,24 @@ class OSSProvider implements Mem0Provider {
     config.embedder = { provider: embedderProvider, config: embedderCfg };
     config.llm = { provider: llmProvider, config: llmCfg };
 
-    if (this.ossConfig?.vectorStore) {
+    const defaultVectorConfig = {
+      collectionName: 'pi_mem0',
+      dbPath: join(resolveHome(), 'memories', 'mem0-vectors.db'),
+    };
+    if (this.ossConfig?.vectorStore?.provider.toLowerCase() === 'memory') {
+      config.vectorStore = {
+        provider: this.ossConfig.vectorStore.provider,
+        config: {
+          ...defaultVectorConfig,
+          ...(this.ossConfig.vectorStore.config ?? {}),
+        },
+      };
+    } else if (this.ossConfig?.vectorStore) {
       config.vectorStore = this.ossConfig.vectorStore;
     } else {
       config.vectorStore = {
         provider: 'memory',
-        config: {
-          collectionName: 'pi_mem0',
-          dbPath: ':memory:',
-        },
+        config: defaultVectorConfig,
       };
     }
 
@@ -449,47 +355,7 @@ class OSSProvider implements Mem0Provider {
 
     this.memory = mem;
 
-    // Initialize SQLite snapshot store for persistence
-    if (this.snapshotDbPath && sqliteOk) {
-      this.snapshot = SqliteSnapshotStore.tryCreate(this.snapshotDbPath);
-    }
-
-    // Restore memories from snapshot into the in-memory vector store
-    if (this.snapshot) {
-      const allUsers = this.snapshot.loadAllUsers();
-      let totalRestored = 0;
-      for (const { userId: uid, items } of allUsers) {
-        for (const item of items) {
-          try {
-            await mem.add([{ role: 'user', content: item.memory }], { userId: uid, infer: false });
-            totalRestored++;
-          } catch {
-            /* skip failed restores */
-          }
-        }
-      }
-      if (totalRestored > 0) {
-        console.error(`[pi-memory-mem0] restored ${totalRestored} memories from snapshot`);
-      }
-    }
-
     await mem.getAll({ filters: { user_id: '__warmup__' } });
-  }
-
-  private asyncSnapshotSync(userId: string): void {
-    if (!this.snapshot || this.syncingSnapshot) return;
-    this.syncingSnapshot = true;
-    // biome-ignore lint/suspicious/noExplicitAny: mem0ai/oss lacks type definitions
-    (this.memory as any)
-      .getAll({ filters: { user_id: userId } })
-      .then((results: unknown) => {
-        const items = normalizeResults(results);
-        this.snapshot!.replaceAll(userId, items);
-      })
-      .catch(() => {})
-      .finally(() => {
-        this.syncingSnapshot = false;
-      });
   }
 
   async add(
@@ -536,7 +402,6 @@ class OSSProvider implements Mem0Provider {
       }
       try {
         const result = await mem.add(messages, addOpts);
-        this.asyncSnapshotSync(opts.userId);
         return result as AddResult;
       } finally {
         restoreLlm?.();
@@ -571,16 +436,6 @@ class OSSProvider implements Mem0Provider {
     // biome-ignore lint/suspicious/noExplicitAny: mem0ai/oss lacks type definitions
     await (this.memory as any).delete(memoryId);
   }
-
-  async flushSnapshot(userId: string): Promise<void> {
-    if (!this.snapshot) return;
-    // biome-ignore lint/suspicious/noExplicitAny: mem0ai/oss lacks type definitions
-    const results = await (this.memory as any).getAll({
-      filters: { user_id: userId },
-    });
-    const items = normalizeResults(results);
-    this.snapshot.replaceAll(userId, items);
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -601,13 +456,10 @@ export async function createMem0Provider(opts: CreateProviderOptions): Promise<M
 
   if (mode === 'open-source') {
     const useRegistry = config.useRegistryKeys !== false;
-    const snapshotDbPath =
-      config.oss?.snapshotDbPath ?? join(resolveHome(), 'memories', 'mem0-snapshot.db');
     const provider = new OSSProvider(
       config.oss,
       useRegistry ? resolveKey : undefined,
       useRegistry ? resolveProvider : undefined,
-      snapshotDbPath,
     );
     // biome-ignore lint/suspicious/noExplicitAny: mem0ai/oss lacks type definitions
     await (provider as any).ensureMemory();
