@@ -37,7 +37,7 @@ session_start                                 ← session-level, once
   │    message_end      { message (user) }
   │    message_start    { message (assistant) }
   │    message_end      { message (assistant) }
-  │    turn_end         { turnIndex, message, toolResults }  ← pi-goal buffers messages here
+  │    turn_end         { turnIndex, message, toolResults }
   │
   agent_end           { messages: [...] }       ← engine evaluates + stops/continues, once per prompt
   │   If a goal is active: build a transcript from `messages`, ask the
@@ -56,10 +56,12 @@ Events pi-goal uses:
 | Event | What pi-goal does | Notes |
 |-------|-------------------|-------|
 | `session_start` | Load config; read the `--goal` flag | Session-level, fires once |
-| `before_agent_start` | If a `--goal` derivation is pending, derive the condition from `event.prompt` (this turn's user input) + buffered transcript, then set + activate the goal | Fires once per prompt; the right anchor for auto-derivation since no transcript exists yet at `session_start` |
-| `turn_end` | Buffer `event.message` into the rolling transcript | Feeds derive/evaluate |
-| `agent_end` | If a goal is active, run the engine: evaluate → mark achieved/impossible or `sendUserMessage` to continue | Engine core |
-| `session_shutdown` | Clear the goal and the buffered transcript | Cleanup |
+| `before_agent_start` | If a `--goal` derivation is pending, derive the condition from `event.prompt` (this turn's user input), then set the goal | Fires once per prompt; the right anchor for auto-derivation since no transcript exists yet at `session_start` |
+| `agent_end` | If a goal is active, run the engine on `event.messages`: evaluate → mark achieved/impossible or `sendUserMessage` to continue | Engine core. `event.messages` is the full conversation, so no separate buffering is needed |
+| `session_shutdown` | Clear the goal | Cleanup |
+
+The interactive `/goal` command (no argument) derives from the session's own
+history, read via `ctx.sessionManager` — not a buffer this extension maintains.
 
 Note on derivation timing: a condition can only be derived once there is
 conversation to derive from. `session_start` is too early (no transcript

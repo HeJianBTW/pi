@@ -1,4 +1,8 @@
-import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
+import {
+  buildSessionContext,
+  type ExtensionAPI,
+  type ExtensionContext,
+} from '@earendil-works/pi-coding-agent';
 import {
   loadSettings,
   type PiGoalConfig,
@@ -115,7 +119,6 @@ export default function goalExtension(
   const state = new GoalState();
   let config: ResolvedGoalConfig = resolveConfig(injectedConfig);
   let registry: GoalModelRegistry | undefined;
-  let latestMessages: unknown[] = [];
   let engineRunning = false;
   // Set when `--goal` was passed with an empty value: derivation is deferred to
   // the first before_agent_start, where the user's prompt is available. At
@@ -157,18 +160,11 @@ export default function goalExtension(
     await deriveAndSet(ctx, prompt, false);
   });
 
-  // Keep the freshest full message list for the engine; agent_end also carries it.
-  pi.on('turn_end', async (event) => {
-    const evt = event as unknown as { message?: unknown };
-    if (evt.message) latestMessages.push(evt.message);
-  });
-
   pi.on('agent_end', async (event, ctx) => {
     if (!state.isActive() || !config.model || !registry) return;
     if (engineRunning) return; // re-entrancy guard: our own sendUserMessage re-triggers agent_end
     const evt = event as unknown as { messages?: unknown[] };
-    const messages =
-      Array.isArray(evt.messages) && evt.messages.length > 0 ? evt.messages : latestMessages;
+    const messages = Array.isArray(evt.messages) ? evt.messages : [];
 
     engineRunning = true;
     try {
@@ -193,7 +189,6 @@ export default function goalExtension(
 
   pi.on('session_shutdown', async () => {
     state.clear();
-    latestMessages = [];
     registry = undefined;
     pendingDerive = false;
   });
@@ -236,9 +231,23 @@ export default function goalExtension(
         return;
       }
 
-      await deriveAndSet(ctx);
+      // Interactive /goal with no arg: derive from the session's conversation
+      // history (read from the session manager, the authoritative source).
+      await deriveAndSet(ctx, '', true, readSessionMessages(ctx));
     },
   });
+
+  /** Resolved conversation messages from the session, or [] if unavailable. */
+  function readSessionMessages(ctx: ExtensionContext): unknown[] {
+    try {
+      const sm = ctx.sessionManager;
+      if (!sm) return [];
+      const context = buildSessionContext(sm.getEntries(), sm.getLeafId());
+      return context.messages ?? [];
+    } catch {
+      return [];
+    }
+  }
 
   function setExplicitGoal(condition: string, ctx: ExtensionContext): void {
     if (condition.length > MAX_CONDITION_LENGTH) {
@@ -265,6 +274,7 @@ export default function goalExtension(
     ctx: ExtensionContext,
     extraContext = '',
     activate = true,
+    history: unknown[] = [],
   ): Promise<void> {
     if (!config.model || !registry) {
       ctx.ui.notify(
@@ -275,9 +285,9 @@ export default function goalExtension(
     }
     ctx.ui.notify('Deriving a goal from the conversation…', 'info');
     // Fold the current turn's prompt (when derivation was triggered by --goal
-    // before any turn has run) into the buffered transcript, so there is always
-    // something to derive from even on a fresh session.
-    const buffered = buildTranscript(latestMessages, config.transcriptMaxChars);
+    // before any turn has run) into the conversation history, so there is
+    // always something to derive from even on a fresh session.
+    const buffered = buildTranscript(history, config.transcriptMaxChars);
     const extra = extraContext.trim() ? `[user] ${extraContext.trim()}` : '';
     const transcript = [buffered, extra].filter(Boolean).join('\n\n');
     const condition = await deriveCondition({

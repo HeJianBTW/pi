@@ -10,6 +10,12 @@ const evaluateCondition = vi.fn();
 vi.mock('../evaluate.js', () => ({
   evaluateCondition: (...args: unknown[]) => evaluateCondition(...args),
 }));
+// Mock buildSessionContext so the interactive /goal path reads controllable
+// conversation history from the (mocked) session manager.
+const sessionMessages = vi.fn(() => [] as unknown[]);
+vi.mock('@earendil-works/pi-coding-agent', () => ({
+  buildSessionContext: () => ({ messages: sessionMessages() }),
+}));
 
 import goalExtension from '../extension.js';
 
@@ -58,6 +64,10 @@ function createMockCtx(hasUI = true) {
       find: () => ({}),
       getApiKeyAndHeaders: async () => ({ ok: true }),
     },
+    sessionManager: {
+      getEntries: () => [],
+      getLeafId: () => null,
+    },
   };
 }
 
@@ -68,6 +78,8 @@ describe('goalExtension wiring', () => {
   beforeEach(() => {
     deriveCondition.mockReset();
     evaluateCondition.mockReset();
+    sessionMessages.mockReset();
+    sessionMessages.mockReturnValue([]);
   });
 
   it('registers the /goal command and lifecycle handlers', () => {
@@ -177,11 +189,9 @@ describe('goalExtension wiring', () => {
     const ctx = createMockCtx(true);
     await pi.eventHandlers.session_start![0]!({ type: 'session_start' }, ctx);
 
-    // Feed a transcript via turn_end so derive has something.
-    await pi.eventHandlers.turn_end![0]!(
-      { type: 'turn_end', message: { role: 'user', content: 'make login work' } },
-      ctx,
-    );
+    // Session history (read via the mocked buildSessionContext) gives derive
+    // something to work with.
+    sessionMessages.mockReturnValue([{ role: 'user', content: 'make login work' }]);
     deriveCondition.mockResolvedValue('The login flow authenticates valid users');
 
     await pi.commands.get('goal')!.handler('', ctx);
@@ -197,10 +207,7 @@ describe('goalExtension wiring', () => {
     const ctx = createMockCtx(true);
     ctx.ui.confirm = vi.fn(async () => false);
     await pi.eventHandlers.session_start![0]!({ type: 'session_start' }, ctx);
-    await pi.eventHandlers.turn_end![0]!(
-      { type: 'turn_end', message: { role: 'user', content: 'x' } },
-      ctx,
-    );
+    sessionMessages.mockReturnValue([{ role: 'user', content: 'x' }]);
     deriveCondition.mockResolvedValue('some condition');
 
     await pi.commands.get('goal')!.handler('', ctx);

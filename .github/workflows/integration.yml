@@ -230,10 +230,11 @@ jobs:
           # commands and won't run an agent turn without a prompt, so this entry
           # uses `--goal '' -p <prompt>`: the prompt drives one real agent run
           # (whose reply we assert on) and, at before_agent_start, pi-goal
-          # derives a goal from that same prompt. maxIterations=1 in settings
-          # bounds the continuation loop so CI can't spin.
+          # derives a goal from that same prompt. The prompt states a concrete
+          # objective (a bare format instruction derives to NONE), with a
+          # completion marker we assert on. maxIterations=1 bounds continuation.
           - extension: pi-goal
-            prompt: "Reply with exactly the token ci-goal-ok and nothing else."
+            prompt: "Task: confirm the CI health check succeeded. When the check is confirmed, print the exact token ci-goal-ok on its own line. The task is complete once that token has been printed."
             assert_pattern: "ci-goal-ok"
           - extension: pi-teamwork
             tools: workspace_list
