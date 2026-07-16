@@ -13,7 +13,7 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { createFetchVisionCaller, handleAnalyzeScreenshot } from './analyze-screenshot.js';
-import type { BrowserUseConfig } from './config.js';
+import { type BrowserUseConfig, resolveConfig } from './config.js';
 import { DevToolsClient } from './index.js';
 import {
   augmentToolDescription,
@@ -35,6 +35,7 @@ const EXCLUDED_TOOLS = new Set([
   'trigger_extension_action',
   'uninstall_extension',
 ]);
+const ARRAY_CONFIG_KEYS = new Set(['allowedUrlPattern', 'blockedUrlPattern']);
 
 export function parseArgs(argv: string[]): BrowserUseConfig {
   const config: BrowserUseConfig = {};
@@ -62,6 +63,12 @@ export function parseArgs(argv: string[]): BrowserUseConfig {
         (config as Record<string, unknown>)[camelKey] = true;
       } else if (value === 'false') {
         (config as Record<string, unknown>)[camelKey] = false;
+      } else if (ARRAY_CONFIG_KEYS.has(camelKey)) {
+        const existing = (config as Record<string, unknown>)[camelKey];
+        (config as Record<string, unknown>)[camelKey] = [
+          ...(Array.isArray(existing) ? existing : []),
+          value,
+        ];
       } else {
         (config as Record<string, unknown>)[camelKey] = value;
       }
@@ -74,7 +81,7 @@ export function parseArgs(argv: string[]): BrowserUseConfig {
 }
 
 async function main(): Promise<void> {
-  const config = parseArgs(process.argv.slice(2));
+  const config = resolveConfig(parseArgs(process.argv.slice(2)));
   const client = new DevToolsClient(config);
   await client.connect();
 
@@ -85,8 +92,8 @@ async function main(): Promise<void> {
     { capabilities: { tools: {} } },
   );
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => {
-    const upstreamTools = await client.listAllTools();
+  server.setRequestHandler(ListToolsRequestSchema, async (_request, extra) => {
+    const upstreamTools = await client.listAllTools(extra.signal);
     const tools = [];
     toolNameMap.clear();
 
@@ -110,12 +117,20 @@ async function main(): Promise<void> {
         inputSchema: {
           type: 'object' as const,
           properties: {
+            ...(config.experimentalPageIdRouting
+              ? {
+                  pageId: {
+                    type: 'number',
+                    description: 'Numeric page ID returned by browser_list_pages.',
+                  },
+                }
+              : {}),
             instruction: {
               type: 'string',
               description: 'What to identify or analyze visually.',
             },
           },
-          required: ['instruction'],
+          required: config.experimentalPageIdRouting ? ['pageId'] : [],
         },
       });
     }
@@ -123,17 +138,17 @@ async function main(): Promise<void> {
     return { tools };
   });
 
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     const { name, arguments: args } = request.params;
     const originalName = toolNameMap.get(name);
     if (!originalName) throw new Error(`Unknown tool: ${name}`);
 
     if (originalName === 'analyze_screenshot' && config.visionModel) {
       const callVision = createFetchVisionCaller(config.visionModel);
-      return await handleAnalyzeScreenshot(client, callVision, args ?? {});
+      return await handleAnalyzeScreenshot(client, callVision, args ?? {}, extra.signal);
     }
 
-    const result = await client.callTool(originalName, args ?? {});
+    const result = await client.callTool(originalName, args ?? {}, extra.signal);
     const textContent = extractTextContent(result.content);
     const processed = postProcessToolResult(originalName, textContent);
 

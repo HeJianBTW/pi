@@ -44,6 +44,7 @@ export type VisionCaller = (
   instruction: string,
   imageBase64: string,
   mimeType: string,
+  signal?: AbortSignal,
 ) => Promise<string>;
 
 /** Create a VisionCaller that resolves credentials from Pi's model registry. Used in CLI standalone mode. */
@@ -51,7 +52,12 @@ export function createFetchVisionCaller(visionConfig: VisionModelConfig): Vision
   const authStorage = AuthStorage.create();
   const registry = ModelRegistry.create(authStorage);
 
-  return async (instruction: string, imageBase64: string, mimeType: string): Promise<string> => {
+  return async (
+    instruction: string,
+    imageBase64: string,
+    mimeType: string,
+    signal?: AbortSignal,
+  ): Promise<string> => {
     const model = registry.find(visionConfig.provider, visionConfig.model);
     if (!model) {
       throw new Error(
@@ -70,6 +76,7 @@ export function createFetchVisionCaller(visionConfig: VisionModelConfig): Vision
     };
     if (auth.apiKey) options.apiKey = auth.apiKey;
     if (auth.headers) options.headers = auth.headers;
+    if (signal) options.signal = signal;
 
     const result = await complete(
       model,
@@ -111,11 +118,13 @@ export async function handleAnalyzeScreenshot(
   client: DevToolsClient,
   callVision: VisionCaller,
   args: Record<string, unknown>,
+  signal?: AbortSignal,
 ): Promise<{ content: Array<{ type: string; text: string }>; isError?: boolean }> {
   const instruction = String(args.instruction ?? '');
+  const screenshotArgs = typeof args.pageId === 'number' ? { pageId: args.pageId } : {};
 
   try {
-    const screenshotResult = await client.callTool('take_screenshot', {});
+    const screenshotResult = await client.callTool('take_screenshot', screenshotArgs, signal);
 
     let imageBase64 = '';
     let mimeType = 'image/png';
@@ -141,7 +150,7 @@ export async function handleAnalyzeScreenshot(
       };
     }
 
-    const analysis = await callVision(instruction, imageBase64, mimeType);
+    const analysis = await callVision(instruction, imageBase64, mimeType, signal);
 
     if (!analysis) {
       return {
@@ -159,6 +168,7 @@ export async function handleAnalyzeScreenshot(
       content: [{ type: 'text', text: `Visual Analysis Result:\n${analysis}` }],
     };
   } catch (error) {
+    if (signal?.aborted) throw error;
     const errorMsg = error instanceof Error ? error.message : String(error);
 
     const isModelError =
@@ -167,9 +177,14 @@ export async function handleAnalyzeScreenshot(
       errorMsg.includes('not found') ||
       errorMsg.includes('permission');
 
+    if (!isModelError) {
+      const errorName = error instanceof Error ? error.name : 'UnknownError';
+      console.error(`[pi-browser-use] visual analysis failed (${errorName})`);
+    }
+
     const fallbackMsg = isModelError
       ? 'Visual analysis model is not available. Use accessibility tree elements (uids from take_snapshot) for all interactions instead.'
-      : `Visual analysis failed: ${errorMsg}. Use accessibility tree elements instead.`;
+      : 'Visual analysis failed. Use accessibility tree elements instead.';
 
     return {
       content: [{ type: 'text', text: fallbackMsg }],

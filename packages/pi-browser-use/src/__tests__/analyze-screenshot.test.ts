@@ -1,4 +1,4 @@
-import { describe, expect, test, vi } from 'vitest';
+import { describe, expect, it, test, vi } from 'vitest';
 import {
   createFetchVisionCaller,
   handleAnalyzeScreenshot,
@@ -62,13 +62,19 @@ describe('handleAnalyzeScreenshot', () => {
     const client = createMockClient();
     const caller = mockVisionCaller('Blue button at (150, 300)');
     const result = await handleAnalyzeScreenshot(client, caller, {
+      pageId: 7,
       instruction: 'Find the blue button',
     });
 
     expect(result.isError).toBeUndefined();
     expect(result.content[0]!.text).toContain('Blue button at (150, 300)');
-    expect(client.callTool).toHaveBeenCalledWith('take_screenshot', {});
-    expect(caller).toHaveBeenCalledWith('Find the blue button', 'aW1hZ2VkYXRh', 'image/png');
+    expect(client.callTool).toHaveBeenCalledWith('take_screenshot', { pageId: 7 }, undefined);
+    expect(caller).toHaveBeenCalledWith(
+      'Find the blue button',
+      'aW1hZ2VkYXRh',
+      'image/png',
+      undefined,
+    );
   });
 
   test('no screenshot data returns error', async () => {
@@ -131,10 +137,56 @@ describe('handleAnalyzeScreenshot', () => {
   test('defaults instruction to empty string', async () => {
     const client = createMockClient();
     const caller = mockVisionCaller('Full page analysis');
-    const result = await handleAnalyzeScreenshot(client, caller, {});
+    const result = await handleAnalyzeScreenshot(client, caller, { pageId: 7 });
 
     expect(result.isError).toBeUndefined();
-    expect(caller).toHaveBeenCalledWith('', 'aW1hZ2VkYXRh', 'image/png');
+    expect(caller).toHaveBeenCalledWith('', 'aW1hZ2VkYXRh', 'image/png', undefined);
+  });
+
+  it('omits pageId when page ID routing is disabled', async () => {
+    const client = createMockClient();
+    const caller = mockVisionCaller('Full page analysis');
+
+    await handleAnalyzeScreenshot(client, caller, {});
+
+    expect(client.callTool).toHaveBeenCalledWith('take_screenshot', {}, undefined);
+  });
+
+  it('forwards the abort signal to screenshot capture and vision analysis', async () => {
+    const client = createMockClient();
+    const caller = mockVisionCaller('Full page analysis');
+    const controller = new AbortController();
+
+    await handleAnalyzeScreenshot(
+      client,
+      caller,
+      { pageId: 7, instruction: 'Find the button' },
+      controller.signal,
+    );
+
+    expect(client.callTool).toHaveBeenCalledWith(
+      'take_screenshot',
+      { pageId: 7 },
+      controller.signal,
+    );
+    expect(caller).toHaveBeenCalledWith(
+      'Find the button',
+      'aW1hZ2VkYXRh',
+      'image/png',
+      controller.signal,
+    );
+  });
+
+  it('does not convert cancellation into a visual analysis error', async () => {
+    const client = createMockClient();
+    const caller = mockVisionCaller('should not be called');
+    const controller = new AbortController();
+    controller.abort();
+    client.callTool.mockRejectedValueOnce(controller.signal.reason);
+
+    await expect(
+      handleAnalyzeScreenshot(client, caller, { pageId: 7 }, controller.signal),
+    ).rejects.toBe(controller.signal.reason);
   });
 
   test('uses correct mimeType from screenshot response', async () => {
@@ -142,7 +194,7 @@ describe('handleAnalyzeScreenshot', () => {
     const caller = mockVisionCaller('result');
     await handleAnalyzeScreenshot(client, caller, { instruction: 'test' });
 
-    expect(caller).toHaveBeenCalledWith('test', 'jpegdata', 'image/jpeg');
+    expect(caller).toHaveBeenCalledWith('test', 'jpegdata', 'image/jpeg', undefined);
   });
 
   test('permission error returns model-not-available', async () => {
@@ -200,9 +252,10 @@ describe('createFetchVisionCaller', () => {
   test('passes image data and mimeType to complete()', async () => {
     const piAi = await import('@earendil-works/pi-ai/compat');
     (piAi.complete as any).mockClear();
+    const controller = new AbortController();
 
     const caller = createFetchVisionCaller({ provider: 'openai', model: 'gpt-4o' });
-    await caller('Describe this', 'aW1hZ2U=', 'image/jpeg');
+    await caller('Describe this', 'aW1hZ2U=', 'image/jpeg', controller.signal);
 
     const callArgs = (piAi.complete as any).mock.calls[0];
     const messages = callArgs[1].messages;
@@ -210,5 +263,6 @@ describe('createFetchVisionCaller', () => {
     expect(imageContent.type).toBe('image');
     expect(imageContent.data).toBe('aW1hZ2U=');
     expect(imageContent.mimeType).toBe('image/jpeg');
+    expect(callArgs[2].signal).toBe(controller.signal);
   });
 });

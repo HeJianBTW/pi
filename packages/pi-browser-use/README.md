@@ -8,6 +8,9 @@ pi-coding-agent extension that wraps [chrome-devtools-mcp](https://github.com/Ch
 
 - **pi-coding-agent extension** — registers tools via `pi.registerTool()`, managed by the agent lifecycle
 - **Dynamic tool discovery** — automatically proxies all upstream chrome-devtools-mcp tools with `browser_` prefix
+- **Page-scoped routing** — routes page tools by explicit `pageId` instead of shared selected-page state
+- **Connection recovery** — detects closed or unhealthy MCP transports and reconnects before the next call
+- **Navigation safety** — supports URL allow/block patterns and redacts sensitive network headers by default
 - **Tool description augmentation** — adds usage hints for key tools (click, fill, press_key, etc.)
 - **Result post-processing** — strips embedded snapshots, detects overlay/stale element issues
 - **Optional visual analysis** — `browser_analyze_screenshot` via configurable vision model
@@ -39,7 +42,8 @@ Configure via `.pi/settings.json` (project-level) or `~/.pi/agent/settings.json`
     "headless": true,
     "channel": "stable",
     "viewport": "1280x720",
-    "experimentalVision": true
+    "experimentalVision": true,
+    "blockedUrlPattern": ["https://ads.example/*"]
   }
 }
 ```
@@ -87,6 +91,7 @@ npx @amaster.ai/pi-browser-use --config path/to/config.json
 | `isolated` | `boolean` | `false` | Use isolated browser profile |
 | `userDataDir` | `string` | — | Custom user data directory |
 | `autoConnect` | `boolean` | `false` | Auto-connect to running browser |
+| `acceptInsecureCerts` | `boolean` | `false` | Ignore invalid or self-signed certificate errors; use with caution |
 
 ### Categories
 
@@ -104,6 +109,7 @@ npx @amaster.ai/pi-browser-use --config path/to/config.json
 | `experimentalVision` | `boolean` | `true` | Enable vision tools (click_at) |
 | `experimentalScreencast` | `boolean` | `false` | Enable screencast |
 | `experimentalMemory` | `boolean` | `false` | Enable memory snapshots |
+| `experimentalPageIdRouting` | `boolean` | `true` | Add a required `pageId` to page-scoped tools and route directly to that page |
 
 ### Privacy
 
@@ -111,6 +117,24 @@ npx @amaster.ai/pi-browser-use --config path/to/config.json
 |--------|------|---------|-------------|
 | `usageStatistics` | `boolean` | `false` | Send usage statistics |
 | `performanceCrux` | `boolean` | `false` | Enable CrUX performance data |
+| `redactNetworkHeaders` | `boolean` | `true` | Redact sensitive headers in network tool results |
+| `allowedUrlPattern` | `string[]` | — | Allow only matching URLPattern values; requires Chrome 149+ |
+| `blockedUrlPattern` | `string[]` | — | Block matching navigation and subresource URLPattern values |
+
+`allowedUrlPattern` and `blockedUrlPattern` are mutually exclusive. Page ID routing is disabled automatically in `slim` mode because upstream slim tools do not expose `pageId`.
+
+### Page-scoped Tool Calls
+
+With the default page ID routing enabled, call `browser_list_pages` first and pass the returned numeric page ID to subsequent page-scoped tools:
+
+```text
+browser_list_pages({})
+browser_take_snapshot({ "pageId": 2 })
+browser_click({ "pageId": 2, "uid": "12_4" })
+browser_take_screenshot({ "pageId": 2 })
+```
+
+This avoids relying on `browser_select_page` when multiple browser calls or tabs are active. A single chrome-devtools-mcp process still serializes tool execution; page ID routing provides isolation rather than parallel throughput.
 
 ### Vision Model (Optional)
 
@@ -128,6 +152,12 @@ Enable `browser_analyze_screenshot` by referencing a model already configured in
 ```
 
 The extension resolves API key, base URL, and headers from the model registry automatically — no need to duplicate credentials here.
+
+With the default page ID routing enabled, visual analysis also targets a page explicitly:
+
+```text
+browser_analyze_screenshot({ "pageId": 2, "instruction": "Find the blue submit button" })
+```
 
 ## Tool Augmentation
 

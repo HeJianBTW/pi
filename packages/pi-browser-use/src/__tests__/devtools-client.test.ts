@@ -1,7 +1,12 @@
-import { beforeEach, describe, expect, test, vi } from 'vitest';
+import { beforeEach, describe, expect, it, test, vi } from 'vitest';
 
 const mockClientConnect = vi.fn(() => Promise.resolve());
 const mockClientClose = vi.fn(() => Promise.resolve());
+const mockClientPing = vi.fn(() => Promise.resolve({}));
+const mockTransports: Array<{
+  onclose?: () => void;
+  onerror?: (error: Error) => void;
+}> = [];
 let _listToolsCalls = 0;
 const mockListTools = vi.fn((opts?: { cursor?: string }) => {
   _listToolsCalls++;
@@ -23,6 +28,7 @@ const mockCallTool = vi.fn((_req: { name: string; arguments: Record<string, unkn
 vi.mock('@modelcontextprotocol/sdk/client/index.js', () => ({
   Client: class {
     connect = mockClientConnect;
+    ping = mockClientPing;
     listTools = mockListTools;
     callTool = mockCallTool;
     close = mockClientClose;
@@ -31,8 +37,11 @@ vi.mock('@modelcontextprotocol/sdk/client/index.js', () => ({
 
 vi.mock('@modelcontextprotocol/sdk/client/stdio.js', () => ({
   StdioClientTransport: class {
-    onerror: unknown;
-    constructor(public opts: unknown) {}
+    onclose?: () => void;
+    onerror?: (error: Error) => void;
+    constructor(public opts: unknown) {
+      mockTransports.push(this);
+    }
   },
 }));
 
@@ -42,12 +51,22 @@ describe('DevToolsClient', () => {
   beforeEach(() => {
     mockClientConnect.mockClear();
     mockClientClose.mockClear();
+    mockClientPing.mockClear();
     mockListTools.mockClear();
     mockCallTool.mockClear();
     _listToolsCalls = 0;
+    mockTransports.length = 0;
   });
 
   describe('connect()', () => {
+    it('shares one connection attempt across concurrent callers', async () => {
+      const client = new DevToolsClient();
+
+      await Promise.all([client.connect(), client.connect()]);
+
+      expect(mockClientConnect).toHaveBeenCalledTimes(1);
+    });
+
     test('creates transport and connects client', async () => {
       const client = new DevToolsClient();
       await client.connect();
@@ -80,13 +99,27 @@ describe('DevToolsClient', () => {
       expect(mockListTools).toHaveBeenCalledTimes(2);
     });
 
-    test('throws when not connected', async () => {
+    it('connects on demand when listing tools', async () => {
       const client = new DevToolsClient();
-      await expect(client.listAllTools()).rejects.toThrow('Client not connected');
+
+      await client.listAllTools();
+
+      expect(mockClientConnect).toHaveBeenCalledTimes(1);
     });
   });
 
   describe('callTool()', () => {
+    it('reconnects before the next tool call after the transport closes', async () => {
+      const client = new DevToolsClient();
+      await client.connect();
+      mockTransports[0]!.onclose?.();
+
+      await client.callTool('click', { uid: '1_2' });
+
+      expect(mockClientConnect).toHaveBeenCalledTimes(2);
+      expect(mockCallTool).toHaveBeenCalledTimes(1);
+    });
+
     test('calls upstream tool with name and args', async () => {
       const client = new DevToolsClient();
       await client.connect();
@@ -101,9 +134,179 @@ describe('DevToolsClient', () => {
       expect(result.content).toEqual([{ type: 'text', text: 'done' }]);
     });
 
-    test('throws when not connected', async () => {
+    it('connects on demand before the first tool call', async () => {
       const client = new DevToolsClient();
-      await expect(client.callTool('click', {})).rejects.toThrow('Client not connected');
+
+      await client.callTool('click', {});
+
+      expect(mockClientConnect).toHaveBeenCalledTimes(1);
+      expect(mockCallTool).toHaveBeenCalledTimes(1);
+    });
+
+    it('checks connection health after the health interval', async () => {
+      vi.useFakeTimers();
+      try {
+        vi.setSystemTime(new Date('2026-07-16T00:00:00Z'));
+        const client = new DevToolsClient();
+        await client.connect();
+        vi.advanceTimersByTime(10_001);
+
+        await client.callTool('click', {});
+
+        expect(mockClientPing).toHaveBeenCalledTimes(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('reconnects when a health check fails before dispatch', async () => {
+      vi.useFakeTimers();
+      try {
+        vi.setSystemTime(new Date('2026-07-16T00:00:00Z'));
+        const client = new DevToolsClient();
+        await client.connect();
+        vi.advanceTimersByTime(10_001);
+        mockClientPing.mockRejectedValueOnce(new Error('transport closed'));
+
+        await client.callTool('click', {});
+
+        expect(mockClientConnect).toHaveBeenCalledTimes(2);
+        expect(mockCallTool).toHaveBeenCalledTimes(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('reconnects when concurrent health checks disagree', async () => {
+      let now = 0;
+      const dateNow = vi.spyOn(Date, 'now').mockImplementation(() => now);
+      let rejectFirstPing!: (reason: Error) => void;
+      let resolveSecondPing!: (value: object) => void;
+      mockClientPing
+        .mockImplementationOnce(
+          () =>
+            new Promise((_resolve, reject) => {
+              rejectFirstPing = reject;
+            }),
+        )
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              resolveSecondPing = resolve;
+            }),
+        );
+
+      try {
+        const client = new DevToolsClient();
+        await client.connect();
+        now = 10_001;
+
+        const firstCall = client.callTool('click', { uid: '1_1' });
+        const secondCall = client.callTool('click', { uid: '1_2' });
+        await vi.waitFor(() => expect(mockClientPing).toHaveBeenCalledTimes(2));
+
+        rejectFirstPing(new Error('transport closed'));
+        resolveSecondPing({});
+
+        await expect(Promise.all([firstCall, secondCall])).resolves.toHaveLength(2);
+        expect(mockClientConnect).toHaveBeenCalledTimes(2);
+        expect(mockCallTool).toHaveBeenCalledTimes(2);
+      } finally {
+        dateNow.mockRestore();
+      }
+    });
+
+    it('passes the abort signal to the upstream request', async () => {
+      const client = new DevToolsClient();
+      const controller = new AbortController();
+
+      await client.callTool('click', {}, controller.signal);
+
+      expect(mockCallTool).toHaveBeenCalledWith({ name: 'click', arguments: {} }, undefined, {
+        signal: controller.signal,
+        timeout: 60_000,
+      });
+    });
+
+    it('does not replay a tool that loses its connection during dispatch', async () => {
+      const client = new DevToolsClient();
+      await client.connect();
+      mockCallTool.mockImplementationOnce(async () => {
+        mockTransports[0]!.onclose?.();
+        throw new Error('internal transport detail');
+      });
+
+      await expect(client.callTool('click', {})).rejects.toThrow(
+        'Browser connection lost; retry the tool',
+      );
+
+      expect(mockCallTool).toHaveBeenCalledTimes(1);
+      expect(client.getState()).toBe('disconnected');
+    });
+
+    it('sanitizes unexpected upstream request failures', async () => {
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        const client = new DevToolsClient();
+        mockCallTool.mockRejectedValueOnce(new Error('secret response body'));
+
+        await expect(client.callTool('click', {})).rejects.toThrow('Browser tool call failed.');
+
+        expect(consoleError).toHaveBeenCalledWith(
+          '[pi-browser-use] upstream tool call failed (Error)',
+        );
+      } finally {
+        consoleError.mockRestore();
+      }
+    });
+  });
+
+  describe('connection state', () => {
+    it('tracks ready and disconnected transport states', async () => {
+      const client = new DevToolsClient();
+      expect(client.getState()).toBe('disconnected');
+
+      await client.connect();
+      expect(client.getState()).toBe('ready');
+
+      mockTransports[0]!.onclose?.();
+      expect(client.getState()).toBe('disconnected');
+    });
+
+    it('ignores a late close event from an old transport', async () => {
+      const client = new DevToolsClient();
+      await client.connect();
+      const oldTransport = mockTransports[0]!;
+      oldTransport.onclose?.();
+      await client.callTool('click', {});
+
+      oldTransport.onclose?.();
+
+      expect(client.getState()).toBe('ready');
+    });
+
+    it('ignores a late error event from an old transport', async () => {
+      const client = new DevToolsClient();
+      await client.connect();
+      const oldTransport = mockTransports[0]!;
+      oldTransport.onclose?.();
+      await client.callTool('click', {});
+
+      oldTransport.onerror?.(new Error('late transport error'));
+
+      expect(client.getState()).toBe('ready');
+      expect(mockClientClose).not.toHaveBeenCalled();
+    });
+
+    it('can retry after an initial connection failure', async () => {
+      mockClientConnect.mockRejectedValueOnce(new Error('startup failed'));
+      const client = new DevToolsClient();
+
+      await expect(client.connect()).rejects.toThrow('Browser connection failed.');
+      expect(client.getState()).toBe('failed');
+
+      await client.connect();
+      expect(client.getState()).toBe('ready');
     });
   });
 

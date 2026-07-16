@@ -7,7 +7,11 @@ const mockListAllTools = vi.fn(() =>
     {
       name: 'click',
       description: 'Click an element.',
-      inputSchema: { type: 'object' as const },
+      inputSchema: {
+        type: 'object' as const,
+        properties: { pageId: { type: 'number' as const } },
+        required: ['pageId'],
+      },
     },
     {
       name: 'take_snapshot',
@@ -32,7 +36,7 @@ const mockListAllTools = vi.fn(() =>
   ]),
 );
 
-const mockCallTool = vi.fn((_name: string, _args: Record<string, unknown>) =>
+const mockCallTool = vi.fn((_name: string, _args: Record<string, unknown>, _signal?: AbortSignal) =>
   Promise.resolve({
     content: [{ type: 'text', text: 'Tool result' }],
   }),
@@ -45,9 +49,14 @@ vi.mock('@modelcontextprotocol/sdk/client/index.js', () => ({
   Client: class {
     connect = mockConnect;
     listTools = vi.fn(() => mockListAllTools().then((tools) => ({ tools, nextCursor: undefined })));
-    callTool = vi.fn((req: { name: string; arguments: Record<string, unknown> }) =>
-      mockCallTool(req.name, req.arguments),
+    callTool = vi.fn(
+      (
+        req: { name: string; arguments: Record<string, unknown> },
+        _schema: unknown,
+        options?: { signal?: AbortSignal },
+      ) => mockCallTool(req.name, req.arguments, options?.signal),
     );
+    ping = vi.fn(() => Promise.resolve({}));
     close = mockClose;
   },
 }));
@@ -74,11 +83,13 @@ interface RegisteredTool {
   name: string;
   label: string;
   description: string;
+  promptSnippet?: string;
+  promptGuidelines?: string[];
   parameters: unknown;
   execute: (
     id: string,
     params: Record<string, unknown>,
-    signal: undefined,
+    signal: AbortSignal | undefined,
     onUpdate: undefined,
     ctx: unknown,
   ) => Promise<unknown>;
@@ -183,6 +194,20 @@ describe('browserUseExtension', () => {
       expect(names).toContain('browser_navigate_page');
     });
 
+    it('preserves required pageId parameters from page-scoped upstream tools', async () => {
+      await startExtension();
+
+      const tool = registeredTools.get('browser_click')!;
+      expect(tool.parameters).toMatchObject({
+        properties: { pageId: { type: 'number' } },
+        required: ['pageId'],
+      });
+      expect(tool.promptSnippet).toContain('browser_list_pages');
+      expect(tool.promptGuidelines).toEqual(
+        expect.arrayContaining([expect.stringContaining('pageId')]),
+      );
+    });
+
     test('excludes lighthouse_audit', async () => {
       await startExtension();
 
@@ -205,13 +230,48 @@ describe('browserUseExtension', () => {
         visionModel: { provider: 'openai', model: 'gpt-4o' },
       });
 
-      expect(registeredTools.has('browser_analyze_screenshot')).toBe(true);
+      const tool = registeredTools.get('browser_analyze_screenshot');
+      expect(tool).toBeDefined();
+      expect(tool!.parameters).toMatchObject({
+        properties: { pageId: { type: 'number' } },
+        required: ['pageId'],
+      });
+      expect(tool!.promptSnippet).toContain('browser_list_pages');
     });
 
     test('does not register analyze_screenshot without visionModel', async () => {
       await startExtension();
 
       expect(registeredTools.has('browser_analyze_screenshot')).toBe(false);
+    });
+
+    it('returns visual analysis failures as tool errors', async () => {
+      await startExtension({
+        visionModel: { provider: 'openai', model: 'gpt-4o' },
+      });
+      const tool = registeredTools.get('browser_analyze_screenshot')!;
+
+      const result = (await tool.execute('call-1', { pageId: 7 }, undefined, undefined, {})) as {
+        isError?: boolean;
+      };
+
+      expect(result.isError).toBe(true);
+    });
+
+    it('forwards the Pi abort signal during visual screenshot capture', async () => {
+      await startExtension({
+        visionModel: { provider: 'openai', model: 'gpt-4o' },
+      });
+      const tool = registeredTools.get('browser_analyze_screenshot')!;
+      const controller = new AbortController();
+
+      await tool.execute('call-1', { pageId: 7 }, controller.signal, undefined, {});
+
+      expect(mockCallTool).toHaveBeenCalledWith(
+        'take_screenshot',
+        { pageId: 7 },
+        controller.signal,
+      );
     });
   });
 
@@ -220,9 +280,19 @@ describe('browserUseExtension', () => {
       await startExtension();
       const clickTool = registeredTools.get('browser_click')!;
 
-      await clickTool.execute('call-1', { uid: '1_2' }, undefined, undefined, {});
+      await clickTool.execute('call-1', { pageId: 7, uid: '1_2' }, undefined, undefined, {});
 
-      expect(mockCallTool).toHaveBeenCalledWith('click', { uid: '1_2' });
+      expect(mockCallTool).toHaveBeenCalledWith('click', { pageId: 7, uid: '1_2' }, undefined);
+    });
+
+    it('forwards the Pi abort signal to the browser client', async () => {
+      await startExtension();
+      const clickTool = registeredTools.get('browser_click')!;
+      const controller = new AbortController();
+
+      await clickTool.execute('call-1', {}, controller.signal, undefined, {});
+
+      expect(mockCallTool).toHaveBeenCalledWith('click', {}, controller.signal);
     });
 
     test('returns upstream text content', async () => {
@@ -288,6 +358,7 @@ describe('browserUseExtension', () => {
       };
 
       expect(result.content[0]!.text).toContain('element not found');
+      expect(result.isError).toBe(true);
     });
 
     test('appends overlay hint for click action blocked by overlay', async () => {
