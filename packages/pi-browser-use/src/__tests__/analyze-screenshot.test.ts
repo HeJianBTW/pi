@@ -272,9 +272,10 @@ describe('createFetchVisionCaller', () => {
     expect(imageContent.data).toBe('aW1hZ2U=');
     expect(imageContent.mimeType).toBe('image/jpeg');
     expect(callArgs[2].signal).toBe(controller.signal);
+    expect(callArgs[2]).not.toHaveProperty('temperature');
   });
 
-  it('omits temperature for reasoning vision models', async () => {
+  it('omits temperature for reasoning vision models too', async () => {
     const piAi = await import('@earendil-works/pi-ai/compat');
     (piAi.complete as any).mockClear();
 

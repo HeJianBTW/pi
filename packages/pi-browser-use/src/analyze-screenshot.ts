@@ -73,10 +73,6 @@ export function createFetchVisionCaller(visionConfig: VisionModelConfig): Vision
     const options: Record<string, unknown> = {
       maxTokens: 2048,
     };
-    // Reasoning models such as Kimi K2.6 only accept their provider-defined
-    // temperature. Pi-ai disables thinking for this short single-turn request;
-    // omitting temperature lets the provider choose its required default.
-    if (!model.reasoning) options.temperature = 0;
     if (auth.apiKey) options.apiKey = auth.apiKey;
     if (auth.headers) options.headers = auth.headers;
     if (signal) options.signal = signal;
