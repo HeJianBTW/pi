@@ -160,12 +160,6 @@ function buildConfig(args: Args): Mem0Config {
     useRegistryKeys: true,
     oss: {
       disableHistory: true, // avoid better-sqlite3 ABI surprises
-      // Fresh snapshot path per invocation — otherwise prior runs' facts
-      // pollute today's blob. The default path is ~/.pi/agent/memories/mem0-snapshot.db.
-      snapshotDbPath: path.join(
-        os.tmpdir(),
-        `pi-eval-mem0-snapshot-${process.pid}.db`,
-      ),
       llm: {
         provider: args.llmProvider,
         config: {

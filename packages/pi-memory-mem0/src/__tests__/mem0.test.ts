@@ -1,16 +1,18 @@
-import { existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Prefetch } from '../prefetch.js';
 import type { KeyResolver, Mem0Provider, ProviderResolver } from '../provider.js';
-import {
-  formatObservedAt,
-  mapApiToMem0Provider,
-  rewriteObservationDate,
-  SqliteSnapshotStore,
-} from '../provider.js';
+import { formatObservedAt, mapApiToMem0Provider, rewriteObservationDate } from '../provider.js';
 import { createMem0Tools } from '../tools.js';
+
+vi.mock('@amaster.ai/pi-shared/settings', async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  return {
+    ...actual,
+    resolveHome: () => join(tmpdir(), 'pi-memory-mem0-unit-home'),
+  };
+});
 
 // ---------------------------------------------------------------------------
 // Mock provider
@@ -22,7 +24,6 @@ function mockProvider(overrides: Partial<Mem0Provider> = {}): Mem0Provider {
     search: vi.fn().mockResolvedValue([]),
     getAll: vi.fn().mockResolvedValue([]),
     delete: vi.fn().mockResolvedValue(undefined),
-    flushSnapshot: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
 }
@@ -401,148 +402,6 @@ describe('createMem0Provider with resolveProvider', () => {
 });
 
 // ---------------------------------------------------------------------------
-// SqliteSnapshotStore
-// ---------------------------------------------------------------------------
-
-// These tests require better-sqlite3 native binding compiled for the current Node version.
-// Skip if the binding is unavailable (e.g. compiled for a different Node/Electron version).
-const canUseSqlite = (() => {
-  try {
-    const { createRequire } = require('node:module');
-    const req = createRequire(import.meta.url);
-    const BS3 = req('better-sqlite3');
-    const db = new BS3(':memory:');
-    db.close();
-    return true;
-  } catch {
-    return false;
-  }
-})();
-
-describe.skipIf(!canUseSqlite)('SqliteSnapshotStore', () => {
-  let dbPath: string;
-  let store: SqliteSnapshotStore;
-
-  beforeEach(() => {
-    dbPath = join(tmpdir(), `mem0-test-${Date.now()}-${Math.random().toString(36).slice(2)}.db`);
-    store = new SqliteSnapshotStore(dbPath);
-  });
-
-  afterEach(() => {
-    store.close();
-    if (existsSync(dbPath)) rmSync(dbPath);
-    if (existsSync(`${dbPath}-wal`)) rmSync(`${dbPath}-wal`);
-    if (existsSync(`${dbPath}-shm`)) rmSync(`${dbPath}-shm`);
-  });
-
-  it('creates db file and table', () => {
-    expect(existsSync(dbPath)).toBe(true);
-  });
-
-  it('loadAll returns empty for new user', () => {
-    const items = store.loadAll('user-1');
-    expect(items).toEqual([]);
-  });
-
-  it('replaceAll stores and loadAll retrieves memories', () => {
-    store.replaceAll('user-1', [
-      {
-        id: 'a',
-        memory: 'likes cats',
-        score: undefined,
-        created_at: '2026-01-01',
-        updated_at: '2026-01-02',
-      },
-      {
-        id: 'b',
-        memory: 'uses vim',
-        score: undefined,
-        created_at: '2026-01-01',
-        updated_at: undefined,
-      },
-    ]);
-
-    const items = store.loadAll('user-1');
-    expect(items).toHaveLength(2);
-    expect(items[0]!.memory).toBe('likes cats');
-    expect(items[1]!.memory).toBe('uses vim');
-  });
-
-  it('replaceAll overwrites previous data', () => {
-    store.replaceAll('user-1', [{ id: 'a', memory: 'old fact', score: undefined }]);
-    store.replaceAll('user-1', [{ id: 'b', memory: 'new fact', score: undefined }]);
-
-    const items = store.loadAll('user-1');
-    expect(items).toHaveLength(1);
-    expect(items[0]!.id).toBe('b');
-    expect(items[0]!.memory).toBe('new fact');
-  });
-
-  it('isolates data by userId', () => {
-    store.replaceAll('user-1', [{ id: 'a', memory: 'fact A', score: undefined }]);
-    store.replaceAll('user-2', [{ id: 'b', memory: 'fact B', score: undefined }]);
-
-    expect(store.loadAll('user-1')).toHaveLength(1);
-    expect(store.loadAll('user-2')).toHaveLength(1);
-    expect(store.loadAll('user-1')[0]!.memory).toBe('fact A');
-    expect(store.loadAll('user-2')[0]!.memory).toBe('fact B');
-  });
-
-  it('tryCreate returns null on invalid path', () => {
-    const result = SqliteSnapshotStore.tryCreate('/dev/null/impossible/path.db');
-    expect(result).toBeNull();
-  });
-
-  it('tryCreate returns instance on valid path', () => {
-    const validPath = join(tmpdir(), `mem0-try-${Date.now()}.db`);
-    const instance = SqliteSnapshotStore.tryCreate(validPath);
-    expect(instance).toBeInstanceOf(SqliteSnapshotStore);
-    instance?.close();
-    if (existsSync(validPath)) rmSync(validPath);
-  });
-
-  it('loadAllUsers groups by userId', () => {
-    store.replaceAll('alice', [
-      { id: '1', memory: 'alice fact 1', score: undefined },
-      { id: '2', memory: 'alice fact 2', score: undefined },
-    ]);
-    store.replaceAll('bob', [{ id: '3', memory: 'bob fact', score: undefined }]);
-
-    const result = store.loadAllUsers();
-    expect(result).toHaveLength(2);
-
-    const alice = result.find((r) => r.userId === 'alice');
-    const bob = result.find((r) => r.userId === 'bob');
-    expect(alice?.items).toHaveLength(2);
-    expect(bob?.items).toHaveLength(1);
-    expect(bob!.items[0]!.memory).toBe('bob fact');
-  });
-
-  it('loadAllUsers returns empty when no data', () => {
-    const result = store.loadAllUsers();
-    expect(result).toEqual([]);
-  });
-
-  it('replaceAll handles empty items array (clears user data)', () => {
-    store.replaceAll('user-1', [{ id: 'a', memory: 'fact', score: undefined }]);
-    store.replaceAll('user-1', []);
-
-    expect(store.loadAll('user-1')).toEqual([]);
-  });
-
-  it('handles concurrent replaceAll for different users', () => {
-    store.replaceAll('user-1', [{ id: 'a', memory: 'A', score: undefined }]);
-    store.replaceAll('user-2', [{ id: 'b', memory: 'B', score: undefined }]);
-    store.replaceAll('user-1', [{ id: 'c', memory: 'C', score: undefined }]);
-
-    expect(store.loadAll('user-1')).toHaveLength(1);
-    expect(store.loadAll('user-1')[0]!.memory).toBe('C');
-    expect(store.loadAll('user-2')).toHaveLength(1);
-    expect(store.loadAll('user-2')[0]!.memory).toBe('B');
-  });
-});
-
-// ---------------------------------------------------------------------------
 // createMem0Provider — additional scenarios
 // ---------------------------------------------------------------------------
 
@@ -586,6 +445,45 @@ describe('createMem0Provider additional scenarios', () => {
       config: Record<string, unknown>;
     };
     expect(vs.provider).toBe('memory');
+    expect(String(vs.config.dbPath).replace(/\\/g, '/')).toContain('/memories/mem0-vectors.db');
+  });
+
+  it('fills Pi defaults for a custom memory vector store config', async () => {
+    const { createMem0Provider: create } = await import('../provider.js');
+
+    await create({
+      config: {
+        mode: 'open-source',
+        oss: {
+          vectorStore: { provider: 'memory', config: { collectionName: 'custom' } },
+        },
+      },
+    });
+
+    const vs = __capturedMem0Config!.vectorStore as {
+      provider: string;
+      config: Record<string, unknown>;
+    };
+    expect(vs.config.collectionName).toBe('custom');
+    expect(String(vs.config.dbPath).replace(/\\/g, '/')).toContain('/memories/mem0-vectors.db');
+  });
+
+  it('preserves an explicit in-memory SQLite dbPath', async () => {
+    const { createMem0Provider: create } = await import('../provider.js');
+
+    await create({
+      config: {
+        mode: 'open-source',
+        oss: {
+          vectorStore: { provider: 'memory', config: { dbPath: ':memory:' } },
+        },
+      },
+    });
+
+    const vs = __capturedMem0Config!.vectorStore as {
+      provider: string;
+      config: Record<string, unknown>;
+    };
     expect(vs.config.dbPath).toBe(':memory:');
   });
 

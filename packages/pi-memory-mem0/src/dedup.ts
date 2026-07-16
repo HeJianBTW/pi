@@ -4,13 +4,10 @@
  * Normalizes content, identifies exact duplicates (case-insensitive, whitespace-collapsed),
  * deletes the older entries, and keeps only the most recently updated.
  *
- * Two code paths:
- * - Platform mode: getAll → delete each duplicate via cloud API (IDs are stable)
- * - OSS mode: operate directly on SqliteSnapshotStore (mem0 OSS reassigns IDs on restore)
+ * Both Platform and OSS modes use the provider API. In OSS mode the configured
+ * vector store is the source of truth and its IDs remain stable across restarts.
  */
-import { join } from 'node:path';
-import { resolveHome } from '@amaster.ai/pi-shared/settings';
-import { createMem0Provider, type ProviderResolver, SqliteSnapshotStore } from './provider.js';
+import { createMem0Provider, type ProviderResolver } from './provider.js';
 import type { Mem0ExtensionConfig, MemoryItem } from './types.js';
 
 export interface DedupOptions {
@@ -26,19 +23,6 @@ export interface DedupResult {
 }
 
 export async function dedupMemories(opts: DedupOptions): Promise<DedupResult> {
-  const { config } = opts;
-  const mode = config.mode ?? 'platform';
-
-  if (mode === 'open-source') {
-    return dedupOss(opts);
-  }
-  return dedupPlatform(opts);
-}
-
-/**
- * Platform mode: use provider API (cloud IDs are stable).
- */
-async function dedupPlatform(opts: DedupOptions): Promise<DedupResult> {
   const { userId, config, resolveProvider, signal } = opts;
 
   const provider = await createMem0Provider({
@@ -65,61 +49,6 @@ async function dedupPlatform(opts: DedupOptions): Promise<DedupResult> {
   }
 
   return { total: allMemories.length, duplicatesRemoved: removed };
-}
-
-/**
- * OSS mode: operate directly on the SQLite snapshot store.
- * mem0 OSS reassigns internal IDs when restoring memories, so we can't
- * rely on provider.delete(originalId). Instead, we deduplicate the snapshot
- * in-place and write back the unique set.
- */
-function dedupOss(opts: DedupOptions): DedupResult {
-  const { userId, config, signal } = opts;
-
-  const snapshotDbPath =
-    config.oss?.snapshotDbPath ?? join(resolveHome(), 'memories', 'mem0-snapshot.db');
-
-  const snapshot = SqliteSnapshotStore.tryCreate(snapshotDbPath);
-  if (!snapshot) {
-    return { total: 0, duplicatesRemoved: 0 };
-  }
-
-  try {
-    const allItems = snapshot.loadAll(userId) as MemoryItem[];
-    if (allItems.length === 0) {
-      return { total: 0, duplicatesRemoved: 0 };
-    }
-
-    const seen = new Map<string, MemoryItem>();
-    let duplicateCount = 0;
-
-    for (const item of allItems) {
-      if (signal?.aborted) break;
-
-      const normalized = item.memory.normalize('NFC').replace(/\s+/g, ' ').trim().toLowerCase();
-      const existing = seen.get(normalized);
-
-      if (existing) {
-        const existingTime = existing.updated_at ? new Date(existing.updated_at).getTime() : 0;
-        const currentTime = item.updated_at ? new Date(item.updated_at).getTime() : 0;
-        if (currentTime > existingTime) {
-          seen.set(normalized, item);
-        }
-        duplicateCount++;
-      } else {
-        seen.set(normalized, item);
-      }
-    }
-
-    if (duplicateCount > 0) {
-      const uniqueItems = [...seen.values()];
-      snapshot.replaceAll(userId, uniqueItems);
-    }
-
-    return { total: allItems.length, duplicatesRemoved: duplicateCount };
-  } finally {
-    snapshot.close();
-  }
 }
 
 /**

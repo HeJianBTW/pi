@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 
+const { mockCreateMem0Provider } = vi.hoisted(() => ({
+  mockCreateMem0Provider: vi.fn(),
+}));
+
 // Isolate mem0Extension from any settings.json that happens to live on the
 // test runner's filesystem. Self-hosted CI runners share $HOME across builds,
 // so without this mock a stale ~/.pi/agent/settings.json from an integration
@@ -14,6 +18,15 @@ vi.mock('@amaster.ai/pi-shared/settings', async (importOriginal) => {
   };
 });
 
+vi.mock('../provider.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../provider.js')>();
+  return {
+    ...actual,
+    createMem0Provider: mockCreateMem0Provider,
+  };
+});
+
+import { loadPiSettings } from '@amaster.ai/pi-shared/settings';
 import mem0Extension from '../index.js';
 
 // ---------------------------------------------------------------------------
@@ -210,6 +223,62 @@ describe('session_shutdown', () => {
 
     const result = await handlers.before_agent_start![0]!({ systemPrompt: 'test' }, ctx);
     expect(result).toBeUndefined();
+  });
+
+  it('waits for queued turns before shutdown', async () => {
+    const { pi, handlers } = createMockPi();
+    const add = vi.fn();
+    let finishFirstAdd: (() => void) | undefined;
+    add
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            finishFirstAdd = resolve;
+          }),
+      )
+      .mockResolvedValue({ results: [] });
+    vi.mocked(loadPiSettings).mockReturnValueOnce({
+      mode: 'open-source',
+      userId: 'company-1',
+    });
+    mockCreateMem0Provider.mockResolvedValueOnce({
+      add,
+      search: vi.fn(),
+      getAll: vi.fn(),
+      delete: vi.fn(),
+    });
+    mem0Extension(pi as never);
+
+    const ctx = createMockCtx();
+    await handlers.session_start![0]!({}, ctx);
+    await handlers.input![0]!({ text: 'first fact' }, ctx);
+    await handlers.turn_end![0]!({ message: { role: 'assistant', content: 'first reply' } }, ctx);
+    await vi.waitFor(() => expect(add).toHaveBeenCalledOnce());
+
+    await handlers.input![0]!({ text: 'second fact' }, ctx);
+    await handlers.turn_end![0]!({ message: { role: 'assistant', content: 'second reply' } }, ctx);
+
+    const shutdown = handlers.session_shutdown![0]!({}, ctx);
+    finishFirstAdd!();
+    await shutdown;
+
+    expect(add).toHaveBeenCalledTimes(2);
+    expect(add).toHaveBeenNthCalledWith(
+      1,
+      [
+        { role: 'user', content: 'first fact' },
+        { role: 'assistant', content: 'first reply' },
+      ],
+      { userId: 'company-1' },
+    );
+    expect(add).toHaveBeenNthCalledWith(
+      2,
+      [
+        { role: 'user', content: 'second fact' },
+        { role: 'assistant', content: 'second reply' },
+      ],
+      { userId: 'company-1' },
+    );
   });
 });
 

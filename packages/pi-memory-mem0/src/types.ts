@@ -23,8 +23,6 @@ export interface Mem0ExtensionConfig {
     historyStore?: { provider: string; config?: Record<string, unknown> };
     /** Shortcut for sqlite history DB path. Default: <home>/memories/mem0-history.db */
     historyDbPath?: string;
-    /** Path to SQLite file for memory snapshot persistence. Default: <home>/memories/mem0-snapshot.db */
-    snapshotDbPath?: string;
     disableHistory?: boolean;
   };
 
