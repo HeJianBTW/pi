@@ -137,8 +137,8 @@ function loadConfigFromFile(options?: PiSettingsOptions): BrowserUseConfig {
   });
 }
 
-/** Convert upstream MCP result into pi-agent TextContent[], applying post-processing. */
-function toTextContent(
+/** Convert upstream MCP result into pi-agent content, applying text post-processing. */
+function toToolContent(
   result: {
     content?: Array<{
       type: string;
@@ -149,11 +149,18 @@ function toTextContent(
     isError?: boolean;
   },
   originalName: string,
-): { content: Array<{ type: 'text'; text: string }>; isError?: boolean } {
+): {
+  content: Array<
+    { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }
+  >;
+  isError?: boolean;
+} {
   const textContent = extractTextContent(result.content);
   const processed = postProcessToolResult(originalName, textContent);
 
-  const content: Array<{ type: 'text'; text: string }> = [];
+  const content: Array<
+    { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }
+  > = [];
 
   if (processed !== textContent) {
     content.push({ type: 'text', text: processed });
@@ -161,6 +168,14 @@ function toTextContent(
     for (const item of result.content) {
       if (item.type === 'text' && item.text) {
         content.push({ type: 'text', text: item.text });
+      }
+    }
+  }
+
+  if (result.content) {
+    for (const item of result.content) {
+      if (item.type === 'image' && item.data) {
+        content.push({ type: 'image', data: item.data, mimeType: item.mimeType ?? 'image/png' });
       }
     }
   }
@@ -220,7 +235,7 @@ export default function browserUseExtension(pi: ExtensionAPI): void {
         ) {
           await ensureConnected();
           const result = await client!.callTool(originalName, params);
-          const { content } = toTextContent(result, originalName);
+          const { content } = toToolContent(result, originalName);
           return { content, details: undefined };
         },
       });

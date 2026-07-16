@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test, vi } from 'vitest';
+import { beforeEach, describe, expect, it, test, vi } from 'vitest';
 
 // --- Mocks ---
 
@@ -12,6 +12,11 @@ const mockListAllTools = vi.fn(() =>
     {
       name: 'take_snapshot',
       description: 'Take snapshot.',
+      inputSchema: { type: 'object' as const },
+    },
+    {
+      name: 'take_screenshot',
+      description: 'Take screenshot.',
       inputSchema: { type: 'object' as const },
     },
     {
@@ -356,20 +361,21 @@ describe('browserUseExtension', () => {
       expect(result.content[0]!.text).toContain('Latest page snapshot');
     });
 
-    test('handles upstream result with no text content (only images)', async () => {
+    it('forwards screenshot image content to Pi', async () => {
       mockCallTool.mockResolvedValueOnce({
         content: [{ type: 'image', data: 'base64data', mimeType: 'image/png' }],
       } as any);
 
       await startExtension();
-      const clickTool = registeredTools.get('browser_click')!;
+      const screenshotTool = registeredTools.get('browser_take_screenshot')!;
 
-      const result = (await clickTool.execute('call-1', {}, undefined, undefined, {})) as {
-        content: Array<{ type: string; text: string }>;
+      const result = (await screenshotTool.execute('call-1', {}, undefined, undefined, {})) as {
+        content: Array<{ type: string; data: string; mimeType: string }>;
       };
 
-      expect(result.content).toHaveLength(1);
-      expect(result.content[0]!.text).toBe('');
+      expect(result.content).toEqual([
+        { type: 'image', data: 'base64data', mimeType: 'image/png' },
+      ]);
     });
   });
 
