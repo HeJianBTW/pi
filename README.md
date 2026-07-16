@@ -66,6 +66,9 @@ Every package is ESM-only and published under the `@amaster.ai` npm scope.
     <td><strong>@amaster.ai/pi-wecom</strong><br><img src="./packages/pi-wecom/preview.png" alt="pi-wecom preview" width="260"></td>
     <td><strong>@amaster.ai/pi-dingtalk</strong><br><img src="./packages/pi-dingtalk/preview.png" alt="pi-dingtalk preview" width="260"></td>
   </tr>
+  <tr>
+    <td><strong>@amaster.ai/pi-goal</strong><br><img src="./packages/pi-goal/preview.png" alt="pi-goal preview" width="260"></td>
+  </tr>
 </table>
 
 ## Requirements
