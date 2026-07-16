@@ -271,13 +271,14 @@ jobs:
             prompt: "Use image_generate to generate a test image with prompt 'a solid red square'. Report the generated file path."
             assert_pattern: "(image|generated|.png|.jpg|.webp|pi-images)"
           - extension: pi-browser-use
-            tools: browser_navigate_page,browser_take_snapshot
-            prompt: "Use browser_navigate_page to go to https://example.com then use browser_take_snapshot to get page content. Tell me the page title."
-            assert_pattern: "(Example Domain|example.com)"
+            tools: browser_list_pages,browser_navigate_page,browser_take_snapshot
+            prompt: "Use browser_list_pages first to get the current pageId. Pass that pageId to browser_navigate_page to go to https://example.com, then pass it to browser_take_snapshot and tell me the page title."
+            assert_pattern: "Example Domain"
+            assert_tool: browser_take_snapshot
           - extension: pi-browser-use
             scenario: screenshot
-            tools: browser_navigate_page,browser_analyze_screenshot
-            prompt: "Use browser_navigate_page to go to http://127.0.0.1:8765/. Then use browser_analyze_screenshot exactly once and ask it to report the exact large heading plus the dominant background color. Return its visual findings. Do not infer the answer from the URL."
+            tools: browser_list_pages,browser_navigate_page,browser_analyze_screenshot
+            prompt: "Use browser_list_pages first to get the current pageId. Pass that pageId to browser_navigate_page to go to http://127.0.0.1:8765/. Then pass it to browser_analyze_screenshot exactly once and ask it to report the exact large heading plus the dominant background color. Return its visual findings. Do not infer the answer from the URL."
             assert_pattern: "(VISUAL CHECK 7391.*(blue|#1457d9)|(blue|#1457d9).*VISUAL CHECK 7391)"
             assert_visual_analysis: true
     env:
@@ -531,7 +532,8 @@ jobs:
         run: |
           set -euo pipefail
           # Use npmmirror CDN to avoid slow Google CDN on domestic runners.
-          npx -y @puppeteer/browsers install chrome@stable \
+          sudo env "PATH=$PATH" npx -y @puppeteer/browsers install chrome@stable \
+            --install-deps \
             --path "$RUNNER_TEMP/chrome-install" \
             --base-url https://cdn.npmmirror.com/binaries/chrome-for-testing
           CHROME_BIN=$(find "$RUNNER_TEMP/chrome-install" -name "chrome" -type f | head -1)
@@ -540,7 +542,7 @@ jobs:
             exit 1
           fi
           echo "Chrome: $CHROME_BIN"
-          "$CHROME_BIN" --version --no-sandbox || true
+          "$CHROME_BIN" --version
           echo "CHROMIUM_BIN=$CHROME_BIN" >> "$GITHUB_ENV"
 
       - name: Start browser screenshot fixture (pi-browser-use screenshot only)
@@ -663,7 +665,7 @@ jobs:
             ' <<<"$output" || true
             echo "--- final assistant text ---"
             ASSISTANT_TEXT=$(jq -rs '
-              map(select(.type == "message_end") | .message.content[]?
+              map(select(.type == "message_end" and .message.role == "assistant") | .message.content[]?
                 | select(.type == "text") | .text)
               | join("\n")
             ' <<<"$output" 2>/dev/null || echo "")
@@ -684,6 +686,32 @@ jobs:
           if [ "${{ matrix.extension }}" != "pi-goal" ]; then
             if ! grep -qiE '${{ matrix.assert_pattern }}' <<<"$HAYSTACK"; then
               echo "::error::Expected pattern '${{ matrix.assert_pattern }}' not found in ${{ matrix.extension }} output"
+              exit 1
+            fi
+          fi
+
+          # Cases with assert_tool must prove that the expected text came from
+          # a successful tool result, not from the prompt or model commentary.
+          if [ -n "${{ matrix.assert_tool }}" ]; then
+            if ! command -v jq >/dev/null 2>&1; then
+              echo "::error::jq is required for the tool result assertion"
+              exit 1
+            fi
+            if ! jq -e -s \
+              --arg tool '${{ matrix.assert_tool }}' \
+              --arg pattern '${{ matrix.assert_pattern }}' '
+                any(.[];
+                  .type == "tool_execution_end"
+                  and .toolName == $tool
+                  and .isError != true
+                  and .result.isError != true
+                  and any((.result.content // [])[]?;
+                    .type == "text"
+                    and ((.text // "") | test($pattern; "i"))
+                  )
+                )
+              ' <<<"$output" >/dev/null; then
+              echo "::error::${{ matrix.assert_tool }} did not return '${{ matrix.assert_pattern }}' successfully"
               exit 1
             fi
           fi
