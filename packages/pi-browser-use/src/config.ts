@@ -31,11 +31,16 @@ export interface BrowserUseConfig {
   experimentalVision?: boolean;
   experimentalScreencast?: boolean;
   experimentalMemory?: boolean;
+  experimentalPageIdRouting?: boolean;
 
   visionModel?: VisionModelConfig;
 
   usageStatistics?: boolean;
   performanceCrux?: boolean;
+  redactNetworkHeaders?: boolean;
+  acceptInsecureCerts?: boolean;
+  allowedUrlPattern?: string[];
+  blockedUrlPattern?: string[];
 
   slim?: boolean;
   extraArgs?: string[];
@@ -52,13 +57,27 @@ const DEFAULTS: Partial<BrowserUseConfig> = {
   experimentalVision: true,
   experimentalScreencast: false,
   experimentalMemory: false,
+  experimentalPageIdRouting: true,
   usageStatistics: false,
   performanceCrux: false,
+  redactNetworkHeaders: true,
+  acceptInsecureCerts: false,
 };
 
 /** Merge user config over sane defaults. */
 export function resolveConfig(config?: BrowserUseConfig): BrowserUseConfig {
   const resolved = { ...DEFAULTS, ...config };
+
+  if (resolved.allowedUrlPattern?.length && resolved.blockedUrlPattern?.length) {
+    throw new Error('allowedUrlPattern and blockedUrlPattern cannot be used together');
+  }
+
+  if (resolved.slim) {
+    if (config?.experimentalPageIdRouting === true) {
+      throw new Error('experimentalPageIdRouting cannot be used with slim mode');
+    }
+    resolved.experimentalPageIdRouting = false;
+  }
 
   switch (resolved.sessionMode) {
     case 'existing':
@@ -106,9 +125,19 @@ export function configToArgs(config: BrowserUseConfig): string[] {
   if (resolved.experimentalVision) args.push('--experimental-vision');
   if (resolved.experimentalScreencast) args.push('--experimental-screencast');
   if (resolved.experimentalMemory) args.push('--experimental-memory');
+  if (resolved.experimentalPageIdRouting) args.push('--experimental-page-id-routing');
 
   if (resolved.usageStatistics === false) args.push('--no-usage-statistics');
   if (resolved.performanceCrux === false) args.push('--no-performance-crux');
+  if (resolved.redactNetworkHeaders) args.push('--redact-network-headers');
+  if (resolved.acceptInsecureCerts) args.push('--accept-insecure-certs');
+
+  for (const pattern of resolved.allowedUrlPattern ?? []) {
+    args.push(`--allowed-url-pattern=${pattern}`);
+  }
+  for (const pattern of resolved.blockedUrlPattern ?? []) {
+    args.push(`--blocked-url-pattern=${pattern}`);
+  }
 
   if (resolved.extraArgs) args.push(...resolved.extraArgs);
 

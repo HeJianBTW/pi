@@ -46,6 +46,32 @@ const EXCLUDED_TOOLS = new Set([
 ]);
 
 const MCP_TIMEOUT_MS = 60_000;
+const MCP_HEALTH_TIMEOUT_MS = 5_000;
+const MCP_HEALTH_CHECK_INTERVAL_MS = 10_000;
+
+function requestOptions(timeout: number, signal?: AbortSignal) {
+  return signal ? { signal, timeout } : { timeout };
+}
+
+function pageRoutingGuidance(enabled: boolean) {
+  return enabled
+    ? {
+        promptSnippet: 'Use browser_list_pages first, then pass its numeric pageId.',
+        promptGuidelines: [
+          'Call browser_list_pages before page-scoped tools to obtain the current numeric pageId.',
+          'Pass pageId explicitly instead of relying on shared browser_select_page state.',
+        ],
+      }
+    : {};
+}
+
+export type ConnectionState =
+  | 'disconnected'
+  | 'connecting'
+  | 'ready'
+  | 'reconnecting'
+  | 'failed'
+  | 'closing';
 
 /**
  * MCP client that spawns chrome-devtools-mcp as a subprocess and communicates
@@ -53,40 +79,139 @@ const MCP_TIMEOUT_MS = 60_000;
  */
 export class DevToolsClient {
   private client: Client | null = null;
-  private transport: StdioClientTransport | null = null;
   private config: BrowserUseConfig;
+  private state: ConnectionState = 'disconnected';
+  private connectPromise: Promise<void> | null = null;
+  private generation = 0;
+  private hasConnected = false;
+  private explicitlyClosed = false;
+  private lastHealthCheckAt = 0;
 
   constructor(config?: BrowserUseConfig) {
     this.config = resolveConfig(config);
   }
 
-  async connect(): Promise<void> {
-    const args = configToArgs(this.config);
+  getState(): ConnectionState {
+    return this.state;
+  }
 
-    this.transport = new StdioClientTransport({
+  async connect(signal?: AbortSignal): Promise<void> {
+    if (this.state === 'ready') return;
+    if (this.connectPromise) return this.connectPromise;
+
+    this.explicitlyClosed = false;
+    this.connectPromise = this.openConnection(signal);
+    try {
+      await this.connectPromise;
+    } finally {
+      this.connectPromise = null;
+    }
+  }
+
+  private async openConnection(signal?: AbortSignal): Promise<void> {
+    this.state = this.hasConnected ? 'reconnecting' : 'connecting';
+    const args = configToArgs(this.config);
+    const generation = ++this.generation;
+
+    const transport = new StdioClientTransport({
       command: 'npx',
       args: ['-y', 'chrome-devtools-mcp@latest', ...args],
       stderr: 'pipe',
     });
 
-    this.client = new Client({ name: 'pi-browser-use', version: '0.1.0' }, { capabilities: {} });
+    const client = new Client({ name: 'pi-browser-use', version: '0.1.0' }, { capabilities: {} });
+    this.client = client;
 
-    this.transport.onerror = (error: Error) => {
-      console.error(`[pi-browser-use] chrome-devtools-mcp transport error: ${error.message}`);
+    transport.onerror = (error: Error) => {
+      if (generation !== this.generation) return;
+      console.error(`[pi-browser-use] chrome-devtools-mcp transport error (${error.name})`);
+      void this.disconnectUnhealthyClient(generation);
     };
+    transport.onclose = () => this.markDisconnected(generation);
 
-    await this.client.connect(this.transport);
+    try {
+      await client.connect(transport, requestOptions(MCP_TIMEOUT_MS, signal));
+      if (generation !== this.generation) return;
+      this.state = 'ready';
+      this.hasConnected = true;
+      this.lastHealthCheckAt = Date.now();
+    } catch (error) {
+      if (generation === this.generation) {
+        ++this.generation;
+        this.client = null;
+        this.state = 'failed';
+      }
+      try {
+        await client.close();
+      } catch {
+        // The failed transport may already be closed.
+      }
+      if (signal?.aborted) throw error;
+      const errorName = error instanceof Error ? error.name : 'UnknownError';
+      console.error(`[pi-browser-use] browser connection failed (${errorName})`);
+      throw new Error('Browser connection failed.');
+    }
   }
 
-  async listAllTools(): Promise<Tool[]> {
-    if (!this.client) throw new Error('Client not connected');
+  private markDisconnected(generation: number): void {
+    if (generation !== this.generation || this.state === 'closing') return;
+    ++this.generation;
+    this.client = null;
+    this.state = 'disconnected';
+  }
+
+  private async disconnectUnhealthyClient(generation: number): Promise<void> {
+    if (generation !== this.generation || this.state === 'closing') return;
+    const failedClient = this.client;
+    this.markDisconnected(generation);
+    if (!failedClient) return;
+
+    try {
+      await failedClient.close();
+    } catch {
+      console.error('[pi-browser-use] failed to close unhealthy MCP client');
+    }
+  }
+
+  async ping(signal?: AbortSignal): Promise<boolean> {
+    if (this.state !== 'ready' || !this.client) return false;
+
+    const generation = this.generation;
+    try {
+      await this.client.ping(requestOptions(MCP_HEALTH_TIMEOUT_MS, signal));
+      if (generation !== this.generation) return false;
+      this.lastHealthCheckAt = Date.now();
+      return true;
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      await this.disconnectUnhealthyClient(generation);
+      return false;
+    }
+  }
+
+  async ensureReady(signal?: AbortSignal): Promise<void> {
+    if (this.explicitlyClosed) throw new Error('Client not connected');
+
+    if (this.state === 'ready') {
+      const healthCheckIsFresh = Date.now() - this.lastHealthCheckAt < MCP_HEALTH_CHECK_INTERVAL_MS;
+      if (healthCheckIsFresh || (await this.ping(signal))) return;
+    }
+
+    await this.connect(signal);
+  }
+
+  async listAllTools(signal?: AbortSignal): Promise<Tool[]> {
+    await this.ensureReady(signal);
+    const client = this.client;
+    if (!client) throw new Error('Client not connected');
 
     const allTools: Tool[] = [];
     let cursor: string | undefined;
     do {
-      const result = await this.client.listTools(cursor ? { cursor } : undefined, {
-        timeout: MCP_TIMEOUT_MS,
-      });
+      const result = await client.listTools(
+        cursor ? { cursor } : undefined,
+        requestOptions(MCP_TIMEOUT_MS, signal),
+      );
       allTools.push(...result.tools);
       cursor = result.nextCursor;
     } while (cursor);
@@ -97,6 +222,7 @@ export class DevToolsClient {
   async callTool(
     name: string,
     args: Record<string, unknown>,
+    signal?: AbortSignal,
   ): Promise<{
     content?: Array<{
       type: string;
@@ -106,27 +232,47 @@ export class DevToolsClient {
     }>;
     isError?: boolean;
   }> {
-    if (!this.client) throw new Error('Client not connected');
+    await this.ensureReady(signal);
+    const client = this.client;
+    if (!client) throw new Error('Client not connected');
 
-    return (await this.client.callTool({ name, arguments: args }, undefined, {
-      timeout: MCP_TIMEOUT_MS,
-    })) as {
-      content?: Array<{
-        type: string;
-        text?: string;
-        data?: string;
-        mimeType?: string;
-      }>;
-      isError?: boolean;
-    };
+    try {
+      return (await client.callTool(
+        { name, arguments: args },
+        undefined,
+        requestOptions(MCP_TIMEOUT_MS, signal),
+      )) as {
+        content?: Array<{
+          type: string;
+          text?: string;
+          data?: string;
+          mimeType?: string;
+        }>;
+        isError?: boolean;
+      };
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      if (this.state !== 'ready' || this.client !== client) {
+        throw new Error('Browser connection lost; retry the tool.');
+      }
+      const errorName = error instanceof Error ? error.name : 'UnknownError';
+      console.error(`[pi-browser-use] upstream tool call failed (${errorName})`);
+      throw new Error('Browser tool call failed.');
+    }
   }
 
   async close(): Promise<void> {
-    if (this.client) {
-      await this.client.close();
-      this.client = null;
+    if (this.explicitlyClosed) return;
+    this.explicitlyClosed = true;
+    this.state = 'closing';
+    const client = this.client;
+    ++this.generation;
+    this.client = null;
+    try {
+      if (client) await client.close();
+    } finally {
+      this.state = 'disconnected';
     }
-    this.transport = null;
   }
 }
 
@@ -137,8 +283,8 @@ function loadConfigFromFile(options?: PiSettingsOptions): BrowserUseConfig {
   });
 }
 
-/** Convert upstream MCP result into pi-agent TextContent[], applying post-processing. */
-function toTextContent(
+/** Convert upstream MCP result into pi-agent content, applying text post-processing. */
+function toToolContent(
   result: {
     content?: Array<{
       type: string;
@@ -149,11 +295,18 @@ function toTextContent(
     isError?: boolean;
   },
   originalName: string,
-): { content: Array<{ type: 'text'; text: string }>; isError?: boolean } {
+): {
+  content: Array<
+    { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }
+  >;
+  isError?: boolean;
+} {
   const textContent = extractTextContent(result.content);
   const processed = postProcessToolResult(originalName, textContent);
 
-  const content: Array<{ type: 'text'; text: string }> = [];
+  const content: Array<
+    { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }
+  > = [];
 
   if (processed !== textContent) {
     content.push({ type: 'text', text: processed });
@@ -161,6 +314,14 @@ function toTextContent(
     for (const item of result.content) {
       if (item.type === 'text' && item.text) {
         content.push({ type: 'text', text: item.text });
+      }
+    }
+  }
+
+  if (result.content) {
+    for (const item of result.content) {
+      if (item.type === 'image' && item.data) {
+        content.push({ type: 'image', data: item.data, mimeType: item.mimeType ?? 'image/png' });
       }
     }
   }
@@ -185,14 +346,10 @@ function toTextContent(
 export default function browserUseExtension(pi: ExtensionAPI): void {
   let config: BrowserUseConfig | undefined;
   let client: DevToolsClient | undefined;
-  let connected = false;
 
-  async function ensureConnected(): Promise<void> {
+  async function ensureConnected(signal?: AbortSignal): Promise<void> {
     if (!client) throw new Error('browser-use: session not started');
-    if (!connected) {
-      await client.connect();
-      connected = true;
-    }
+    await client.ensureReady(signal);
   }
 
   async function registerUpstreamTools(): Promise<void> {
@@ -205,23 +362,27 @@ export default function browserUseExtension(pi: ExtensionAPI): void {
       const prefixedName = `${TOOL_PREFIX}${tool.name}`;
       const originalName = tool.name;
       const description = augmentToolDescription(originalName, tool.description ?? '');
+      const routingGuidance = pageRoutingGuidance(
+        tool.inputSchema.required?.includes('pageId') ?? false,
+      );
 
       pi.registerTool({
         name: prefixedName,
         label: prefixedName,
         description,
+        ...routingGuidance,
         parameters: Type.Unsafe(tool.inputSchema),
         async execute(
           _toolCallId: string,
           params: Record<string, unknown>,
-          _signal: AbortSignal | undefined,
+          signal: AbortSignal | undefined,
           _onUpdate: unknown,
           _ctx: ExtensionContext,
         ) {
-          await ensureConnected();
-          const result = await client!.callTool(originalName, params);
-          const { content } = toTextContent(result, originalName);
-          return { content, details: undefined };
+          await ensureConnected(signal);
+          const result = await client!.callTool(originalName, params, signal);
+          const toolContent = toToolContent(result, originalName);
+          return { ...toolContent, details: undefined };
         },
       });
     }
@@ -232,7 +393,12 @@ export default function browserUseExtension(pi: ExtensionAPI): void {
     visionConfig: VisionModelConfig,
     ctx: ExtensionContext,
   ): VisionCaller {
-    return async (instruction: string, imageBase64: string, mimeType: string): Promise<string> => {
+    return async (
+      instruction: string,
+      imageBase64: string,
+      mimeType: string,
+      signal?: AbortSignal,
+    ): Promise<string> => {
       const model = ctx.modelRegistry.find(visionConfig.provider, visionConfig.model);
       if (!model) {
         throw new Error(
@@ -246,11 +412,11 @@ export default function browserUseExtension(pi: ExtensionAPI): void {
       }
 
       const options: Record<string, unknown> = {
-        temperature: 0,
         maxTokens: 2048,
       };
       if (auth.apiKey) options.apiKey = auth.apiKey;
       if (auth.headers) options.headers = auth.headers;
+      if (signal) options.signal = signal;
 
       const result = await complete(
         model,
@@ -273,6 +439,10 @@ export default function browserUseExtension(pi: ExtensionAPI): void {
         options,
       );
 
+      if (result.stopReason === 'error') {
+        throw new Error(result.errorMessage || 'Vision model request failed');
+      }
+
       return result.content
         .filter((c): c is AiTextContent => c.type === 'text')
         .map((c) => c.text)
@@ -281,12 +451,23 @@ export default function browserUseExtension(pi: ExtensionAPI): void {
   }
 
   async function registerVisionTool(visionConfig: VisionModelConfig): Promise<void> {
+    const routingGuidance = pageRoutingGuidance(config?.experimentalPageIdRouting === true);
+    const pageIdParameter = config?.experimentalPageIdRouting
+      ? {
+          pageId: Type.Number({
+            description: 'Numeric page ID returned by browser_list_pages.',
+          }),
+        }
+      : {};
+
     pi.registerTool({
       name: `${TOOL_PREFIX}analyze_screenshot`,
       label: `${TOOL_PREFIX}analyze_screenshot`,
       description:
         'Analyze the current page visually using a screenshot. Use when you need to identify elements by visual attributes (color, layout, position) not available in the accessibility tree, or when you need precise pixel coordinates for click_at.',
+      ...routingGuidance,
       parameters: Type.Object({
+        ...pageIdParameter,
         instruction: Type.Optional(
           Type.String({
             description:
@@ -297,13 +478,13 @@ export default function browserUseExtension(pi: ExtensionAPI): void {
       async execute(
         _toolCallId: string,
         params: Record<string, unknown>,
-        _signal: AbortSignal | undefined,
+        signal: AbortSignal | undefined,
         _onUpdate: unknown,
         ctx: ExtensionContext,
       ) {
-        await ensureConnected();
+        await ensureConnected(signal);
         const callVision = createPiVisionCaller(visionConfig, ctx);
-        const result = await handleAnalyzeScreenshot(client!, callVision, params);
+        const result = await handleAnalyzeScreenshot(client!, callVision, params, signal);
         const content: Array<{ type: 'text'; text: string }> = [];
         if (result.content) {
           for (const item of result.content) {
@@ -315,7 +496,9 @@ export default function browserUseExtension(pi: ExtensionAPI): void {
         if (content.length === 0) {
           content.push({ type: 'text', text: '' });
         }
-        return { content, details: undefined };
+        return result.isError
+          ? { content, isError: true, details: undefined }
+          : { content, details: undefined };
       },
     });
   }
@@ -323,7 +506,6 @@ export default function browserUseExtension(pi: ExtensionAPI): void {
   pi.on('session_start', async (_event, ctx) => {
     config = resolveConfig(loadConfigFromFile({ cwd: ctx.cwd }));
     client = new DevToolsClient(config);
-    connected = false;
     await registerUpstreamTools();
     if (config.visionModel) {
       await registerVisionTool(config.visionModel);
@@ -331,9 +513,9 @@ export default function browserUseExtension(pi: ExtensionAPI): void {
   });
 
   pi.on('session_shutdown', async () => {
-    if (connected && client) {
+    if (client) {
       await client.close();
-      connected = false;
+      client = undefined;
     }
   });
 }

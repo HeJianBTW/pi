@@ -1,7 +1,15 @@
-import { describe, expect, test } from 'vitest';
+import { describe, expect, it, test } from 'vitest';
 import { configToArgs, resolveConfig } from '../config.js';
 
 describe('resolveConfig', () => {
+  it('enables page ID routing and network header redaction by default', () => {
+    const config = resolveConfig();
+
+    expect(config.experimentalPageIdRouting).toBe(true);
+    expect(config.redactNetworkHeaders).toBe(true);
+    expect(config.acceptInsecureCerts).toBe(false);
+  });
+
   test('returns defaults when called with no args', () => {
     const config = resolveConfig();
     expect(config.categoryPerformance).toBe(false);
@@ -39,6 +47,54 @@ describe('resolveConfig', () => {
 });
 
 describe('configToArgs', () => {
+  it('enables page ID routing and network header redaction by default', () => {
+    const args = configToArgs({});
+
+    expect(args).toContain('--experimental-page-id-routing');
+    expect(args).toContain('--redact-network-headers');
+    expect(args).not.toContain('--accept-insecure-certs');
+  });
+
+  it('maps URL patterns and insecure certificate configuration', () => {
+    const args = configToArgs({
+      blockedUrlPattern: ['https://example.com/*', 'https://*.internal/*'],
+      acceptInsecureCerts: true,
+    });
+
+    expect(args).toContain('--blocked-url-pattern=https://example.com/*');
+    expect(args).toContain('--blocked-url-pattern=https://*.internal/*');
+    expect(args).toContain('--accept-insecure-certs');
+  });
+
+  it('allows page routing and header redaction to be disabled explicitly', () => {
+    const args = configToArgs({
+      experimentalPageIdRouting: false,
+      redactNetworkHeaders: false,
+    });
+
+    expect(args).not.toContain('--experimental-page-id-routing');
+    expect(args).not.toContain('--redact-network-headers');
+  });
+
+  it('rejects simultaneous URL allow and block lists', () => {
+    expect(() =>
+      configToArgs({
+        allowedUrlPattern: ['https://allowed.example/*'],
+        blockedUrlPattern: ['https://blocked.example/*'],
+      }),
+    ).toThrow('allowedUrlPattern and blockedUrlPattern cannot be used together');
+  });
+
+  it('disables page ID routing automatically in slim mode', () => {
+    expect(configToArgs({ slim: true })).not.toContain('--experimental-page-id-routing');
+  });
+
+  it('rejects explicitly enabled page ID routing in slim mode', () => {
+    expect(() => configToArgs({ slim: true, experimentalPageIdRouting: true })).toThrow(
+      'experimentalPageIdRouting cannot be used with slim mode',
+    );
+  });
+
   test('empty config produces default flags', () => {
     const args = configToArgs({});
     expect(args).toContain('--category-performance=false');

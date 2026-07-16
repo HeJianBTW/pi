@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, test, vi } from 'vitest';
+import { describe, expect, it, test, vi } from 'vitest';
 
 vi.mock('../index.js', () => ({
   DevToolsClient: class {
@@ -27,6 +27,15 @@ vi.mock('@modelcontextprotocol/sdk/server/stdio.js', () => ({
 const { parseArgs } = await import('../cli.js');
 
 describe('parseArgs', () => {
+  it('collects repeated URL pattern flags into arrays', () => {
+    const config = parseArgs([
+      '--allowed-url-pattern=https://one.example/*',
+      '--allowed-url-pattern=https://two.example/*',
+    ]);
+
+    expect(config.allowedUrlPattern).toEqual(['https://one.example/*', 'https://two.example/*']);
+  });
+
   test('--headless produces boolean true', () => {
     const config = parseArgs(['--headless']);
     expect(config.headless).toBe(true);
