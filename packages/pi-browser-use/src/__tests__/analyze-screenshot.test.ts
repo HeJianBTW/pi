@@ -6,10 +6,18 @@ import {
 } from '../analyze-screenshot.js';
 
 vi.mock('@earendil-works/pi-coding-agent', () => {
-  const mockModel = { id: 'gpt-4o', provider: 'openai' };
+  const mockModel = { id: 'gpt-4o', provider: 'openai', reasoning: false };
+  const mockReasoningModel = {
+    id: 'kimi-k2.6',
+    provider: 'deepseek-integration',
+    reasoning: true,
+  };
   const mockRegistry = {
     find: vi.fn((provider: string, model: string) => {
       if (provider === 'openai' && model === 'gpt-4o') return mockModel;
+      if (provider === 'deepseek-integration' && model === 'kimi-k2.6') {
+        return mockReasoningModel;
+      }
       return undefined;
     }),
     getApiKeyAndHeaders: vi.fn(() =>
@@ -264,5 +272,35 @@ describe('createFetchVisionCaller', () => {
     expect(imageContent.data).toBe('aW1hZ2U=');
     expect(imageContent.mimeType).toBe('image/jpeg');
     expect(callArgs[2].signal).toBe(controller.signal);
+  });
+
+  it('omits temperature for reasoning vision models', async () => {
+    const piAi = await import('@earendil-works/pi-ai/compat');
+    (piAi.complete as any).mockClear();
+
+    const caller = createFetchVisionCaller({
+      provider: 'deepseek-integration',
+      model: 'kimi-k2.6',
+    });
+    await caller('Describe this', 'aW1hZ2U=', 'image/png');
+
+    const options = (piAi.complete as any).mock.calls[0][2];
+    expect(options).toMatchObject({ maxTokens: 2048 });
+    expect(options).not.toHaveProperty('temperature');
+  });
+
+  it('surfaces model error results instead of treating them as empty analysis', async () => {
+    const piAi = await import('@earendil-works/pi-ai/compat');
+    (piAi.complete as any).mockResolvedValueOnce({
+      content: [],
+      stopReason: 'error',
+      errorMessage: 'invalid temperature',
+    });
+
+    const caller = createFetchVisionCaller({ provider: 'openai', model: 'gpt-4o' });
+
+    await expect(caller('Describe this', 'aW1hZ2U=', 'image/png')).rejects.toThrow(
+      'invalid temperature',
+    );
   });
 });

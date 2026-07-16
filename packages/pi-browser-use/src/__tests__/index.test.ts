@@ -44,6 +44,11 @@ const mockCallTool = vi.fn((_name: string, _args: Record<string, unknown>, _sign
 
 const mockConnect = vi.fn(() => Promise.resolve());
 const mockClose = vi.fn(() => Promise.resolve());
+const mockComplete = vi.fn((..._args: any[]) =>
+  Promise.resolve({ content: [{ type: 'text', text: 'Visual result' }] }),
+);
+
+vi.mock('@earendil-works/pi-ai/compat', () => ({ complete: mockComplete }));
 
 vi.mock('@modelcontextprotocol/sdk/client/index.js', () => ({
   Client: class {
@@ -148,6 +153,7 @@ describe('browserUseExtension', () => {
     mockConnect.mockClear();
     mockCallTool.mockClear();
     mockClose.mockClear();
+    mockComplete.mockClear();
     mockListAllTools.mockClear();
   });
 
@@ -237,6 +243,32 @@ describe('browserUseExtension', () => {
         required: ['pageId'],
       });
       expect(tool!.promptSnippet).toContain('browser_list_pages');
+    });
+
+    it('omits temperature when the configured vision model uses reasoning', async () => {
+      await startExtension({
+        visionModel: { provider: 'deepseek-integration', model: 'kimi-k2.6' },
+      });
+      mockCallTool.mockResolvedValueOnce({
+        content: [{ type: 'image', data: 'aW1hZ2U=', mimeType: 'image/png' }],
+      } as any);
+      const tool = registeredTools.get('browser_analyze_screenshot')!;
+      const ctx = {
+        modelRegistry: {
+          find: vi.fn(() => ({
+            id: 'kimi-k2.6',
+            provider: 'deepseek-integration',
+            reasoning: true,
+          })),
+          getApiKeyAndHeaders: vi.fn(() => Promise.resolve({ ok: true, apiKey: 'key' })),
+        },
+      };
+
+      await tool.execute('call-1', { pageId: 7 }, undefined, undefined, ctx);
+
+      const options = mockComplete.mock.calls[0]![2] as Record<string, unknown>;
+      expect(options).toMatchObject({ maxTokens: 2048 });
+      expect(options).not.toHaveProperty('temperature');
     });
 
     test('does not register analyze_screenshot without visionModel', async () => {

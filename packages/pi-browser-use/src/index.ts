@@ -412,9 +412,12 @@ export default function browserUseExtension(pi: ExtensionAPI): void {
       }
 
       const options: Record<string, unknown> = {
-        temperature: 0,
         maxTokens: 2048,
       };
+      // Reasoning models such as Kimi K2.6 only accept their provider-defined
+      // temperature. Pi-ai disables thinking for this short single-turn request;
+      // omitting temperature lets the provider choose its required default.
+      if (!model.reasoning) options.temperature = 0;
       if (auth.apiKey) options.apiKey = auth.apiKey;
       if (auth.headers) options.headers = auth.headers;
       if (signal) options.signal = signal;
@@ -439,6 +442,10 @@ export default function browserUseExtension(pi: ExtensionAPI): void {
         },
         options,
       );
+
+      if (result.stopReason === 'error') {
+        throw new Error(result.errorMessage || 'Vision model request failed');
+      }
 
       return result.content
         .filter((c): c is AiTextContent => c.type === 'text')
