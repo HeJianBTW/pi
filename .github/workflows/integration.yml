@@ -228,14 +228,17 @@ jobs:
           # pi-goal registers no LLM tool — it is driven by the /goal command
           # (TUI) or the --goal flag (CLI). Print mode can't dispatch slash
           # commands and won't run an agent turn without a prompt, so this entry
-          # uses `--goal '' -p <prompt>`: the prompt drives one real agent run
-          # (whose reply we assert on) and, at before_agent_start, pi-goal
-          # derives a goal from that same prompt. The prompt states a concrete
-          # objective (a bare format instruction derives to NONE), with a
-          # completion marker we assert on. maxIterations=1 bounds continuation.
+          # uses `--goal '' -p <prompt>` with a plain, real task (write a file).
+          # pi-goal derives a goal from that task at before_agent_start and
+          # evaluates it at agent_end — the task itself has nothing to do with
+          # "goal". We assert the engine's stderr diagnostics ran AND the file
+          # was actually written (a filesystem check can't be self-matched by
+          # prompt/thinking echo the way a text token can). maxIterations=1
+          # bounds continuation. `write` tool only, for predictability.
           - extension: pi-goal
-            prompt: "Task: confirm the CI health check succeeded. When the check is confirmed, print the exact token ci-goal-ok on its own line. The task is complete once that token has been printed."
-            assert_pattern: "ci-goal-ok"
+            tools: write
+            prompt: "Create a file at /tmp/pi-goal-ci.txt containing exactly the line: integration test complete"
+            assert_pattern: "integration test complete"
           - extension: pi-teamwork
             tools: workspace_list
             prompt: "Use workspace_list to fetch teamwork workspaces, then tell me the names of the workspaces. Call the tool exactly once."
@@ -535,14 +538,16 @@ jobs:
           if [ "${{ matrix.extension }}" = "pi-goal" ]; then
             # pi-goal has no LLM tool. --goal '' enables auto-derivation; -p
             # drives one real agent run (print mode won't run a turn without a
-            # prompt). pi-goal derives the goal from the prompt at
-            # before_agent_start; we assert on the assistant's reply.
+            # prompt). The task is a plain file write; pi-goal derives a goal
+            # from it at before_agent_start and evaluates at agent_end. Restrict
+            # to the write tool for predictability.
             output="$(pi \
               --provider deepseek-integration \
               --model deepseek-v4-flash \
               --thinking high \
               --no-session \
               --no-context-files \
+              --tools '${{ matrix.tools }}' \
               --mode json \
               --goal '' \
               -p '${{ matrix.prompt }}' 2>&1)"
@@ -603,18 +608,24 @@ jobs:
           # pattern still matches when the assistant doesn't quote them back.
           HAYSTACK="${ASSISTANT_TEXT:-$output}"
           [ -z "$HAYSTACK" ] && HAYSTACK="$output"
-          if ! grep -qiE '${{ matrix.assert_pattern }}' <<<"$HAYSTACK"; then
-            echo "::error::Expected pattern '${{ matrix.assert_pattern }}' not found in ${{ matrix.extension }} output"
-            exit 1
+          # pi-goal is asserted below by the goal engine's diagnostics and a
+          # filesystem check, not by grepping assistant text (which would be
+          # self-matched by prompt/thinking echo). Skip the generic assert here.
+          if [ "${{ matrix.extension }}" != "pi-goal" ]; then
+            if ! grep -qiE '${{ matrix.assert_pattern }}' <<<"$HAYSTACK"; then
+              echo "::error::Expected pattern '${{ matrix.assert_pattern }}' not found in ${{ matrix.extension }} output"
+              exit 1
+            fi
           fi
 
-          # pi-goal: the generic assert above only proves the assistant echoed
-          # the token the prompt asked for — it does not prove the goal engine
-          # ran. Assert the engine's stderr diagnostics (merged via 2>&1) show
-          # it derived a condition. Derivation happens at before_agent_start, so
-          # it always completes before the run ends — a hard gate. Evaluation
-          # runs in the async agent_end handler, which print mode may not await
-          # before exit, so it is a soft check (warn only).
+          # pi-goal: prove the goal engine actually ran and the task completed.
+          #   1. [pi-goal] derived condition:  — derivation ran (hard gate;
+          #      happens at before_agent_start, always before the run ends).
+          #   2. [pi-goal] evaluation:         — evaluation ran (soft; the
+          #      agent_end handler is async and print mode may exit first).
+          #   3. the file the task asked for exists with the expected line —
+          #      the real proof of completion. A filesystem check can't be
+          #      self-matched by prompt/thinking echo the way a text token can.
           if [ "${{ matrix.extension }}" = "pi-goal" ]; then
             echo "--- pi-goal engine diagnostics ---"
             grep -E '\[pi-goal\] (derived condition|evaluation):' <<<"$output" || true
@@ -625,6 +636,14 @@ jobs:
             if ! grep -qE '\[pi-goal\] evaluation: ok=' <<<"$output"; then
               echo "::warning::pi-goal: no 'evaluation' line — agent_end evaluation may not have completed before print-mode exit."
             fi
+            GOAL_FILE=/tmp/pi-goal-ci.txt
+            if [ ! -f "$GOAL_FILE" ] || ! grep -qiE '${{ matrix.assert_pattern }}' "$GOAL_FILE"; then
+              echo "::error::pi-goal: $GOAL_FILE missing or missing expected line — the task the goal was derived from did not complete."
+              rm -f "$GOAL_FILE"
+              exit 1
+            fi
+            echo "✓ pi-goal wrote $GOAL_FILE and the goal engine derived+evaluated a condition."
+            rm -f "$GOAL_FILE"
           fi
 
       - name: Verify pi-memory-mem0 captured turn (memory job only)
