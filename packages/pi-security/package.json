@@ -30,7 +30,7 @@
   "pi": {
     "image": "https://raw.githubusercontent.com/TGYD-helige/pi/master/packages/pi-security/preview.png",
     "extensions": [
-      "./dist/index.js"
+      "./dist/extension.js"
     ]
   },
   "publishConfig": {

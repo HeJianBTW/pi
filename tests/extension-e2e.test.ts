@@ -62,7 +62,12 @@ function createCollector(): { api: Record<string, unknown>; ext: CollectedExtens
 async function loadExtensionWithJiti(
   pkgName: string,
 ): Promise<{ factory: Function; ext: CollectedExtension }> {
-  const entryPath = path.join(PACKAGES_DIR, pkgName, 'src', 'index.ts');
+  const packageDir = path.join(PACKAGES_DIR, pkgName);
+  const packageJson = JSON.parse(readFileSync(path.join(packageDir, 'package.json'), 'utf8'));
+  const extensionEntry = packageJson.pi.extensions[0]
+    .replace('./dist/', './src/')
+    .replace(/\.js$/, '.ts');
+  const entryPath = path.join(packageDir, extensionEntry);
   const jiti = createJiti(entryPath, { moduleCache: false });
   const factory = (await jiti.import(entryPath, { default: true })) as Function;
   const { api, ext } = createCollector();
@@ -91,14 +96,13 @@ function findSchemaViolations(schema: unknown, path = ''): string[] {
   return violations;
 }
 
-// Packages whose src/index.ts is type-export-heavy followed by `export { default } from
+// Packages whose declared src/index.ts is type-export-heavy followed by `export { default } from
 // './extension.js'`. jiti 2.7's static interop trips on this combination at the moment
 // (it returns `undefined` for the re-exported default). The factory-invoke contract is
 // still covered by extension-loading.test.ts, which uses vitest's native TS loader.
 // pi-coding-agent itself runs against the built dist/index.js, so jiti behavior here is
 // a developer-time check, not a runtime gate.
 const JITI_FACTORY_INVOKE_SKIP = new Set([
-  'pi-security',
   'pi-task-scheduler',
   'pi-telemetry',
 ]);
@@ -161,7 +165,7 @@ describe('Extension E2E loading via jiti', () => {
     expect(ext.commands.has('teamwork-status')).toBe(true);
   });
 
-  // pi-task-scheduler / pi-memory / pi-security re-export their factory through
+  // pi-task-scheduler / pi-memory re-export their factory through
   // `export { default } from './extension.js'`, which jiti 2.7 returns as undefined
   // when the re-exporting module starts with type-only exports (see
   // JITI_FACTORY_INVOKE_SKIP). Their command registrations are covered by the
