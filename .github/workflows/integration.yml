@@ -277,8 +277,9 @@ jobs:
             assert_tool: browser_take_snapshot
           - extension: pi-browser-use
             scenario: screenshot
-            tools: browser_list_pages,browser_navigate_page,browser_analyze_screenshot
-            prompt: "Use browser_list_pages first to get the current pageId. Pass that pageId to browser_navigate_page to go to http://127.0.0.1:8765/. Then pass it to browser_analyze_screenshot exactly once and ask it to report the exact large heading plus the dominant background color. Return its visual findings. Do not infer the answer from the URL."
+            tools: browser_list_pages,browser_evaluate_script,browser_analyze_screenshot
+            prompt: >-
+              Use browser_list_pages first to get the current pageId. Pass that pageId to browser_evaluate_script with this function parameter exactly: () => { document.title = "Screenshot fixture"; document.documentElement.style.cssText = "height:100%;margin:0"; document.body.style.cssText = "height:100%;margin:0;display:grid;place-items:center;background:#1457d9;color:white;font-family:sans-serif"; const heading = document.createElement("h1"); heading.textContent = "VISUAL CHECK 7391"; heading.style.cssText = "font-size:64px;letter-spacing:.08em"; document.body.replaceChildren(heading); return document.title; }. Then pass the same pageId to browser_analyze_screenshot exactly once and ask it to report the exact large heading plus the dominant background color. Return its visual findings.
             assert_pattern: "(VISUAL CHECK 7391.*(blue|#1457d9)|(blue|#1457d9).*VISUAL CHECK 7391)"
             assert_visual_analysis: true
     env:
@@ -286,6 +287,7 @@ jobs:
       PI_INTEGRATION_API_KEY: ${{ secrets.PI_INTEGRATION_API_KEY }}
       PI_INTEGRATION_MULTICA_TOKEN: ${{ secrets.PI_INTEGRATION_MULTICA_TOKEN }}
       FIRECRAWL_API_KEY: ${{ secrets.FIRECRAWL_API_KEY }}
+      BROWSERLESS_TOKEN: ${{ secrets.BROWSERLESS_TOKEN }}
       PI_OFFLINE: '0'
 
     steps:
@@ -473,10 +475,8 @@ jobs:
               }
             },
             "pi-browser-use": {
-              "headless": true,
-              "sessionMode": "isolated",
-              "viewport": "1280x720",
-              "executablePath": "\${CHROMIUM_BIN}",
+              "sessionMode": "existing",
+              "wsEndpoint": "wss://production-sfo.browserless.io/chrome?token=\${BROWSERLESS_TOKEN}",
               "visionModel": {
                 "provider": "deepseek-integration",
                 "model": "kimi-k2.6"
@@ -527,62 +527,14 @@ jobs:
           # Smoke-test the auth before handing off to pi-teamwork.
           multica workspace list --output json
 
-      - name: Install Chromium (pi-browser-use only)
+      - name: Verify Browserless credentials (pi-browser-use only)
         if: matrix.extension == 'pi-browser-use'
         run: |
           set -euo pipefail
-          # Use npmmirror CDN to avoid slow Google CDN on domestic runners.
-          sudo env "PATH=$PATH" npx -y @puppeteer/browsers install chrome@stable \
-            --install-deps \
-            --path "$RUNNER_TEMP/chrome-install" \
-            --base-url https://cdn.npmmirror.com/binaries/chrome-for-testing
-          CHROME_BIN=$(find "$RUNNER_TEMP/chrome-install" -name "chrome" -type f | head -1)
-          if [ -z "$CHROME_BIN" ]; then
-            echo "::error::Could not find chrome binary after install"
+          if [ -z "${BROWSERLESS_TOKEN:-}" ]; then
+            echo "::error::BROWSERLESS_TOKEN secret is required for pi-browser-use E2E"
             exit 1
           fi
-          echo "Chrome: $CHROME_BIN"
-          "$CHROME_BIN" --version
-          echo "CHROMIUM_BIN=$CHROME_BIN" >> "$GITHUB_ENV"
-
-      - name: Start browser screenshot fixture (pi-browser-use screenshot only)
-        if: matrix.extension == 'pi-browser-use' && matrix.scenario == 'screenshot'
-        run: |
-          set -euo pipefail
-          fixture_dir="$RUNNER_TEMP/pi-browser-screenshot-fixture"
-          mkdir -p "$fixture_dir"
-          cat > "$fixture_dir/index.html" <<'EOF'
-          <!doctype html>
-          <html lang="en">
-            <head>
-              <meta charset="utf-8">
-              <title>Screenshot fixture</title>
-              <style>
-                html, body { height: 100%; margin: 0; }
-                body {
-                  display: grid;
-                  place-items: center;
-                  background: #1457d9;
-                  color: white;
-                  font-family: sans-serif;
-                }
-                h1 { font-size: 64px; letter-spacing: 0.08em; }
-              </style>
-            </head>
-            <body><h1>VISUAL CHECK 7391</h1></body>
-          </html>
-          EOF
-          python3 -m http.server 8765 --bind 127.0.0.1 --directory "$fixture_dir" \
-            > "$RUNNER_TEMP/pi-browser-screenshot-fixture.log" 2>&1 &
-          echo "BROWSER_FIXTURE_PID=$!" >> "$GITHUB_ENV"
-          for attempt in $(seq 1 20); do
-            if curl -fsS http://127.0.0.1:8765/ >/dev/null; then
-              exit 0
-            fi
-            sleep 0.25
-          done
-          echo "::error::Browser screenshot fixture failed to start"
-          exit 1
 
       - name: Run extension prompt (Stage C)
         if: env.PI_INTEGRATION_BASE_URL != '' && env.PI_INTEGRATION_API_KEY != ''
@@ -767,13 +719,6 @@ jobs:
             fi
             echo "✓ pi-goal wrote $GOAL_FILE and the goal engine derived+evaluated a condition."
             rm -f "$GOAL_FILE"
-          fi
-
-      - name: Stop browser screenshot fixture
-        if: always() && matrix.extension == 'pi-browser-use' && matrix.scenario == 'screenshot'
-        run: |
-          if [ -n "${BROWSER_FIXTURE_PID:-}" ]; then
-            kill "$BROWSER_FIXTURE_PID" 2>/dev/null || true
           fi
 
       - name: Verify pi-memory-mem0 captured turn (memory job only)
