@@ -19,6 +19,7 @@ product-specific UI.
 | Extension | `@amaster.ai/pi-attachments` | Attachment normalization, local/remote upload handling, document parsing, and model-readable attachment prompts. |
 | Extension | `@amaster.ai/pi-telemetry` | Runtime telemetry with Langfuse and OpenTelemetry exporters. |
 | Extension | `@amaster.ai/pi-task-scheduler` | Cron-based scheduled task management with LLM-callable tools. |
+| Extension | `@amaster.ai/pi-goal` | Derives a goal from the conversation and keeps the agent working until the condition is met, with iteration/token backstops. |
 | Extension | `@amaster.ai/pi-browser-use` | Browser automation wrapping chrome-devtools-mcp with `browser_`-prefixed tools. |
 | Extension | `@amaster.ai/pi-web-access` | Web search and URL content extraction across configurable providers. |
 | Extension | `@amaster.ai/pi-computer-use` | Computer-use extension for CUA computer-server with desktop automation tools. |

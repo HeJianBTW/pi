@@ -225,6 +225,20 @@ jobs:
             tools: scheduler_list
             prompt: "Use the scheduler_list tool exactly once to list scheduled tasks, then tell me how many tasks there are."
             assert_pattern: "(0|task|tasks|empty|none)"
+          # pi-goal registers no LLM tool — it is driven by the /goal command
+          # (TUI) or the --goal flag (CLI). Print mode can't dispatch slash
+          # commands and won't run an agent turn without a prompt, so this entry
+          # uses `--goal '' -p <prompt>` with a plain, real task (write a file).
+          # pi-goal derives a goal from that task at before_agent_start and
+          # evaluates it at agent_end — the task itself has nothing to do with
+          # "goal". We assert the engine's stderr diagnostics ran AND the file
+          # was actually written (a filesystem check can't be self-matched by
+          # prompt/thinking echo the way a text token can). maxIterations=1
+          # bounds continuation. `write` tool only, for predictability.
+          - extension: pi-goal
+            tools: write
+            prompt: "Create a file at /tmp/pi-goal-ci.txt containing exactly the line: integration test complete"
+            assert_pattern: "integration test complete"
           - extension: pi-teamwork
             tools: workspace_list
             prompt: "Use workspace_list to fetch teamwork workspaces, then tell me the names of the workspaces. Call the tool exactly once."
@@ -396,6 +410,14 @@ jobs:
             "pi-scheduler": {
               "dataDir": "${RUNNER_TEMP}/pi-scheduler"
             },
+            "pi-goal": {
+              "model": {
+                "provider": "deepseek-integration",
+                "model": "deepseek-v4-flash"
+              },
+              "maxIterations": 1,
+              "requireConfirmForDerived": false
+            },
             "pi-memory-mem0": {
               "mode": "open-source",
               "userId": "ci-integration",
@@ -518,16 +540,35 @@ jobs:
           # `reasoning_effort: max`, which on the amaster gateway has been
           # observed to occasionally hang >5min on tool-call prompts. Stage B
           # smoke keeps xhigh per the original spec.
-          output="$(pi \
-            --provider deepseek-integration \
-            --model deepseek-v4-flash \
-            --thinking high \
-            --no-session \
-            --no-context-files \
-            --tools '${{ matrix.tools }}' \
-            --mode json \
-            -p '${{ matrix.prompt }}' 2>&1)"
-          rc=$?
+          if [ "${{ matrix.extension }}" = "pi-goal" ]; then
+            # pi-goal has no LLM tool. --goal '' enables auto-derivation; -p
+            # drives one real agent run (print mode won't run a turn without a
+            # prompt). The task is a plain file write; pi-goal derives a goal
+            # from it at before_agent_start and evaluates at agent_end. Restrict
+            # to the write tool for predictability.
+            output="$(pi \
+              --provider deepseek-integration \
+              --model deepseek-v4-flash \
+              --thinking high \
+              --no-session \
+              --no-context-files \
+              --tools '${{ matrix.tools }}' \
+              --mode json \
+              --goal '' \
+              -p '${{ matrix.prompt }}' 2>&1)"
+            rc=$?
+          else
+            output="$(pi \
+              --provider deepseek-integration \
+              --model deepseek-v4-flash \
+              --thinking high \
+              --no-session \
+              --no-context-files \
+              --tools '${{ matrix.tools }}' \
+              --mode json \
+              -p '${{ matrix.prompt }}' 2>&1)"
+            rc=$?
+          fi
           set -e
           echo "--- raw event stream (${{ matrix.extension }}, exit=$rc) ---"
           echo "$output"
@@ -572,9 +613,42 @@ jobs:
           # pattern still matches when the assistant doesn't quote them back.
           HAYSTACK="${ASSISTANT_TEXT:-$output}"
           [ -z "$HAYSTACK" ] && HAYSTACK="$output"
-          if ! grep -qiE '${{ matrix.assert_pattern }}' <<<"$HAYSTACK"; then
-            echo "::error::Expected pattern '${{ matrix.assert_pattern }}' not found in ${{ matrix.extension }} output"
-            exit 1
+          # pi-goal is asserted below by the goal engine's diagnostics and a
+          # filesystem check, not by grepping assistant text (which would be
+          # self-matched by prompt/thinking echo). Skip the generic assert here.
+          if [ "${{ matrix.extension }}" != "pi-goal" ]; then
+            if ! grep -qiE '${{ matrix.assert_pattern }}' <<<"$HAYSTACK"; then
+              echo "::error::Expected pattern '${{ matrix.assert_pattern }}' not found in ${{ matrix.extension }} output"
+              exit 1
+            fi
+          fi
+
+          # pi-goal: prove the goal engine actually ran and the task completed.
+          #   1. [pi-goal] derived condition:  — derivation ran (hard gate;
+          #      happens at before_agent_start, always before the run ends).
+          #   2. [pi-goal] evaluation:         — evaluation ran (soft; the
+          #      agent_end handler is async and print mode may exit first).
+          #   3. the file the task asked for exists with the expected line —
+          #      the real proof of completion. A filesystem check can't be
+          #      self-matched by prompt/thinking echo the way a text token can.
+          if [ "${{ matrix.extension }}" = "pi-goal" ]; then
+            echo "--- pi-goal engine diagnostics ---"
+            grep -E '\[pi-goal\] (derived condition|evaluation):' <<<"$output" || true
+            if ! grep -qE '\[pi-goal\] derived condition:' <<<"$output"; then
+              echo "::error::pi-goal: no 'derived condition' in output — auto-derivation did not run."
+              exit 1
+            fi
+            if ! grep -qE '\[pi-goal\] evaluation: ok=' <<<"$output"; then
+              echo "::warning::pi-goal: no 'evaluation' line — agent_end evaluation may not have completed before print-mode exit."
+            fi
+            GOAL_FILE=/tmp/pi-goal-ci.txt
+            if [ ! -f "$GOAL_FILE" ] || ! grep -qiE '${{ matrix.assert_pattern }}' "$GOAL_FILE"; then
+              echo "::error::pi-goal: $GOAL_FILE missing or missing expected line — the task the goal was derived from did not complete."
+              rm -f "$GOAL_FILE"
+              exit 1
+            fi
+            echo "✓ pi-goal wrote $GOAL_FILE and the goal engine derived+evaluated a condition."
+            rm -f "$GOAL_FILE"
           fi
 
       - name: Verify pi-memory-mem0 captured turn (memory job only)

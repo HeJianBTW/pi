@@ -1,0 +1,223 @@
+name: Agentic Eval
+
+# Manual-only. Effect evaluation (task-completion rate) for the agentic
+# extensions — distinct from integration.yml, which is a pass/fail smoke test.
+# This runs each extension through the real `pi` CLI on a set of scored tasks and
+# reports successRate / failure mix, the same harness pattern as memory-eval.yml.
+#
+# - browser: pi-browser-use on a Linux runner with a real headless Chrome.
+# - computer: pi-computer-use — macOS + Accessibility/Screen Recording only; the
+#   runner skips gracefully elsewhere, and there is no hosted macOS runner wired
+#   here yet, so it is expected to no-op until one is added.
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Which eval to run
+        type: choice
+        default: browser
+        options: [browser, computer, both]
+      model:
+        description: Model (provider is deepseek-integration)
+        type: string
+        default: deepseek-v4-flash
+      thinking:
+        description: Thinking level
+        type: choice
+        default: high
+        options: [minimal, low, medium, high, xhigh]
+      tasks:
+        description: Limit to first N tasks (0 = all)
+        type: string
+        default: '0'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+jobs:
+  browser-eval:
+    name: Browser eval (task completion)
+    if: inputs.target == 'browser' || inputs.target == 'both'
+    runs-on:
+      - instance-hnpsq9go
+      - linux
+      - x64
+    timeout-minutes: 60
+    env:
+      PI_INTEGRATION_BASE_URL: ${{ secrets.PI_INTEGRATION_BASE_URL }}
+      PI_INTEGRATION_API_KEY: ${{ secrets.PI_INTEGRATION_API_KEY }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pi build environment
+        uses: ./.github/actions/setup-pi-build
+        with:
+          install-pi-cli: 'true'
+          set-pi-agent-dir: 'true'
+
+      - name: Guard — require provider secrets
+        run: |
+          set -euo pipefail
+          if [ -z "${PI_INTEGRATION_BASE_URL}" ] || [ -z "${PI_INTEGRATION_API_KEY}" ]; then
+            echo "::error::PI_INTEGRATION_BASE_URL / PI_INTEGRATION_API_KEY not set — cannot run eval"
+            exit 1
+          fi
+
+      - name: Verify pi installation
+        run: pi --version
+
+      - name: Write eval models.json from secrets
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/eval"
+          # Same as memory-eval.yml: apiKey is written literally from the secret;
+          # the file lives under RUNNER_TEMP and is not uploaded.
+          cat > "$RUNNER_TEMP/eval/models.json" <<EOF
+          {
+            "providers": {
+              "deepseek-integration": {
+                "baseUrl": "${PI_INTEGRATION_BASE_URL}",
+                "api": "openai-completions",
+                "apiKey": "${PI_INTEGRATION_API_KEY}",
+                "models": [
+                  { "id": "${{ inputs.model }}", "name": "${{ inputs.model }}", "input": ["text"] }
+                ]
+              }
+            }
+          }
+          EOF
+          echo "MODELS_PATH=$RUNNER_TEMP/eval/models.json" >> "$GITHUB_ENV"
+
+      - name: Install Chromium
+        run: |
+          set -euo pipefail
+          # Same step integration.yml uses; npmmirror CDN avoids slow Google CDN.
+          npx -y @puppeteer/browsers install chrome@stable \
+            --path "$RUNNER_TEMP/chrome-install" \
+            --base-url https://cdn.npmmirror.com/binaries/chrome-for-testing
+          CHROME_BIN=$(find "$RUNNER_TEMP/chrome-install" -name "chrome" -type f | head -1)
+          if [ -z "$CHROME_BIN" ]; then
+            echo "::error::Could not find chrome binary after install"
+            exit 1
+          fi
+          "$CHROME_BIN" --version --no-sandbox || true
+          echo "CHROME_BIN=$CHROME_BIN" >> "$GITHUB_ENV"
+
+      - name: Eval — pi-browser-use
+        run: |
+          set -euo pipefail
+          pnpm --filter @amaster.ai/pi-eval eval:browser -- \
+            --provider deepseek-integration \
+            --model "${{ inputs.model }}" \
+            --thinking "${{ inputs.thinking }}" \
+            --tasks "${{ inputs.tasks }}" \
+            --models "$MODELS_PATH"
+
+      - name: Summarize
+        if: always()
+        run: |
+          set -euo pipefail
+          f=tests/eval/results/browser-tasks.json
+          [ -f "$f" ] || { echo "no results"; exit 0; }
+          {
+            echo "## Browser eval — task completion"
+            node -e '
+              const d = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+              const s = d.summary || {};
+              console.log("");
+              console.log(`- model: \`${s.model ?? "?"}\``);
+              console.log(`- successRate: **${(s.successRate ?? 0).toFixed(3)}** (${s.nChecked ?? 0} checked / ${s.n ?? 0} tasks)`);
+              console.log(`- avgTurns (to success): ${(s.avgTurns ?? 0).toFixed(1)}`);
+              console.log(`- avgToolCalls: ${(s.avgToolCalls ?? 0).toFixed(1)}`);
+              console.log(`- failureMix: \`${JSON.stringify(s.failureMix ?? {})}\``);
+              console.log("");
+              console.log("| task | success | mode | turns | tools |");
+              console.log("|------|:-------:|------|------:|------:|");
+              for (const r of d.rows ?? []) {
+                console.log(`| ${r.task} | ${r.success ? "✅" : "❌"} | ${r.failureMode} | ${r.turns} | ${r.toolCalls} |`);
+              }
+            ' "$f"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-eval-results
+          path: tests/eval/results/browser-tasks.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  computer-eval:
+    name: Computer eval (task completion, macOS)
+    if: inputs.target == 'computer' || inputs.target == 'both'
+    # No hosted macOS runner is wired here yet. When one is available, point
+    # runs-on at it (the runner needs Accessibility + Screen Recording grants).
+    # Until then this job is a placeholder that documents the requirement; the
+    # runner itself skips gracefully on non-macOS, so a Linux fallback no-ops.
+    runs-on:
+      - instance-hnpsq9go
+      - linux
+      - x64
+    timeout-minutes: 60
+    env:
+      PI_INTEGRATION_BASE_URL: ${{ secrets.PI_INTEGRATION_BASE_URL }}
+      PI_INTEGRATION_API_KEY: ${{ secrets.PI_INTEGRATION_API_KEY }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pi build environment
+        uses: ./.github/actions/setup-pi-build
+        with:
+          install-pi-cli: 'true'
+          set-pi-agent-dir: 'true'
+
+      - name: Write eval models.json from secrets
+        if: env.PI_INTEGRATION_BASE_URL != ''
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/eval"
+          cat > "$RUNNER_TEMP/eval/models.json" <<EOF
+          {
+            "providers": {
+              "deepseek-integration": {
+                "baseUrl": "${PI_INTEGRATION_BASE_URL}",
+                "api": "openai-completions",
+                "apiKey": "${PI_INTEGRATION_API_KEY}",
+                "models": [
+                  { "id": "${{ inputs.model }}", "name": "${{ inputs.model }}", "input": ["text"] }
+                ]
+              }
+            }
+          }
+          EOF
+          echo "MODELS_PATH=$RUNNER_TEMP/eval/models.json" >> "$GITHUB_ENV"
+
+      - name: Eval — pi-computer-use (macOS only; skips elsewhere)
+        run: |
+          set -euo pipefail
+          # On a non-macOS runner run-computer.ts writes {skipped:true} and exits 0.
+          pnpm --filter @amaster.ai/pi-eval eval:computer -- \
+            --provider deepseek-integration \
+            --model "${{ inputs.model }}" \
+            --thinking "${{ inputs.thinking }}" \
+            --tasks "${{ inputs.tasks }}" \
+            --models "${MODELS_PATH:-}"
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: computer-eval-results
+          path: tests/eval/results/computer-tasks.json
+          if-no-files-found: warn
+          retention-days: 14
