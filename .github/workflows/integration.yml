@@ -636,7 +636,11 @@ jobs:
           # filesystem check, not by grepping assistant text (which would be
           # self-matched by prompt/thinking echo). Skip the generic assert here.
           if [ "${{ matrix.extension }}" != "pi-goal" ]; then
-            if ! grep -qiE '${{ matrix.assert_pattern }}' <<<"$HAYSTACK"; then
+            # Flatten newlines so that patterns using `.*` can span multiple lines
+            # (e.g. the screenshot scenario checks heading + color which the model
+            # reports on separate lines).
+            HAYSTACK_FLAT=$(tr '\n' ' ' <<<"$HAYSTACK")
+            if ! grep -qiE '${{ matrix.assert_pattern }}' <<<"$HAYSTACK_FLAT"; then
               echo "::error::Expected pattern '${{ matrix.assert_pattern }}' not found in ${{ matrix.extension }} output"
               exit 1
             fi
