@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { dedupMemories } from '@amaster.ai/pi-memory-mem0/dedup';
 import { loadPiSettings, resolveHome } from '@amaster.ai/pi-shared/settings';
 import { JsonFileTranscriptStore } from '@amaster.ai/pi-storage/json';
-import { AuthStorage, ModelRegistry } from '@earendil-works/pi-coding-agent';
+import { ModelRegistry, ModelRuntime } from '@earendil-works/pi-coding-agent';
 import { runConsolidation } from '../consolidation.js';
 import { readDreamingState, writeDreamingState } from '../dreaming-state.js';
 
@@ -84,8 +84,8 @@ async function main(): Promise<void> {
 
   // Phase 1: Consolidation
   const modelConfig = config.model ?? DEFAULT_MODEL;
-  const authStorage = AuthStorage.create();
-  const modelRegistry = ModelRegistry.create(authStorage);
+  const modelRuntime = await ModelRuntime.create();
+  const modelRegistry = new ModelRegistry(modelRuntime);
 
   let consolidationSucceeded = false;
   try {

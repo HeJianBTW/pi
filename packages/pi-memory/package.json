@@ -80,8 +80,8 @@
   },
   "peerDependencies": {
     "@earendil-works/pi-agent-core": ">=0.74.0",
-    "@earendil-works/pi-ai": ">=0.80.3",
-    "@earendil-works/pi-coding-agent": ">=0.74.0",
+    "@earendil-works/pi-ai": ">=0.80.10",
+    "@earendil-works/pi-coding-agent": ">=0.80.10",
     "typebox": "*"
   },
   "peerDependenciesMeta": {
@@ -99,9 +99,9 @@
     }
   },
   "devDependencies": {
-    "@earendil-works/pi-agent-core": "0.80.3",
-    "@earendil-works/pi-ai": "0.80.3",
-    "@earendil-works/pi-coding-agent": "0.80.3",
+    "@earendil-works/pi-agent-core": "0.80.10",
+    "@earendil-works/pi-ai": "0.80.10",
+    "@earendil-works/pi-coding-agent": "0.80.10",
     "@types/proper-lockfile": "^4.1.4",
     "typebox": "*",
     "vitest": "^4.0.0"

@@ -634,9 +634,13 @@ jobs:
           [ -z "$HAYSTACK" ] && HAYSTACK="$output"
           # pi-goal is asserted below by the goal engine's diagnostics and a
           # filesystem check, not by grepping assistant text (which would be
-          # self-matched by prompt/thinking echo). Skip the generic assert here.
-          if [ "${{ matrix.extension }}" != "pi-goal" ]; then
-            if ! grep -qiE '${{ matrix.assert_pattern }}' <<<"$HAYSTACK"; then
+          # self-matched by prompt/thinking echo). Visual analysis cases are
+          # asserted against the tool result below so line wrapping in the final
+          # assistant answer cannot cause a false negative.
+          if [ "${{ matrix.extension }}" != "pi-goal" ] && [ "${{ matrix.assert_visual_analysis }}" != "true" ]; then
+            # Flatten newlines so that patterns using `.*` can span multiple lines.
+            HAYSTACK_FLAT=$(tr '\n' ' ' <<<"$HAYSTACK")
+            if ! grep -qiE '${{ matrix.assert_pattern }}' <<<"$HAYSTACK_FLAT"; then
               echo "::error::Expected pattern '${{ matrix.assert_pattern }}' not found in ${{ matrix.extension }} output"
               exit 1
             fi
@@ -671,7 +675,7 @@ jobs:
           # Screenshot scenario: browser_analyze_screenshot captures the image
           # internally, sends it to the configured Kimi vision model, and returns
           # text to the DeepSeek main model. Assert the vision tool itself found
-          # both deterministic markers before checking the final answer above.
+          # both deterministic markers.
           if [ "${{ matrix.assert_visual_analysis }}" = "true" ]; then
             if ! command -v jq >/dev/null 2>&1; then
               echo "::error::jq is required for the visual analysis assertion"

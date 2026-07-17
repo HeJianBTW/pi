@@ -24,10 +24,12 @@ vi.mock('@earendil-works/pi-coding-agent', () => {
       Promise.resolve({ ok: true, apiKey: 'resolved-key', headers: {} }),
     ),
   };
-  const mockAuthStorage = {};
   return {
-    AuthStorage: { create: () => mockAuthStorage },
-    ModelRegistry: { create: () => mockRegistry },
+    ModelRuntime: { create: vi.fn(() => Promise.resolve({})) },
+    ModelRegistry: class {
+      find = mockRegistry.find;
+      getApiKeyAndHeaders = mockRegistry.getApiKeyAndHeaders;
+    },
     __mockRegistry: mockRegistry,
   };
 });
