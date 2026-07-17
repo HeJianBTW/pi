@@ -19,7 +19,7 @@
 
 import { Agent, type AgentTool } from '@earendil-works/pi-agent-core';
 import { streamSimple } from '@earendil-works/pi-ai/compat';
-import { AuthStorage, ModelRegistry } from '@earendil-works/pi-coding-agent';
+import { ModelRegistry, ModelRuntime } from '@earendil-works/pi-coding-agent';
 import type { MemoryStore } from './store.js';
 import { createMemoryTools } from './tools.js';
 
@@ -37,7 +37,7 @@ export interface ExtractionRunnerOptions {
   modelConfig: ExtractionModelConfig;
   /** How many user turns between extraction runs. */
   interval: number;
-  /** Model registry for resolving provider/model. Falls back to AuthStorage if omitted. */
+  /** Model registry for resolving provider/model. Falls back to the default ModelRuntime if omitted. */
   modelRegistry?: {
     find(provider: string, model: string): unknown;
     getApiKeyAndHeaders(
@@ -185,7 +185,7 @@ export function createExtractionRunner(opts: ExtractionRunnerOptions): Extractio
   async function runExtraction(messages: Array<{ role: string; text: string }>): Promise<number> {
     if (messages.length === 0) return 0;
 
-    const registry = modelRegistry ?? createFallbackRegistry();
+    const registry = modelRegistry ?? (await createFallbackRegistry());
     const model = registry.find(modelConfig.provider, modelConfig.model);
     if (!model) {
       if (!warnedOnce && onNotify) {
@@ -308,9 +308,9 @@ export function countMemoryActions(messages: unknown[]): number {
   return count;
 }
 
-function createFallbackRegistry() {
-  const authStorage = AuthStorage.create();
-  const registry = ModelRegistry.create(authStorage);
+async function createFallbackRegistry() {
+  const modelRuntime = await ModelRuntime.create();
+  const registry = new ModelRegistry(modelRuntime);
   return {
     find: (provider: string, model: string) => registry.find(provider, model),
     getApiKeyAndHeaders: async (model: unknown) => {

@@ -64,7 +64,7 @@
     }
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "0.80.3",
+    "@earendil-works/pi-coding-agent": "0.80.10",
     "typebox": "*",
     "vitest": "^4.0.0"
   },
