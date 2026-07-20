@@ -23,13 +23,19 @@ export type VisionCaller = (
   instruction: string,
   imageBase64: string,
   mimeType: string,
+  signal?: AbortSignal,
 ) => Promise<string>;
 
 export function createPiVisionCaller(
   visionConfig: VisionModelConfig,
   ctx: ExtensionContext,
 ): VisionCaller {
-  return async (instruction: string, imageBase64: string, mimeType: string): Promise<string> => {
+  return async (
+    instruction: string,
+    imageBase64: string,
+    mimeType: string,
+    signal?: AbortSignal,
+  ): Promise<string> => {
     const model = ctx.modelRegistry.find(visionConfig.provider, visionConfig.model);
     if (!model) {
       throw new Error(
@@ -43,11 +49,11 @@ export function createPiVisionCaller(
     }
 
     const options: Record<string, unknown> = {
-      temperature: 0,
       maxTokens: 2048,
     };
     if (auth.apiKey) options.apiKey = auth.apiKey;
     if (auth.headers) options.headers = auth.headers;
+    if (signal) options.signal = signal;
 
     const result = await complete(
       model,
@@ -78,7 +84,6 @@ export function createPiVisionCaller(
         return {
           type,
           textLength: text?.length,
-          textPreview: text ? text.slice(0, 200) : undefined,
           keys: Object.keys(block),
         };
       });

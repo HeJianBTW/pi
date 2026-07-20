@@ -22,7 +22,7 @@ product-specific UI.
 | Extension | `@amaster.ai/pi-goal` | Derives a goal from the conversation and keeps the agent working until the condition is met, with iteration/token backstops. |
 | Extension | `@amaster.ai/pi-browser-use` | Browser automation wrapping chrome-devtools-mcp with `browser_`-prefixed tools. |
 | Extension | `@amaster.ai/pi-web-access` | Web search and URL content extraction across configurable providers. |
-| Extension | `@amaster.ai/pi-computer-use` | Computer-use extension for CUA computer-server with desktop automation tools. |
+| Extension | `@amaster.ai/pi-computer-use` | Cross-platform computer-use tools for desktop automation. |
 | Extension | `@amaster.ai/pi-channels` | Native messaging channels: Feishu, WeCom, and webhooks. |
 | Extension | `@amaster.ai/pi-memory` | Persistent curated memory (`MEMORY.md` + `USER.md`) injected into the system prompt as a refreshed prompt snapshot. |
 | Extension | `@amaster.ai/pi-security` | Resource-aware security policy engine and tool authorization. |
@@ -65,6 +65,9 @@ Every package is ESM-only and published under the `@amaster.ai` npm scope.
     <td><strong>@amaster.ai/pi-lark</strong><br><img src="./packages/pi-lark/preview.png" alt="pi-lark preview" width="260"></td>
     <td><strong>@amaster.ai/pi-wecom</strong><br><img src="./packages/pi-wecom/preview.png" alt="pi-wecom preview" width="260"></td>
     <td><strong>@amaster.ai/pi-dingtalk</strong><br><img src="./packages/pi-dingtalk/preview.png" alt="pi-dingtalk preview" width="260"></td>
+  </tr>
+  <tr>
+    <td><strong>@amaster.ai/pi-goal</strong><br><img src="./packages/pi-goal/preview.png" alt="pi-goal preview" width="260"></td>
   </tr>
 </table>
 

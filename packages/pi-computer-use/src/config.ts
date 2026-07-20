@@ -14,10 +14,16 @@ export interface ComputerUseConfig {
   extraArgs?: string[];
   /** Vision model for screenshot analysis */
   visionModel?: VisionModelConfig;
+  /** Ask once per app target before launch_app. Default: true */
+  confirmAppLaunch?: boolean;
+  /** Confirm high-risk tools such as kill_app and replay_trajectory. Default: true */
+  confirmDangerousActions?: boolean;
 }
 
 const DEFAULTS: Partial<ComputerUseConfig> = {
   mode: 'bundled',
+  confirmAppLaunch: true,
+  confirmDangerousActions: true,
 };
 
 export function resolveConfig(config?: ComputerUseConfig): ComputerUseConfig {

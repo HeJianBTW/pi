@@ -1,5 +1,7 @@
 # @amaster.ai/pi-goal
 
+![pi-goal preview](https://raw.githubusercontent.com/TGYD-helige/pi/master/packages/pi-goal/preview.png)
+
 A Pi extension that lets Pi **keep working until a goal is met**. You don't have to write the completion condition yourself — run `/goal` with no argument and the extension derives a measurable condition from the conversation, shows it to you for a quick confirmation, then keeps the agent working (re-checking after each run) until the condition holds.
 
 Modeled on Claude Code's stop-condition mechanism, with a token/iteration budget backstop borrowed from Codex's goal mode.
