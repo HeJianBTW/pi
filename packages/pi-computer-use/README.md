@@ -2,17 +2,27 @@
 
 ![pi-computer-use preview](https://raw.githubusercontent.com/TGYD-helige/pi/master/packages/pi-computer-use/preview.png)
 
-pi-coding-agent extension that wraps [cua-driver-rs](https://github.com/trycua/cua/), exposing desktop automation tools with a `computer_use_` prefix.
+Cross-platform computer-use tools for Pi desktop automation. The extension
+exposes a native MCP tool surface with a `computer_use_` prefix. The bundled
+runtime comes from the official
+[Cua Driver Rust 0.9.0 release](https://github.com/trycua/cua/releases/tag/cua-driver-rs-v0.9.0).
 
-## Features
+## What it provides
 
-- **Zero external dependencies** — pre-compiled cua-driver-rs binaries bundled for all platforms
-- **MCP stdio communication** — spawns `cua-driver mcp` via `StdioClientTransport`, JSON-RPC over stdio
-- **Dynamic tool discovery** — auto-discovers upstream MCP tools and registers with `computer_use_` prefix; falls back to a built-in tool list when cua-driver fails to start
-- **Smart tool filtering** — excludes non-essential tools (agent cursor, recording, config, raw screenshot), exposes 17 action tools + 1 vision tool
-- **Optional visual analysis** — `computer_use_analyze_screenshot` via configurable vision model
-- **Cross-platform permission handling** — detects platform-specific permission issues (macOS TCC, Windows UAC, Linux display server access) and returns actionable guidance
-- **Graceful degradation** — tools are always registered even when cua-driver cannot connect; lazy reconnect is attempted on each tool call
+- One Rust 0.9.0 driver line across macOS, Linux, and Windows
+- 49 version-pinned upstream tools, including sessions, element tokens,
+  accessibility + screenshot state, native input, browser tools, diagnostics,
+  recording, and permission policy support
+- Full MCP text, image, and `structuredContent` forwarding
+- Owned daemon + MCP proxy lifecycle with reconnect and AbortSignal propagation
+- A non-prompting permission probe on session start
+- Once-per-session app-launch approval and confirmation for high-risk operations
+- Bounded text and structured results before they enter Pi's context
+- Optional secondary vision analysis through a configured Pi model
+
+`get_window_state` is the primary perception tool. Cua Driver 0.9 returns the
+accessibility tree, structured elements with `element_token`, and a screenshot in
+one response. The standalone `screenshot` tool no longer exists.
 
 ## Install
 
@@ -20,34 +30,36 @@ pi-coding-agent extension that wraps [cua-driver-rs](https://github.com/trycua/c
 bun add @amaster.ai/pi-computer-use
 ```
 
-Requires Node.js >= 20 and `@earendil-works/pi-coding-agent >= 0.74.0`.
+The package bundles signed/precompiled driver assets. No separate Cua Driver
+installation is required.
 
-## Usage
+## Configuration
 
-Install the package and pi-coding-agent will automatically discover and load the extension. All tools are registered on `session_start`.
-
-Configure via `.pi/settings.json` (project-level) or `~/.pi/agent/settings.json` (user-level) under the `"pi-computer-use"` key:
+Configure `.pi/settings.json` or `~/.pi/agent/settings.json`:
 
 ```json
 {
   "pi-computer-use": {
-    "mode": "bundled"
+    "mode": "bundled",
+    "confirmAppLaunch": true,
+    "confirmDangerousActions": true
   }
 }
 ```
 
-## Configuration
-
 | Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `mode` | `'bundled' \| 'path'` | `'bundled'` | Binary resolution strategy |
-| `binaryPath` | `string` | — | Custom cua-driver binary path (requires `mode: 'path'`) |
-| `extraArgs` | `string[]` | — | Extra CLI arguments passed to cua-driver |
-| `visionModel` | `VisionModelConfig` | — | Enable visual screenshot analysis |
+| --- | --- | --- | --- |
+| `mode` | `"bundled" \| "path"` | `"bundled"` | Use the packaged 0.9.0 driver or a compatible custom binary |
+| `binaryPath` | `string` | — | Custom driver path when `mode` is `"path"` |
+| `extraArgs` | `string[]` | — | Additional arguments appended to `cua-driver mcp` |
+| `confirmAppLaunch` | `boolean` | `true` | Ask once per app target before `launch_app` |
+| `confirmDangerousActions` | `boolean` | `true` | Confirm high-risk tools such as `kill_app` and `replay_trajectory` |
+| `visionModel` | `{ provider, model }` | — | Register `computer_use_analyze_screenshot` |
 
-### Vision Model (Optional)
+In non-interactive modes, confirmation-required tools return an error unless the
+corresponding confirmation setting is explicitly disabled.
 
-Enable `computer_use_analyze_screenshot` by referencing a model already configured in Pi's model registry (`models.json`):
+### Optional vision model
 
 ```json
 {
@@ -60,77 +72,50 @@ Enable `computer_use_analyze_screenshot` by referencing a model already configur
 }
 ```
 
-The extension resolves API key, base URL, and headers from the model registry automatically — no need to duplicate credentials here.
+`computer_use_analyze_screenshot` requires both `pid` and `window_id`. It calls
+`get_window_state`, reuses the returned image, and invokes the configured model.
+Use it only when the primary model cannot resolve visual ambiguity.
 
-## Exposed Tools (17 + 1 vision)
+## Runtime and permissions
 
-### Input
+At `session_start`, the extension starts the driver daemon and MCP proxy, then
+registers the exact live `tools/list` surface for that platform and calls
+`check_permissions({ prompt: false })`. The generated macOS 0.9.0 manifest is
+used only to detect release drift. If startup discovery fails, the extension
+registers `computer_use_connect` (and `/computer-use-connect`) so a later retry
+can install the exact live platform contract without advertising another OS's schemas.
 
-| Tool | Description |
-|------|-------------|
-| `computer_use_click` | Left-click via element_index or x/y coordinates |
-| `computer_use_double_click` | Double-click at x/y or on an AX element |
-| `computer_use_right_click` | Right-click (context menu) |
-| `computer_use_type_text` | Insert text via AX or CGEvent fallback |
-| `computer_use_press_key` | Press and release a single key |
-| `computer_use_hotkey` | Press a key combination (e.g. Cmd+C) |
-| `computer_use_scroll` | Scroll by line or page in a direction |
-| `computer_use_drag` | Press-drag-release gesture between two points |
-| `computer_use_set_value` | Set value on UI elements (popups, sliders, steppers) |
+- **Bundled macOS:** launches the signed `CuaDriver.app` through LaunchServices,
+  so Accessibility and Screen Recording grants belong to `com.trycua.driver`.
+- **Custom macOS binary:** uses Cua Driver embedded mode and inherits the host
+  application's TCC responsibility chain.
+- **Linux/Windows:** starts an extension-owned daemon in the interactive user
+  session and tears it down on session shutdown.
 
-### Query
+## Supported targets
 
-| Tool | Description |
-|------|-------------|
-| `computer_use_get_screen_size` | Get display dimensions and scale factor |
-| `computer_use_get_cursor_position` | Get current mouse cursor position |
-| `computer_use_get_accessibility_tree` | Lightweight desktop snapshot (apps, windows, bounds) |
-| `computer_use_get_window_state` | Full AX tree of a window with actionable element indices |
-| `computer_use_list_windows` | List all top-level windows with bounds and z-order |
-| `computer_use_list_apps` | List running and installed apps with state flags |
-
-### App Lifecycle
-
-| Tool | Description |
-|------|-------------|
-| `computer_use_launch_app` | Launch an app in the background without focus steal |
-| `computer_use_kill_app` | Force-terminate a process by pid |
-
-### Vision (requires `visionModel` config)
-
-| Tool | Description |
-|------|-------------|
-| `computer_use_analyze_screenshot` | Take a screenshot and analyze it with a vision model |
-
-## Excluded Tools (16)
-
-Agent cursor styling, recording/replay, config management, zoom, raw screenshot (use `analyze_screenshot` instead), and browser-specific operations are filtered out.
-
-## Permissions
-
-On `session_start`, the extension checks permissions via cua-driver's `check_permissions` tool. Platform-specific guidance is provided:
-
-| Platform | Accessibility | Screen Capture |
-|----------|--------------|----------------|
-| macOS | System Settings → Privacy & Security → Accessibility | System Settings → Privacy & Security → Screen & System Audio Recording |
-| Windows | Run as Administrator / UI Automation access | Check DRM or security policy |
-| Linux | AT-SPI accessibility service | PipeWire portal or X11 access |
-
-When cua-driver fails to connect (missing permissions, binary not found, etc.):
-1. User is notified with a platform-appropriate warning
-2. Tools are still registered using a built-in fallback schema
-3. On each tool call, lazy reconnect is attempted; if it still fails, a friendly error with permission instructions is returned
-
-## Supported Platforms
-
-| Platform | Binary |
-|----------|--------|
-| macOS ARM64 | `bin/darwin-arm64/cua-driver` |
-| macOS x64 | `bin/darwin-x64/cua-driver` |
+| Platform | Bundled target |
+| --- | --- |
+| macOS ARM64 / x64 | `bin/darwin-universal/CuaDriver.app` |
 | Linux x64 | `bin/linux-x64/cua-driver` |
-| Windows x64 | `bin/win32-x64/cua-driver.exe` |
-| Windows ARM64 | `bin/win32-arm64/cua-driver.exe` |
+| Linux ARM64 | `bin/linux-arm64/cua-driver` |
+| Windows x64 | `bin/win32-x64/cua-driver.exe` + `cua-driver-uia.exe` |
+| Windows ARM64 | `bin/win32-arm64/cua-driver.exe` + `cua-driver-uia.exe` |
+
+## Canonical workflow
+
+1. `computer_use_start_session`
+2. `computer_use_launch_app` or `computer_use_list_windows`
+3. `computer_use_get_window_state`
+4. Act using `element_token`/`element_index`, falling back to pixels for
+   custom-drawn surfaces
+5. Re-run `computer_use_get_window_state` and verify the change
+6. `computer_use_end_session`
+
+Tool descriptions and schemas are discovered from the exact live driver, so the
+model receives the platform-specific contract without a separate bundled skill.
 
 ## License
 
-Apache-2.0
+Apache-2.0 for this package. Bundled Cua Driver assets retain their upstream
+license and release metadata.

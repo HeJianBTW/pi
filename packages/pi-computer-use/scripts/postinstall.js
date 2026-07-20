@@ -6,7 +6,8 @@ import { fileURLToPath } from 'node:url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const binDir = join(__dirname, '..', 'bin');
 
-const platform = process.platform === 'win32' ? 'win32-x64' : `${process.platform}-${process.arch}`;
+const platform =
+  process.platform === 'darwin' ? 'darwin-universal' : `${process.platform}-${process.arch}`;
 const platformDir = join(binDir, platform);
 
 if (process.platform === 'win32') {
