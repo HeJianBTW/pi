@@ -1,3 +1,4 @@
+import { PassThrough } from 'node:stream';
 import { beforeEach, describe, expect, it, test, vi } from 'vitest';
 
 const mockClientConnect = vi.fn(() => Promise.resolve());
@@ -6,6 +7,8 @@ const mockClientPing = vi.fn(() => Promise.resolve({}));
 const mockTransports: Array<{
   onclose?: () => void;
   onerror?: (error: Error) => void;
+  opts?: { command?: string; args?: string[] };
+  stderr?: PassThrough;
 }> = [];
 let _listToolsCalls = 0;
 const mockListTools = vi.fn((opts?: { cursor?: string }) => {
@@ -39,7 +42,8 @@ vi.mock('@modelcontextprotocol/sdk/client/stdio.js', () => ({
   StdioClientTransport: class {
     onclose?: () => void;
     onerror?: (error: Error) => void;
-    constructor(public opts: unknown) {
+    stderr = new PassThrough();
+    constructor(public opts: { command?: string; args?: string[] }) {
       mockTransports.push(this);
     }
   },
@@ -83,6 +87,53 @@ describe('DevToolsClient', () => {
       const client = new DevToolsClient({ headless: true, channel: 'canary' });
       await client.connect();
       expect(mockClientConnect).toHaveBeenCalled();
+    });
+
+    test('uses the packaged chrome-devtools-mcp entrypoint when PATH has no npx', async () => {
+      const originalPath = process.env.PATH;
+      process.env.PATH = '/usr/bin:/bin:/usr/sbin:/sbin';
+      try {
+        const client = new DevToolsClient({ headless: true });
+        await client.connect();
+
+        expect(mockTransports[0]!.opts).toMatchObject({ command: process.execPath });
+        expect(mockTransports[0]!.opts!.args?.[0]).toMatch(
+          /chrome-devtools-mcp[/\\]build[/\\]src[/\\]bin[/\\]chrome-devtools-mcp\.js$/,
+        );
+        expect(mockTransports[0]!.opts!.args).not.toContain('chrome-devtools-mcp@latest');
+      } finally {
+        process.env.PATH = originalPath;
+      }
+    });
+
+    test('preserves an allowlisted MCP subprocess error code when startup fails', async () => {
+      mockClientConnect.mockImplementationOnce(async () => {
+        mockTransports[0]!.stderr!.write('npm error code ENOTEMPTY path /private/cache\n');
+        const error = new Error('MCP error -32000: Connection closed');
+        error.name = 'McpError';
+        throw error;
+      });
+      const client = new DevToolsClient({ headless: true });
+
+      await expect(client.connect()).rejects.toThrow(
+        'Browser connection failed. MCP subprocess failed (ENOTEMPTY).',
+      );
+    });
+
+    test('does not expose arbitrary MCP subprocess stderr in connection errors', async () => {
+      mockClientConnect.mockImplementationOnce(async () => {
+        mockTransports[0]!.stderr!.write(
+          'startup failed --ws-headers={"Authorization":"Bearer secret-token"}\n',
+        );
+        throw new Error('Connection closed');
+      });
+      const client = new DevToolsClient({ headless: true });
+
+      const connection = client.connect();
+      await expect(connection).rejects.toThrow(
+        'Browser connection failed. MCP transport failed (Error).',
+      );
+      await expect(connection).rejects.not.toThrow('secret-token');
     });
   });
 
