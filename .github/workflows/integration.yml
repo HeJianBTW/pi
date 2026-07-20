@@ -664,9 +664,12 @@ jobs:
                   and .toolName == $tool
                   and .isError != true
                   and .result.isError != true
-                  and any((.result.content // [])[]?;
-                    .type == "text"
-                    and ((.text // "") | test($pattern; "i"))
+                  and (
+                    any((.result.content // [])[]?;
+                      .type == "text"
+                      and ((.text // "") | test($pattern; "i"))
+                    )
+                    or ((.result.details // {}) | tostring | test($pattern; "i"))
                   )
                 )
               ' <<<"$output" >/dev/null; then
