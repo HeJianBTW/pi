@@ -225,6 +225,11 @@ jobs:
             tools: scheduler_list
             prompt: "Use the scheduler_list tool exactly once to list scheduled tasks, then tell me how many tasks there are."
             assert_pattern: "(0|task|tasks|empty|none)"
+          - extension: pi-computer-use
+            tools: computer_use_health_report
+            prompt: "Use computer_use_health_report exactly once with include=[binary_version, platform_supported, session_active]. Report the schema version, platform, driver version, and overall status."
+            assert_pattern: "(schema_version|driver_version|overall)"
+            assert_tool: computer_use_health_report
           # pi-goal registers no LLM tool — it is driven by the /goal command
           # (TUI) or the --goal flag (CLI). Print mode can't dispatch slash
           # commands and won't run an agent turn without a prompt, so this entry
