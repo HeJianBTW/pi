@@ -10,12 +10,18 @@ type UpstreamResult = {
   isError?: boolean;
 };
 
+type LiveTool = {
+  name: string;
+  description?: string;
+  inputSchema: unknown;
+};
+
 let mockConfigContent: string | null = null;
 let mockConnect: () => Promise<void> = async () => {};
 let mockCallTool: (name: string, args: Record<string, unknown>) => UpstreamResult = () => ({
   content: [{ type: 'text', text: 'Action executed.' }],
 });
-let mockLiveTools: typeof toolManifest.tools = toolManifest.tools;
+let mockLiveTools: readonly LiveTool[] = toolManifest.tools;
 let lastRequestOptions: Record<string, unknown> | undefined;
 let lastTransport: { onclose?: () => void; onerror?: (error: Error) => void } | undefined;
 let closeCount = 0;
@@ -170,7 +176,7 @@ describe('computerUseExtension', () => {
         description: 'Live platform contract',
         inputSchema: { type: 'object', properties: {} },
       },
-    ] as typeof toolManifest.tools;
+    ];
 
     await start();
 
@@ -207,7 +213,7 @@ describe('computerUseExtension', () => {
         description: 'Live platform contract',
         inputSchema: { type: 'object', properties: {} },
       },
-    ] as typeof toolManifest.tools;
+    ];
 
     await start();
 
