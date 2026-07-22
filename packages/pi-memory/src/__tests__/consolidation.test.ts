@@ -1,6 +1,9 @@
-import type { ConversationTurn } from '@amaster.ai/pi-shared';
 import { describe, expect, it } from 'vitest';
-import { buildConsolidationUserPrompt, CONSOLIDATION_SYSTEM_PROMPT } from '../consolidation.js';
+import {
+  buildConsolidationUserPrompt,
+  CONSOLIDATION_SYSTEM_PROMPT,
+  type DreamTurn,
+} from '../consolidation.js';
 
 describe('consolidation', () => {
   describe('CONSOLIDATION_SYSTEM_PROMPT', () => {
@@ -32,7 +35,7 @@ describe('consolidation', () => {
     });
 
     it('formats turns with session id and timestamps', () => {
-      const turns: ConversationTurn[] = [
+      const turns: DreamTurn[] = [
         {
           id: '1',
           sessionId: 'sess-1',
@@ -53,7 +56,7 @@ describe('consolidation', () => {
 
     it('respects the 8000 char limit', () => {
       const longMsg = 'x'.repeat(3000);
-      const turns: ConversationTurn[] = Array.from({ length: 10 }, (_, i) => ({
+      const turns: DreamTurn[] = Array.from({ length: 10 }, (_, i) => ({
         id: String(i),
         sessionId: `sess-${i}`,
         conversationId: 'conv-1',
@@ -68,7 +71,7 @@ describe('consolidation', () => {
     });
 
     it('includes instruction to begin with memory_read', () => {
-      const turns: ConversationTurn[] = [
+      const turns: DreamTurn[] = [
         {
           id: '1',
           sessionId: 'sess-1',

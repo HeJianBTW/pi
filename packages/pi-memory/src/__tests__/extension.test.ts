@@ -5,34 +5,33 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import memoryExtension from '../extension.js';
 import { MemoryStore } from '../store.js';
 
-const { installMock, statusMock, uninstallMock } = vi.hoisted(() => ({
-  installMock: vi.fn(),
-  statusMock: vi.fn(),
-  uninstallMock: vi.fn(),
+const { runDreamMock } = vi.hoisted(() => ({
+  runDreamMock: vi.fn(),
 }));
 
-vi.mock('@amaster.ai/pi-shared/scheduler', () => ({
-  install: installMock,
-  status: statusMock,
-  uninstall: uninstallMock,
+vi.mock('../dream.js', () => ({
+  runDream: runDreamMock,
 }));
-
 const TEST_ROOT = path.join(tmpdir(), 'pi-memory-extension-test');
 
 describe('memoryExtension', () => {
   beforeEach(() => {
     mkdirSync(TEST_ROOT, { recursive: true });
-    installMock.mockReset();
-    statusMock.mockReset().mockResolvedValue('not-found');
-    uninstallMock.mockReset();
+    runDreamMock.mockReset().mockResolvedValue(false);
   });
 
   afterEach(() => {
     rmSync(TEST_ROOT, { recursive: true, force: true });
   });
 
-  it('registers the dream cron entry on session start', async () => {
-    const dir = path.join(TEST_ROOT, `cron-${Date.now()}`);
+  it('starts dreaming in the background', async () => {
+    let finishDream: (() => void) | undefined;
+    runDreamMock.mockReturnValue(
+      new Promise<boolean>((resolve) => {
+        finishDream = () => resolve(false);
+      }),
+    );
+    const dir = path.join(TEST_ROOT, `dream-${Date.now()}`);
     const store = new MemoryStore({ dir });
     await store.loadFromDisk();
 
@@ -50,21 +49,70 @@ describe('memoryExtension', () => {
     };
     const ctx = {
       cwd: dir,
+      signal: new AbortController().signal,
+      sessionManager: {
+        getSessionDir: () => path.join(dir, 'sessions'),
+      },
       ui: { notify: vi.fn(), setStatus: vi.fn() },
       modelRegistry: { find: () => null, getApiKeyAndHeaders: async () => ({ ok: false }) },
     };
 
-    memoryExtension(pi as never, { store, dataDir: dir });
+    memoryExtension(pi as never, {
+      store,
+      dataDir: dir,
+      dreaming: { minHoursSinceLastRun: 12 },
+    });
     for (const handler of eventHandlers.session_start ?? []) {
       await handler({}, ctx);
     }
 
-    expect(installMock).toHaveBeenCalledWith({
-      name: 'ai.pi.memory-dream',
-      command: process.execPath,
-      args: [expect.stringMatching(/cli\/dream\.js$/), '--once'],
-      intervalSeconds: 4 * 3600,
-      description: 'Pi memory consolidation and dedup',
+    expect(runDreamMock).toHaveBeenCalledWith({
+      dreaming: { minHoursSinceLastRun: 12 },
+      includeGlobalSessions: false,
+      memoryDir: dir,
+      modelRegistry: ctx.modelRegistry,
+      sessionDir: path.join(dir, 'sessions'),
+      signal: ctx.signal,
     });
+    finishDream?.();
+  });
+
+  it('scans global sessions only for the default global store', async () => {
+    const dir = path.join(TEST_ROOT, `global-${Date.now()}`);
+    const previousHome = process.env.PI_AGENT_HOME;
+    process.env.PI_AGENT_HOME = dir;
+    try {
+      const eventHandlers: Record<
+        string,
+        Array<(event: unknown, ctx: unknown) => Promise<void>>
+      > = {};
+      const pi = {
+        on: (event: string, handler: (event: unknown, ctx: unknown) => Promise<void>) => {
+          eventHandlers[event] ??= [];
+          eventHandlers[event].push(handler);
+        },
+        registerTool: vi.fn(),
+        registerCommand: vi.fn(),
+      };
+      const ctx = {
+        cwd: dir,
+        sessionManager: { getSessionDir: () => path.join(dir, 'sessions') },
+        ui: { notify: vi.fn(), setStatus: vi.fn() },
+        modelRegistry: { find: () => null, getApiKeyAndHeaders: async () => ({ ok: false }) },
+      };
+
+      memoryExtension(pi as never);
+      for (const handler of eventHandlers.session_start ?? []) await handler({}, ctx);
+
+      expect(runDreamMock).toHaveBeenCalledWith({
+        includeGlobalSessions: true,
+        memoryDir: path.join(dir, 'memories'),
+        modelRegistry: ctx.modelRegistry,
+        sessionDir: path.join(dir, 'sessions'),
+      });
+    } finally {
+      if (previousHome === undefined) delete process.env.PI_AGENT_HOME;
+      else process.env.PI_AGENT_HOME = previousHome;
+    }
   });
 });

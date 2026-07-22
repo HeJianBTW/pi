@@ -5,13 +5,22 @@
  * update entries. Follows a 4-phase prompt: Orient → Gather → Consolidate → Prune.
  */
 
-import type { ConversationTurn } from '@amaster.ai/pi-shared';
 import { Agent } from '@earendil-works/pi-agent-core';
 import { streamSimple } from '@earendil-works/pi-ai/compat';
 import { MemoryStore } from './store.js';
 import { createMemoryTools } from './tools.js';
 
 const MAX_CONSOLIDATION_TURNS = 8;
+
+export interface DreamTurn {
+  id: string;
+  sessionId: string;
+  conversationId: string;
+  userMessage: string;
+  assistantMessage: string;
+  model: { provider: string; model: string };
+  createdAt: string;
+}
 
 export interface ConsolidationModelRegistry {
   find(provider: string, model: string): unknown;
@@ -22,7 +31,7 @@ export interface ConsolidationModelRegistry {
 
 export interface ConsolidationOptions {
   memoryDir: string;
-  turns: ConversationTurn[];
+  turns: DreamTurn[];
   modelConfig: { provider: string; model: string };
   modelRegistry: ConsolidationModelRegistry;
   signal?: AbortSignal;
@@ -82,7 +91,7 @@ After consolidating, check capacity:
 - If nothing meaningful has changed, say so — don't make changes for the sake of it
 `;
 
-export function buildConsolidationUserPrompt(turns: ConversationTurn[]): string {
+export function buildConsolidationUserPrompt(turns: DreamTurn[]): string {
   if (turns.length === 0) {
     return 'No recent conversations to review. Call memory_read to check current state and verify everything is still accurate.';
   }

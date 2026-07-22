@@ -5,11 +5,7 @@
     "rootDir": "src",
     "outDir": "dist"
   },
-  "references": [
-    { "path": "../shared" },
-    { "path": "../storage" },
-    { "path": "../pi-memory-mem0" }
-  ],
+  "references": [{ "path": "../shared" }],
   "include": ["src/**/*.ts"],
   "exclude": ["src/**/*.test.ts"]
 }

@@ -187,15 +187,9 @@ importers:
 
   packages/pi-memory:
     dependencies:
-      '@amaster.ai/pi-memory-mem0':
-        specifier: workspace:*
-        version: link:../pi-memory-mem0
       '@amaster.ai/pi-shared':
         specifier: workspace:*
         version: link:../shared
-      '@amaster.ai/pi-storage':
-        specifier: workspace:*
-        version: link:../storage
       proper-lockfile:
         specifier: ^4.1.2
         version: 4.1.2

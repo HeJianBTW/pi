@@ -126,26 +126,21 @@ The drift guard exists to prevent silent data loss — never bypass it by deleti
 
 | Hook                  | Behavior                                                                  |
 |-----------------------|---------------------------------------------------------------------------|
-| `session_start`       | Resolve `dataDir`, build `MemoryStore`, `loadFromDisk()`, register 4 tools, set status `memory: loaded`/`memory: empty`. Auto-register dreaming cron job if not already installed. |
+| `session_start`       | Resolve `dataDir`, build `MemoryStore`, `loadFromDisk()`, register 4 tools, set status `memory: loaded`/`memory: empty`, and start a gated background dream. |
 | `before_agent_start`  | Reload memory from disk, rebuild the prompt snapshot, and append it to assembled `systemPrompt` (guidance only when empty). |
 | `session_shutdown`    | Drop store references.                                                    |
 
-## Dreaming (Periodic Memory Consolidation)
+## Dreaming (Background Memory Consolidation)
 
-On first session start, pi-memory automatically registers a system-level scheduled task that periodically reviews recent conversations and consolidates durable facts into memory. No manual cron configuration needed.
+On session start, pi-memory checks whether enough Pi session history has accumulated and, when due, starts an isolated background agent that consolidates durable facts into memory. The default global memory store reads Pi sessions across all projects; an injected store or custom `dataDir` reads only the active session directory. It does not add a turn to the active conversation or install an operating-system scheduled task.
 
 ### How it works
 
-1. **System cron registration** — On first load, the extension registers a platform-native scheduled job:
-   - macOS: `launchd` LaunchAgent
-   - Linux: user `crontab` entry
-   - Windows: Task Scheduler
+1. **Session-start trigger** — The extension launches the check asynchronously after memory initialization, so the active session is not blocked.
 
-2. **Gate check** — Each run checks whether enough time and sessions have elapsed since the last consolidation before proceeding.
+2. **Gate and lock** — Each run checks whether enough time and turns have elapsed, then takes a cross-process lock so multiple Pi hosts cannot dream concurrently.
 
-3. **Phase 1 — Consolidation** — An agentic loop (using pi-agent-core) reviews recent conversation transcripts and updates `MEMORY.md`/`USER.md` via the memory tools. Follows a 4-phase prompt: Orient → Gather → Consolidate → Prune.
-
-4. **Phase 2 — Dedup** — If `pi-memory-mem0` is configured, exact-duplicate entries in the vector store are identified and deleted.
+3. **Consolidation** — An agentic loop (using pi-agent-core) reviews recent Pi sessions and updates `MEMORY.md`/`USER.md` via the memory tools. Follows a 4-phase prompt: Orient → Gather → Consolidate → Prune.
 
 ### Configuration
 
@@ -156,7 +151,6 @@ Add to `settings.json` under the `pi-memory` key:
   "pi-memory": {
     "dreaming": {
       "enabled": true,
-      "intervalHours": 4,
       "minHoursSinceLastRun": 24,
       "minTurnsSinceLastRun": 5,
       "model": {
@@ -170,16 +164,6 @@ Add to `settings.json` under the `pi-memory` key:
 
 All fields are optional with sensible defaults. The `model` field accepts any provider/model pair configured in your `~/.pi/agent/models.json` (built-in or custom). `minSessionsSinceLastRun` is accepted as a deprecated alias for `minTurnsSinceLastRun`.
 
-Set `"enabled": false` to disable dreaming and remove the scheduled task.
+Set `"enabled": false` to disable background dreaming.
 
-### CLI
-
-The dreaming logic is also available as a standalone CLI:
-
-```bash
-# Run once (called by the system scheduler)
-npx pi-memory-dream
-
-# Or via the installed bin
-pi-memory-dream
-```
+Dreaming is opportunistic: it runs while a Pi host is active and catches up on the next session start. It does not run while every Pi host is closed.
