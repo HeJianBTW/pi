@@ -5,6 +5,9 @@
   "keywords": ["pi-package", "pi", "extension", "browser", "automation", "chrome-devtools", "mcp"],
   "license": "Apache-2.0",
   "type": "module",
+  "engines": {
+    "node": "^20.19.0 || ^22.12.0 || >=23"
+  },
   "sideEffects": false,
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -46,7 +49,8 @@
   },
   "dependencies": {
     "@amaster.ai/pi-shared": "workspace:*",
-    "@modelcontextprotocol/sdk": "^1.29.0"
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "chrome-devtools-mcp": "^1.6.0"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": ">=0.80.10",

@@ -1,3 +1,5 @@
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
 import { loadPiSettings, type PiSettingsOptions } from '@amaster.ai/pi-shared/settings';
 import type { TextContent as AiTextContent } from '@earendil-works/pi-ai';
 import { complete } from '@earendil-works/pi-ai/compat';
@@ -48,9 +50,49 @@ const EXCLUDED_TOOLS = new Set([
 const MCP_TIMEOUT_MS = 60_000;
 const MCP_HEALTH_TIMEOUT_MS = 5_000;
 const MCP_HEALTH_CHECK_INTERVAL_MS = 10_000;
+const MCP_STDERR_LIMIT = 4_096;
+const MCP_SYSTEM_ERROR_CODE_PATTERN =
+  /^(?:EACCES|EADDRINUSE|ECONNREFUSED|ECONNRESET|EHOSTUNREACH|ENOENT|ENOTEMPTY|ENOTFOUND|EPERM|ETIMEDOUT)$/;
+const require = createRequire(import.meta.url);
+const chromeDevToolsMcpPackagePath = require.resolve('chrome-devtools-mcp/package.json');
+const chromeDevToolsMcpPackage = require(chromeDevToolsMcpPackagePath) as {
+  bin?: Record<string, string>;
+};
+const chromeDevToolsMcpBin = chromeDevToolsMcpPackage.bin?.['chrome-devtools-mcp'];
+if (!chromeDevToolsMcpBin) {
+  throw new Error('chrome-devtools-mcp package does not declare its chrome-devtools-mcp binary');
+}
+const CHROME_DEVTOOLS_MCP_ENTRYPOINT = join(
+  dirname(chromeDevToolsMcpPackagePath),
+  chromeDevToolsMcpBin,
+);
 
 function requestOptions(timeout: number, signal?: AbortSignal) {
   return signal ? { signal, timeout } : { timeout };
+}
+
+function safeMcpSystemErrorCode(value: unknown): string | undefined {
+  return typeof value === 'string' && MCP_SYSTEM_ERROR_CODE_PATTERN.test(value) ? value : undefined;
+}
+
+function summarizeMcpFailure(stderr: string, errorName: string, errorCode?: string): string {
+  const systemError =
+    safeMcpSystemErrorCode(errorCode) ??
+    stderr.match(
+      /\b(EACCES|EADDRINUSE|ECONNREFUSED|ECONNRESET|EHOSTUNREACH|ENOENT|ENOTEMPTY|ENOTFOUND|EPERM|ETIMEDOUT)\b/,
+    )?.[1];
+  if (systemError) return `MCP subprocess failed (${systemError}).`;
+  if (/could not find (?:chrome|browser)/i.test(stderr)) {
+    return 'Chrome executable was not found.';
+  }
+  if (/failed to launch (?:the )?(?:browser|chrome)/i.test(stderr)) {
+    return 'Chrome failed to launch.';
+  }
+  if (/(?:browser|chrome).+already running|profile.+in use/i.test(stderr)) {
+    return 'Chrome profile is already in use.';
+  }
+  const safeErrorName = /^[A-Za-z][A-Za-z0-9]{0,63}$/.test(errorName) ? errorName : 'UnknownError';
+  return `MCP transport failed (${safeErrorName}).`;
 }
 
 function pageRoutingGuidance(enabled: boolean) {
@@ -114,9 +156,14 @@ export class DevToolsClient {
     const generation = ++this.generation;
 
     const transport = new StdioClientTransport({
-      command: 'npx',
-      args: ['-y', 'chrome-devtools-mcp@latest', ...args],
+      command: process.execPath,
+      args: [CHROME_DEVTOOLS_MCP_ENTRYPOINT, ...args],
       stderr: 'pipe',
+    });
+    let stderr = '';
+    let transportErrorCode: string | undefined;
+    transport.stderr?.on('data', (chunk) => {
+      stderr = `${stderr}${String(chunk)}`.slice(-MCP_STDERR_LIMIT);
     });
 
     const client = new Client({ name: 'pi-browser-use', version: '0.1.0' }, { capabilities: {} });
@@ -124,7 +171,10 @@ export class DevToolsClient {
 
     transport.onerror = (error: Error) => {
       if (generation !== this.generation) return;
-      console.error(`[pi-browser-use] chrome-devtools-mcp transport error (${error.name})`);
+      transportErrorCode = safeMcpSystemErrorCode((error as Error & { code?: unknown }).code);
+      console.error(
+        `[pi-browser-use] chrome-devtools-mcp transport error (${transportErrorCode ?? error.name})`,
+      );
       void this.disconnectUnhealthyClient(generation);
     };
     transport.onclose = () => this.markDisconnected(generation);
@@ -148,8 +198,13 @@ export class DevToolsClient {
       }
       if (signal?.aborted) throw error;
       const errorName = error instanceof Error ? error.name : 'UnknownError';
-      console.error(`[pi-browser-use] browser connection failed (${errorName})`);
-      throw new Error('Browser connection failed.');
+      const errorCode =
+        error instanceof Error
+          ? safeMcpSystemErrorCode((error as Error & { code?: unknown }).code)
+          : undefined;
+      const diagnostic = summarizeMcpFailure(stderr, errorName, transportErrorCode ?? errorCode);
+      console.error(`[pi-browser-use] browser connection failed: ${diagnostic}`);
+      throw new Error(`Browser connection failed. ${diagnostic}`);
     }
   }
 
