@@ -23,7 +23,7 @@ pi-coding-agent extension that wraps [chrome-devtools-mcp](https://github.com/Ch
 bun add @amaster.ai/pi-browser-use
 ```
 
-Requires Node.js >= 20, Chrome (stable or newer), and `@earendil-works/pi-coding-agent >= 0.74.0`.
+Requires Node.js `^20.19.0 || ^22.12.0 || >=23`, Chrome (stable or newer), and `@earendil-works/pi-coding-agent >= 0.74.0`.
 
 `chrome-devtools-mcp` is a compatible runtime dependency and its installed entrypoint is resolved when the extension module loads. A missing or malformed installation fails extension loading immediately; the extension does not download a replacement at connection time. Connection failures expose only allowlisted system error codes or Chrome startup categories, not raw subprocess stderr.
 
