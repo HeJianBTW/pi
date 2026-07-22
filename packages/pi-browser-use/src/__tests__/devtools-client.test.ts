@@ -89,7 +89,7 @@ describe('DevToolsClient', () => {
       expect(mockClientConnect).toHaveBeenCalled();
     });
 
-    test('uses the packaged chrome-devtools-mcp entrypoint when PATH has no npx', async () => {
+    it('uses the installed chrome-devtools-mcp entrypoint when PATH has no npx', async () => {
       const originalPath = process.env.PATH;
       process.env.PATH = '/usr/bin:/bin:/usr/sbin:/sbin';
       try {
@@ -106,7 +106,7 @@ describe('DevToolsClient', () => {
       }
     });
 
-    test('preserves an allowlisted MCP subprocess error code when startup fails', async () => {
+    it('preserves an allowlisted MCP subprocess error code when startup fails', async () => {
       mockClientConnect.mockImplementationOnce(async () => {
         mockTransports[0]!.stderr!.write('npm error code ENOTEMPTY path /private/cache\n');
         const error = new Error('MCP error -32000: Connection closed');
@@ -120,7 +120,7 @@ describe('DevToolsClient', () => {
       );
     });
 
-    test('does not expose arbitrary MCP subprocess stderr in connection errors', async () => {
+    it('does not expose arbitrary MCP subprocess stderr in connection errors', async () => {
       mockClientConnect.mockImplementationOnce(async () => {
         mockTransports[0]!.stderr!.write(
           'startup failed --ws-headers={"Authorization":"Bearer secret-token"}\n',

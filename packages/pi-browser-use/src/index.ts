@@ -51,6 +51,8 @@ const MCP_TIMEOUT_MS = 60_000;
 const MCP_HEALTH_TIMEOUT_MS = 5_000;
 const MCP_HEALTH_CHECK_INTERVAL_MS = 10_000;
 const MCP_STDERR_LIMIT = 4_096;
+const MCP_SYSTEM_ERROR_CODE_PATTERN =
+  /^(?:EACCES|EADDRINUSE|ECONNREFUSED|ECONNRESET|EHOSTUNREACH|ENOENT|ENOTEMPTY|ENOTFOUND|EPERM|ETIMEDOUT)$/;
 const require = createRequire(import.meta.url);
 const chromeDevToolsMcpPackagePath = require.resolve('chrome-devtools-mcp/package.json');
 const chromeDevToolsMcpPackage = require(chromeDevToolsMcpPackagePath) as {
@@ -69,10 +71,16 @@ function requestOptions(timeout: number, signal?: AbortSignal) {
   return signal ? { signal, timeout } : { timeout };
 }
 
-function summarizeMcpFailure(stderr: string, errorName: string): string {
-  const systemError = stderr.match(
-    /\b(EACCES|EADDRINUSE|ECONNREFUSED|ECONNRESET|EHOSTUNREACH|ENOENT|ENOTEMPTY|ENOTFOUND|EPERM|ETIMEDOUT)\b/,
-  )?.[1];
+function safeMcpSystemErrorCode(value: unknown): string | undefined {
+  return typeof value === 'string' && MCP_SYSTEM_ERROR_CODE_PATTERN.test(value) ? value : undefined;
+}
+
+function summarizeMcpFailure(stderr: string, errorName: string, errorCode?: string): string {
+  const systemError =
+    safeMcpSystemErrorCode(errorCode) ??
+    stderr.match(
+      /\b(EACCES|EADDRINUSE|ECONNREFUSED|ECONNRESET|EHOSTUNREACH|ENOENT|ENOTEMPTY|ENOTFOUND|EPERM|ETIMEDOUT)\b/,
+    )?.[1];
   if (systemError) return `MCP subprocess failed (${systemError}).`;
   if (/could not find (?:chrome|browser)/i.test(stderr)) {
     return 'Chrome executable was not found.';
@@ -153,6 +161,7 @@ export class DevToolsClient {
       stderr: 'pipe',
     });
     let stderr = '';
+    let transportErrorCode: string | undefined;
     transport.stderr?.on('data', (chunk) => {
       stderr = `${stderr}${String(chunk)}`.slice(-MCP_STDERR_LIMIT);
     });
@@ -162,7 +171,10 @@ export class DevToolsClient {
 
     transport.onerror = (error: Error) => {
       if (generation !== this.generation) return;
-      console.error(`[pi-browser-use] chrome-devtools-mcp transport error (${error.name})`);
+      transportErrorCode = safeMcpSystemErrorCode((error as Error & { code?: unknown }).code);
+      console.error(
+        `[pi-browser-use] chrome-devtools-mcp transport error (${transportErrorCode ?? error.name})`,
+      );
       void this.disconnectUnhealthyClient(generation);
     };
     transport.onclose = () => this.markDisconnected(generation);
@@ -186,7 +198,11 @@ export class DevToolsClient {
       }
       if (signal?.aborted) throw error;
       const errorName = error instanceof Error ? error.name : 'UnknownError';
-      const diagnostic = summarizeMcpFailure(stderr, errorName);
+      const errorCode =
+        error instanceof Error
+          ? safeMcpSystemErrorCode((error as Error & { code?: unknown }).code)
+          : undefined;
+      const diagnostic = summarizeMcpFailure(stderr, errorName, transportErrorCode ?? errorCode);
       console.error(`[pi-browser-use] browser connection failed: ${diagnostic}`);
       throw new Error(`Browser connection failed. ${diagnostic}`);
     }

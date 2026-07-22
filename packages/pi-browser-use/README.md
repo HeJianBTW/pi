@@ -8,7 +8,7 @@ pi-coding-agent extension that wraps [chrome-devtools-mcp](https://github.com/Ch
 
 - **pi-coding-agent extension** — registers tools via `pi.registerTool()`, managed by the agent lifecycle
 - **Dynamic tool discovery** — automatically proxies all upstream chrome-devtools-mcp tools with `browser_` prefix
-- **Reproducible MCP runtime** — launches the packaged, pinned chrome-devtools-mcp entrypoint with the current Node executable instead of downloading `@latest` through ambient `npx`
+- **Reproducible MCP runtime** — launches the installed chrome-devtools-mcp entrypoint with the current Node executable instead of downloading `@latest` through ambient `npx`
 - **Page-scoped routing** — routes page tools by explicit `pageId` instead of shared selected-page state
 - **Connection recovery** — detects closed or unhealthy MCP transports and reconnects before the next call
 - **Navigation safety** — supports URL allow/block patterns and redacts sensitive network headers by default
@@ -25,7 +25,7 @@ bun add @amaster.ai/pi-browser-use
 
 Requires Node.js >= 20, Chrome (stable or newer), and `@earendil-works/pi-coding-agent >= 0.74.0`.
 
-`chrome-devtools-mcp` is a pinned runtime dependency and is resolved when the extension module loads. A missing or malformed installation fails extension loading immediately; the extension does not download a replacement at connection time. Connection failures expose only allowlisted system error codes or Chrome startup categories, not raw subprocess stderr.
+`chrome-devtools-mcp` is a compatible runtime dependency and its installed entrypoint is resolved when the extension module loads. A missing or malformed installation fails extension loading immediately; the extension does not download a replacement at connection time. Connection failures expose only allowlisted system error codes or Chrome startup categories, not raw subprocess stderr.
 
 ## Usage
 
