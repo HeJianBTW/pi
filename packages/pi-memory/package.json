@@ -8,9 +8,6 @@
   "sideEffects": false,
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "bin": {
-    "pi-memory-dream": "./dist/cli/dream.js"
-  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -74,8 +71,6 @@
   },
   "dependencies": {
     "@amaster.ai/pi-shared": "workspace:*",
-    "@amaster.ai/pi-storage": "workspace:*",
-    "@amaster.ai/pi-memory-mem0": "workspace:*",
     "proper-lockfile": "^4.1.2"
   },
   "peerDependencies": {

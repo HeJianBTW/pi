@@ -1,6 +1,4 @@
-import path, { dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { install, status, uninstall } from '@amaster.ai/pi-shared/scheduler';
+import path from 'node:path';
 import { loadPiSettings, resolveHome } from '@amaster.ai/pi-shared/settings';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import {
@@ -8,10 +6,9 @@ import {
   type ExtractionModelConfig,
   type ExtractionRunner,
 } from './background-extraction.js';
+import { type DreamingConfig, runDream } from './dream.js';
 import { MemoryStore } from './store.js';
 import { createMemoryTools } from './tools.js';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const SETTINGS_KEY = 'pi-memory';
 const STATUS_KEY = 'pi-memory';
@@ -43,15 +40,8 @@ export type PiMemoryExtensionConfig = {
   extractionModel?: ExtractionModelConfig;
   /** Turns between extraction runs. Default: 5. */
   extractionInterval?: number;
-  /** Dreaming (periodic consolidation + dedup) config. */
+  /** Dreaming (opportunistic background consolidation) config. */
   dreaming?: DreamingConfig;
-};
-
-export type DreamingConfig = {
-  /** Set to false to disable dreaming entirely and unregister the cron job. Default: true. */
-  enabled?: boolean;
-  /** Interval in hours between dream runs. Default: 4. */
-  intervalHours?: number;
 };
 
 type ResolvedConfig = {
@@ -85,36 +75,6 @@ function loadSettings(cwd: string): PiMemoryExtensionConfig | undefined {
     return Object.keys(config).length > 0 ? (config as PiMemoryExtensionConfig) : undefined;
   } catch {
     return undefined;
-  }
-}
-
-const DREAM_JOB_NAME = 'ai.pi.memory-dream';
-const DEFAULT_DREAM_INTERVAL_HOURS = 4;
-
-async function registerDreamingCron(dreaming?: DreamingConfig): Promise<void> {
-  try {
-    if (dreaming?.enabled === false) {
-      const current = await status(DREAM_JOB_NAME);
-      if (current === 'installed') {
-        await uninstall(DREAM_JOB_NAME);
-      }
-      return;
-    }
-
-    const current = await status(DREAM_JOB_NAME);
-    if (current === 'installed') return;
-
-    const dreamBin = path.resolve(__dirname, 'cli/dream.js');
-    const intervalHours = dreaming?.intervalHours ?? DEFAULT_DREAM_INTERVAL_HOURS;
-    await install({
-      name: DREAM_JOB_NAME,
-      command: process.execPath,
-      args: [dreamBin, '--once'],
-      intervalSeconds: intervalHours * 3600,
-      description: 'Pi memory consolidation and dedup',
-    });
-  } catch {
-    // Non-fatal: cron registration failure should not block the extension
   }
 }
 
@@ -157,8 +117,19 @@ export default function memoryExtension(
         });
       }
 
-      // Auto-register dreaming cron job
-      await registerDreamingCron(config.dreaming);
+      void runDream({
+        includeGlobalSessions:
+          !config.store && config.dataDir === path.join(resolveHome(), 'memories'),
+        memoryDir: store.dir,
+        modelRegistry: ctx.modelRegistry as never,
+        sessionDir: ctx.sessionManager.getSessionDir(),
+        ...(config.dreaming ? { dreaming: config.dreaming } : {}),
+        ...(ctx.signal ? { signal: ctx.signal } : {}),
+      }).catch((error) => {
+        console.error(
+          `[pi-memory] background dream failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
     } catch (err) {
       ctx.ui.setStatus(STATUS_KEY, 'memory: unavailable');
       ctx.ui.notify(
