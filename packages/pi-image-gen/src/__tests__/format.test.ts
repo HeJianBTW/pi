@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { altFromPath, formatToolResultText } from '../index.js';
+import { altFromPath, formatCommandSummary, formatToolResultText } from '../index.js';
 import type { ImageGenResult } from '../types.js';
 
 describe('altFromPath', () => {
@@ -92,5 +92,52 @@ describe('formatToolResultText', () => {
       }),
     );
     expect(text).toContain('Generated 2 image(s) via amaster (custom) (qwen-image-2.0)');
+  });
+});
+
+describe('formatCommandSummary', () => {
+  function makeResult(overrides: Partial<ImageGenResult> = {}): ImageGenResult {
+    return {
+      model: 'gpt-image-2',
+      provider: 'openai',
+      images: [],
+      ...overrides,
+    };
+  }
+
+  it('lists raw paths WITHOUT markdown image syntax (notify renders plain text)', () => {
+    const text = formatCommandSummary(
+      makeResult({
+        images: [{ path: '/Users/me/.pi/images/white.png', mimeType: 'image/png' }],
+      }),
+    );
+    expect(text).toContain('/Users/me/.pi/images/white.png');
+    // notify() shows a status line, not markdown — the literal `![](…)` would
+    // leak to the user, so the command summary must not contain it.
+    expect(text).not.toContain('![');
+    expect(text).not.toContain('](');
+  });
+
+  it('reports image count, provider, and model in the header', () => {
+    const text = formatCommandSummary(
+      makeResult({
+        images: [
+          { path: '/a.png', mimeType: 'image/png' },
+          { path: '/b.png', mimeType: 'image/png' },
+        ],
+      }),
+    );
+    expect(text).toContain('Generated 2 image(s) via openai (gpt-image-2)');
+  });
+
+  it('includes the revised prompt as an indented note, not a quote line', () => {
+    const text = formatCommandSummary(
+      makeResult({
+        images: [{ path: '/tmp/cat.png', mimeType: 'image/png', revisedPrompt: 'a cute cat' }],
+      }),
+    );
+    expect(text).toContain('/tmp/cat.png');
+    expect(text).toContain('revised prompt: a cute cat');
+    expect(text).not.toContain('> revised prompt');
   });
 });

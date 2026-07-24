@@ -76,6 +76,12 @@ export type GenerateImageParams = {
   n?: number;
   /** Image size hint (e.g. "1024x1024"). Provider may ignore. */
   size?: string;
+  /**
+   * Quality hint (e.g. "low" | "medium" | "high" | "auto" for OpenAI gpt-image).
+   * Provider-specific: forwarded on OpenAI-shaped providers, ignored by adapters
+   * that don't expose a quality knob.
+   */
+  quality?: string;
   /** Output filename prefix. */
   filename?: string;
   /** Override settings.outputDir for this call. */

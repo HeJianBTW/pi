@@ -1,4 +1,4 @@
-import { describeNetworkError } from '../errors.js';
+import { describeNetworkError, missingKeyError } from '../errors.js';
 import { toDataUri } from '../image-input.js';
 import type {
   GenerateImageParams,
@@ -32,7 +32,7 @@ export const arkAdapter: ImageProviderAdapter = {
     inputs?: ResolvedImageInput[],
   ): Promise<RawImageResult[]> {
     if (!provider.apiKey) {
-      throw new Error(missingKeyMessage(provider));
+      throw missingKeyError(provider);
     }
     const base = withDefaultPath(provider.baseUrl, '/api/v3');
     const url = `${base}/images/generations`;
@@ -42,6 +42,9 @@ export const arkAdapter: ImageProviderAdapter = {
       n: params.n ?? 1,
     };
     if (params.size) body.size = params.size;
+    // Seedream sizing is driven by `size` resolution tiers (1K/2K/4K), not an
+    // OpenAI-style `quality` knob — forwarding `quality` here risks a 400, so we
+    // intentionally drop it. See README provider table.
     if (inputs && inputs.length > 0) {
       body.image = inputs.map((input) => toDataUri(input));
     }
@@ -55,15 +58,8 @@ export const arkAdapter: ImageProviderAdapter = {
         signal: signal ?? null,
       });
     } catch (error) {
-      throw new Error(describeNetworkError(error, provider));
+      throw describeNetworkError(error, provider);
     }
     return parseImagesResponse(res, url, provider);
   },
 };
-
-function missingKeyMessage(provider: ResolvedProvider): string {
-  if (provider.builtIn) {
-    return `Provider "${provider.id}" has no API key. Tell the user to set ARK_API_KEY (or pi-image-gen.providers.${provider.id}.apiKey in settings.json).`;
-  }
-  return `Provider "${provider.id}" has no API key. Tell the user to set pi-image-gen.customProviders.${provider.id}.apiKey in settings.json.`;
-}

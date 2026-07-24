@@ -149,9 +149,18 @@ describe('Extension E2E loading via jiti', () => {
     expect(ext.tools.has('notify')).toBe(true);
   });
 
-  it('pi-image-gen: registers /image-gen command and image_generate tool', async () => {
+  it('pi-image-gen: registers /image-gen command, and image_generate tool after session_start', async () => {
     const { ext } = await loadExtensionWithJiti('pi-image-gen');
     expect(ext.commands.has('image-gen')).toBe(true);
+    // The tool registers inside session_start: its schema is shaped for the
+    // provider resolved from just-loaded settings (e.g. quality is exposed only
+    // for OpenAI/OpenRouter), so it can't be built at factory time.
+    const handler = ext.handlers.get('session_start')?.[0] as (
+      event: unknown,
+      ctx: unknown,
+    ) => Promise<void>;
+    expect(handler).toBeDefined();
+    await handler({}, { cwd: process.cwd() });
     expect(ext.tools.has('image_generate')).toBe(true);
   });
 

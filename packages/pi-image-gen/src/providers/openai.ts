@@ -1,4 +1,12 @@
-import { classifyHttpError, describeNetworkError } from '../errors.js';
+import {
+  describeNetworkError,
+  ImageGenError,
+  missingKeyError,
+  providerLogLabel,
+  readBodyText,
+  redactUrl,
+  throwHttpError,
+} from '../errors.js';
 import { classifyImageOutput, sniffMime } from '../image-input.js';
 import type {
   GenerateImageParams,
@@ -40,7 +48,7 @@ export const openaiAdapter: ImageProviderAdapter = {
     inputs?: ResolvedImageInput[],
   ): Promise<RawImageResult[]> {
     if (!provider.apiKey) {
-      throw new Error(missingKeyMessage(provider));
+      throw missingKeyError(provider);
     }
     const base = withDefaultPath(provider.baseUrl, '/v1');
     if (inputs && inputs.length > 0) {
@@ -54,7 +62,7 @@ async function generateFromText(
   provider: ResolvedProvider,
   base: string,
   remoteModelId: string,
-  params: { prompt: string; n?: number; size?: string },
+  params: { prompt: string; n?: number; size?: string; quality?: string },
   fetchImpl: typeof fetch,
   signal?: AbortSignal,
 ): Promise<RawImageResult[]> {
@@ -65,6 +73,7 @@ async function generateFromText(
     n: params.n ?? 1,
   };
   if (params.size) body.size = params.size;
+  if (params.quality) body.quality = params.quality;
 
   let res: Response;
   try {
@@ -75,7 +84,7 @@ async function generateFromText(
       signal: signal ?? null,
     });
   } catch (error) {
-    throw new Error(describeNetworkError(error, provider));
+    throw describeNetworkError(error, provider);
   }
   return parseImagesResponse(res, url, provider);
 }
@@ -84,7 +93,7 @@ async function generateWithImages(
   provider: ResolvedProvider,
   base: string,
   remoteModelId: string,
-  params: { prompt: string; n?: number; size?: string },
+  params: { prompt: string; n?: number; size?: string; quality?: string },
   inputs: ResolvedImageInput[],
   fetchImpl: typeof fetch,
   signal?: AbortSignal,
@@ -95,6 +104,7 @@ async function generateWithImages(
   form.append('prompt', params.prompt);
   form.append('n', String(params.n ?? 1));
   if (params.size) form.append('size', params.size);
+  if (params.quality) form.append('quality', params.quality);
   // OpenAI accepts repeated `image[]` for multi-image edits on gpt-image-2.
   const fieldName = inputs.length > 1 ? 'image[]' : 'image';
   for (const [i, input] of inputs.entries()) {
@@ -112,7 +122,7 @@ async function generateWithImages(
       signal: signal ?? null,
     });
   } catch (error) {
-    throw new Error(describeNetworkError(error, provider));
+    throw describeNetworkError(error, provider);
   }
   return parseImagesResponse(res, url, provider);
 }
@@ -122,24 +132,29 @@ export async function parseImagesResponse(
   url: string,
   provider: ResolvedProvider,
 ): Promise<RawImageResult[]> {
-  const text = await safeText(res);
+  // Check status BEFORE reading the body: an HTTP error is classified by status
+  // (body-free), and a body that breaks mid-read is classified as a network
+  // failure rather than swallowed and misreported as "invalid JSON".
   if (!res.ok) {
-    throw new Error(classifyHttpError(res, text, provider));
+    await throwHttpError(res, provider);
   }
+  const text = await readBodyText(res, provider);
   const contentType = res.headers.get('content-type') ?? '';
   if (!contentType.includes('json')) {
-    const preview = text.slice(0, 200).replace(/\s+/g, ' ');
-    throw new Error(
-      `${provider.name} returned ${contentType || 'non-JSON'} from ${url}. The endpoint probably doesn't expose the OpenAI-compatible images API at this path. Body: ${preview}`,
-    );
+    // The raw body may carry credentials / another tenant's data — never
+    // interpolate it; `redactUrl(url)` drops any signed query on the endpoint.
+    const detail = `${provider.name} returned ${contentType || 'non-JSON'} from ${redactUrl(url)}. The endpoint probably doesn't expose the OpenAI-compatible images API at this path.`;
+    throw new ImageGenError(detail, `${providerLogLabel(provider)} returned non-JSON`);
   }
   let json: {
     data?: Array<{ url?: string; b64_json?: string; revised_prompt?: string; media_type?: string }>;
   };
   try {
     json = JSON.parse(text);
-  } catch (error) {
-    throw new Error(`${provider.name} returned invalid JSON: ${(error as Error).message}`);
+  } catch {
+    // The parse error message echoes response bytes, so it's dropped entirely.
+    const detail = `${provider.name} returned invalid JSON.`;
+    throw new ImageGenError(detail, `${providerLogLabel(provider)} returned invalid JSON`);
   }
   const data = json.data ?? [];
   const out: RawImageResult[] = [];
@@ -162,24 +177,9 @@ export async function parseImagesResponse(
     out.push(item);
   }
   if (out.length === 0) {
-    throw new Error(
-      `${provider.name} returned no usable images. Response had ${data.length} entries but none had b64_json or a valid url. Raw: ${text.slice(0, 300).replace(/\s+/g, ' ')}`,
-    );
+    // Entry count is safe metadata; the raw body ("Raw: …") is not — drop it.
+    const detail = `${provider.name} returned no usable images. Response had ${data.length} entries but none had b64_json or a valid url.`;
+    throw new ImageGenError(detail, `${providerLogLabel(provider)} returned no usable images`);
   }
   return out;
-}
-
-export function missingKeyMessage(provider: ResolvedProvider): string {
-  if (provider.builtIn) {
-    return `Provider "${provider.id}" has no API key. Tell the user to set OPENAI_API_KEY (or pi-image-gen.providers.${provider.id}.apiKey in settings.json).`;
-  }
-  return `Provider "${provider.id}" has no API key. Tell the user to set pi-image-gen.customProviders.${provider.id}.apiKey in settings.json.`;
-}
-
-async function safeText(res: Response): Promise<string> {
-  try {
-    return await res.text();
-  } catch {
-    return '<unreadable response body>';
-  }
 }

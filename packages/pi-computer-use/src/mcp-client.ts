@@ -28,6 +28,25 @@ function abortError(signal?: AbortSignal): Error {
   return new Error('Cua Driver operation aborted.');
 }
 
+export async function waitForPromise<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) throw abortError(signal);
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(abortError(signal));
+    signal.addEventListener('abort', onAbort, { once: true });
+    void promise.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener('abort', onAbort);
+        reject(error);
+      },
+    );
+  });
+}
+
 function delay(milliseconds: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
@@ -109,6 +128,7 @@ export class CuaDriverClient {
   private activeLayout: DriverLayout | null = null;
   private state: ConnectionState = 'disconnected';
   private connectPromise: Promise<void> | null = null;
+  private readonly lifecycleController = new AbortController();
   private generation = 0;
   private hasConnected = false;
   private explicitlyClosed = false;
@@ -120,16 +140,17 @@ export class CuaDriverClient {
   }
 
   async connect(signal?: AbortSignal): Promise<void> {
+    if (this.explicitlyClosed) throw new Error('Cua Driver client is closed.');
     if (this.state === 'ready') return;
-    if (this.connectPromise) return this.connectPromise;
-
-    this.explicitlyClosed = false;
-    this.connectPromise = this.openConnection(signal);
-    try {
-      await this.connectPromise;
-    } finally {
-      this.connectPromise = null;
+    if (!this.connectPromise) {
+      const connection = this.openConnection(this.lifecycleController.signal);
+      this.connectPromise = connection;
+      const clearConnection = () => {
+        if (this.connectPromise === connection) this.connectPromise = null;
+      };
+      void connection.then(clearConnection, clearConnection);
     }
+    await waitForPromise(this.connectPromise, signal);
   }
 
   private async openConnection(signal?: AbortSignal): Promise<void> {
@@ -421,6 +442,9 @@ export class CuaDriverClient {
     if (this.explicitlyClosed) return;
     this.explicitlyClosed = true;
     this.state = 'closing';
+    const connection = this.connectPromise;
+    this.lifecycleController.abort(new Error('Cua Driver client is closing.'));
+    if (connection) await Promise.allSettled([connection]);
     const client = this.client;
     ++this.generation;
     this.client = null;

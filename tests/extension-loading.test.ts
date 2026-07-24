@@ -226,12 +226,20 @@ describe('Extension loading contract', () => {
   });
 
   describe('pi-image-gen registrations', () => {
-    it('registers /image-gen command and image_generate tool at top level', async () => {
+    it('registers /image-gen command at top level and image_generate tool after session_start', async () => {
       const factory = await loadExtension('pi-image-gen');
       const pi = createMockExtensionAPI();
       // biome-ignore lint/suspicious/noExplicitAny: mock API
       factory(pi as any);
       expect(commandsRegistered(pi)).toContain('image-gen');
+      // The tool registers inside session_start so its schema can be shaped for
+      // the provider resolved from just-loaded settings (see pi-web-access).
+      expect(eventsRegistered(pi)).toContain('session_start');
+      const sessionStartHandler = pi.on.mock.calls.find(
+        (c: unknown[]) => c[0] === 'session_start',
+      )?.[1] as (...args: unknown[]) => Promise<void>;
+      expect(sessionStartHandler).toBeDefined();
+      await sessionStartHandler({ type: 'session_start', reason: 'startup' }, { cwd: process.cwd() });
       expect(toolsRegistered(pi)).toContain('image_generate');
     });
   });

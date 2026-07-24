@@ -2,7 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-a
 import { Type } from 'typebox';
 import { type ComputerUseConfig, loadConfigFromFile, resolveConfig } from './config.js';
 import toolManifest from './generated/cua-driver-tools.js';
-import { CuaDriverClient } from './mcp-client.js';
+import { CuaDriverClient, waitForPromise } from './mcp-client.js';
 import { type McpToolResult, toPiToolResult } from './tool-result.js';
 import { createPiVisionCaller } from './vision.js';
 
@@ -28,10 +28,8 @@ const HIGH_RISK_TOOLS = new Set([
   'replay_trajectory',
 ]);
 
-const PLATFORM = process.platform;
-
 function permissionHint(): string {
-  switch (PLATFORM) {
+  switch (process.platform) {
     case 'darwin':
       return 'Check that Accessibility and Screen Recording permissions are granted in System Settings → Privacy & Security.';
     case 'win32':
@@ -42,7 +40,7 @@ function permissionHint(): string {
 }
 
 function accessibilityHint(): string {
-  switch (PLATFORM) {
+  switch (process.platform) {
     case 'darwin':
       return 'Accessibility permission not granted. The user needs to enable it in System Settings → Privacy & Security → Accessibility, then restart the app.';
     case 'win32':
@@ -53,7 +51,7 @@ function accessibilityHint(): string {
 }
 
 function screenRecordingHint(): string {
-  switch (PLATFORM) {
+  switch (process.platform) {
     case 'darwin':
       return 'Screen Recording permission not granted. The user needs to enable it in System Settings → Privacy & Security → Screen & System Audio Recording, then restart the app.';
     case 'win32':
@@ -66,11 +64,44 @@ function screenRecordingHint(): string {
 export default function computerUseExtension(pi: ExtensionAPI): void {
   let config: ComputerUseConfig | undefined;
   let client: CuaDriverClient | undefined;
+  let sessionAbortController: AbortController | undefined;
+  let macPermissionPromise: Promise<void> | undefined;
   const approvedAppTargets = new Set<string>();
 
-  async function ensureConnected(signal?: AbortSignal): Promise<void> {
-    if (!client) throw new Error('pi-computer-use: session not started');
-    await client.ensureReady(signal);
+  async function ensureConnected(
+    signal?: AbortSignal,
+    requestMacPermissions = true,
+  ): Promise<void> {
+    signal?.throwIfAborted();
+    if (!client) {
+      if (!config) throw new Error('pi-computer-use: session not started');
+      client = new CuaDriverClient(config);
+    }
+    const sessionClient = client;
+    const sessionSignal = sessionAbortController?.signal;
+    if (!sessionSignal) throw new Error('pi-computer-use: session not started');
+    sessionSignal.throwIfAborted();
+    await sessionClient.ensureReady(signal);
+    if (process.platform !== 'darwin' || !requestMacPermissions) return;
+
+    sessionSignal.throwIfAborted();
+    if (!macPermissionPromise) {
+      const permissionPromise = sessionClient
+        .callTool('check_permissions', { prompt: true }, sessionSignal)
+        .then(
+          () => undefined,
+          () => {
+            if (!sessionSignal.aborted) {
+              console.error(
+                '[pi-computer-use] macOS permission probe failed; requested tool will continue',
+              );
+            }
+          },
+        );
+      macPermissionPromise = permissionPromise;
+    }
+    await waitForPromise(macPermissionPromise, signal);
+    sessionSignal.throwIfAborted();
   }
 
   async function confirmToolCall(
@@ -142,7 +173,7 @@ export default function computerUseExtension(pi: ExtensionAPI): void {
           }
 
           try {
-            await ensureConnected(signal);
+            await ensureConnected(signal, originalName !== 'check_permissions');
             const result = await client!.callTool(originalName, params, signal);
 
             if (result.isError) {
@@ -182,17 +213,6 @@ export default function computerUseExtension(pi: ExtensionAPI): void {
     await ensureConnected(signal);
     const liveTools = await client!.listAllTools(signal);
     registerTools(liveTools);
-
-    if (PLATFORM === 'darwin') {
-      const pinnedNames = new Set(toolManifest.tools.map((tool) => tool.name));
-      const liveNames = new Set(liveTools.map((tool) => tool.name));
-      const drift = [...pinnedNames].filter((name) => !liveNames.has(name));
-      if (drift.length > 0) {
-        console.error(
-          `[pi-computer-use] bundled tool manifest drift: ${drift.length} pinned tools missing`,
-        );
-      }
-    }
 
     return liveTools.length;
   }
@@ -378,8 +398,17 @@ export default function computerUseExtension(pi: ExtensionAPI): void {
 
   pi.on('session_start', async (_event, ctx) => {
     config = resolveConfig(loadConfigFromFile({ cwd: ctx.cwd }));
-    client = new CuaDriverClient(config);
+    client = undefined;
+    sessionAbortController = new AbortController();
+    macPermissionPromise = undefined;
     approvedAppTargets.clear();
+
+    if (process.platform === 'darwin') {
+      registerTools(toolManifest.tools);
+      registerVisionTool();
+      return;
+    }
+
     let connectedAtStartup = false;
     try {
       await discoverAndRegisterTools(ctx.signal);
@@ -398,7 +427,11 @@ export default function computerUseExtension(pi: ExtensionAPI): void {
     if (!connectedAtStartup) return;
 
     try {
-      const permissions = await client.callTool('check_permissions', { prompt: false }, ctx.signal);
+      const permissions = await client!.callTool(
+        'check_permissions',
+        { prompt: false },
+        ctx.signal,
+      );
       const status = permissions.structuredContent;
       if (status?.accessibility === false || status?.screen_recording === false) {
         ctx.ui.notify(`pi-computer-use: ${permissionHint()}`, 'warning');
@@ -410,9 +443,16 @@ export default function computerUseExtension(pi: ExtensionAPI): void {
   });
 
   pi.on('session_shutdown', async () => {
-    if (client) {
-      await client.close();
-    }
+    const closingClient = client;
+    const sessionAbort = sessionAbortController;
+    const pendingPermission = macPermissionPromise;
+    client = undefined;
+    config = undefined;
+    sessionAbortController = undefined;
+    macPermissionPromise = undefined;
+    approvedAppTargets.clear();
+    sessionAbort?.abort(new Error('pi-computer-use: session shut down'));
+    await Promise.allSettled([pendingPermission, closingClient?.close()]);
   });
 }
 

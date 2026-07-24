@@ -28,6 +28,7 @@
   },
   "files": [
     "dist",
+    "skills",
     "preview.png",
     "README.md"
   ],
@@ -35,6 +36,9 @@
     "image": "https://raw.githubusercontent.com/TGYD-helige/pi/master/packages/pi-image-gen/preview.png",
     "extensions": [
       "./dist/index.js"
+    ],
+    "skills": [
+      "./skills"
     ]
   },
   "publishConfig": {
@@ -54,10 +58,14 @@
     "@amaster.ai/pi-shared": "workspace:*"
   },
   "peerDependencies": {
+    "@earendil-works/pi-ai": ">=0.80.10",
     "@earendil-works/pi-coding-agent": ">=0.74.0",
     "typebox": "*"
   },
   "peerDependenciesMeta": {
+    "@earendil-works/pi-ai": {
+      "optional": true
+    },
     "@earendil-works/pi-coding-agent": {
       "optional": true
     },
@@ -66,6 +74,7 @@
     }
   },
   "devDependencies": {
+    "@earendil-works/pi-ai": "0.80.10",
     "@earendil-works/pi-coding-agent": "0.80.10",
     "typebox": "*",
     "vitest": "^4.0.0"

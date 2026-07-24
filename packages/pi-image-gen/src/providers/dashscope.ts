@@ -1,4 +1,11 @@
-import { classifyHttpError, describeNetworkError } from '../errors.js';
+import {
+  describeNetworkError,
+  ImageGenError,
+  missingKeyError,
+  providerLogLabel,
+  readBodyText,
+  throwHttpError,
+} from '../errors.js';
 import { classifyImageOutput, toDataUri } from '../image-input.js';
 import type {
   GenerateImageParams,
@@ -28,7 +35,7 @@ export const dashscopeAdapter: ImageProviderAdapter = {
     inputs?: ResolvedImageInput[],
   ): Promise<RawImageResult[]> {
     if (!provider.apiKey) {
-      throw new Error(missingKeyMessage(provider));
+      throw missingKeyError(provider);
     }
     const base = withDefaultPath(provider.baseUrl, '/api/v1');
     const headers: Record<string, string> = {
@@ -59,12 +66,14 @@ export const dashscopeAdapter: ImageProviderAdapter = {
         signal: signal ?? null,
       });
     } catch (error) {
-      throw new Error(describeNetworkError(error, provider));
+      throw describeNetworkError(error, provider);
     }
-    const text = await safeText(res);
+    // Status first (body-free), then read: a broken/cancelled body is classified
+    // as a network failure rather than swallowed and misreported as invalid JSON.
     if (!res.ok) {
-      throw new Error(classifyHttpError(res, text, provider));
+      await throwHttpError(res, provider);
     }
+    const text = await readBodyText(res, provider);
     let json: {
       output?: {
         choices?: Array<{
@@ -80,8 +89,10 @@ export const dashscopeAdapter: ImageProviderAdapter = {
     };
     try {
       json = JSON.parse(text);
-    } catch (error) {
-      throw new Error(`${provider.name} returned invalid JSON: ${(error as Error).message}`);
+    } catch {
+      // The parse error message echoes response bytes, so it's dropped entirely.
+      const detail = `${provider.name} returned invalid JSON.`;
+      throw new ImageGenError(detail, `${providerLogLabel(provider)} returned invalid JSON`);
     }
     const out: RawImageResult[] = [];
     for (const choice of json.output?.choices ?? []) {
@@ -93,25 +104,10 @@ export const dashscopeAdapter: ImageProviderAdapter = {
       }
     }
     if (out.length === 0) {
-      throw new Error(
-        `${provider.name} returned no images. The model may have refused the prompt or the response shape changed. Raw: ${text.slice(0, 300).replace(/\s+/g, ' ')}`,
-      );
+      // Drop the raw body ("Raw: …") — it may echo the prompt or provider internals.
+      const detail = `${provider.name} returned no images. The model may have refused the prompt or the response shape changed.`;
+      throw new ImageGenError(detail, `${providerLogLabel(provider)} returned no images`);
     }
     return out;
   },
 };
-
-function missingKeyMessage(provider: ResolvedProvider): string {
-  if (provider.builtIn) {
-    return `Provider "${provider.id}" has no API key. Tell the user to set DASHSCOPE_API_KEY (or pi-image-gen.providers.${provider.id}.apiKey in settings.json).`;
-  }
-  return `Provider "${provider.id}" has no API key. Tell the user to set pi-image-gen.customProviders.${provider.id}.apiKey in settings.json.`;
-}
-
-async function safeText(res: Response): Promise<string> {
-  try {
-    return await res.text();
-  } catch {
-    return '<unreadable response body>';
-  }
-}
