@@ -285,14 +285,29 @@ If a custom provider has no `models` list, you can still address it with `<provi
 image_generate({
   prompt: string,                  // required — what to draw or how to edit
   image?: string[],                // optional — array of file paths or http(s) URLs
-  n?: number,                      // 1–8, default 1
+  n?: number,                      // 1–8, default 1 (variants of ONE prompt)
   size?: string,                   // e.g. "1024x1024" — provider-specific
+  quality?: 'low'|'medium'|'high'|'auto', // present only for a built-in gpt-image route (see below)
   filename?: string,               // filename prefix (no extension)
   outputDir?: string,              // override settings.outputDir for this call
 })
 ```
 
 Returns the absolute file path(s) of saved images. Files land in `outputDir` (default `<cwd>/.pi/images`), filename pattern `<filename or model-UTC-stamp>.<ext>`.
+
+**The schema is provider-aware.** The tool is registered once settings are loaded (on session start, and again after `/image-gen reload`), so its parameters are shaped for the active model:
+
+- `quality` appears **only** for a **built-in gpt-image** route — the built-in OpenAI provider on `gpt-image-*`, or an OpenRouter route whose model id is gpt-image (e.g. `openrouter/openai/gpt-image-2`). Only there is it constrained to the enum `low`/`medium`/`high`/`auto` (the vocabulary those APIs document). It is **omitted from the schema entirely** for:
+  - Gemini, DashScope/Qwen, and Ark/Seedream — their image APIs have no `quality` field (Seedream varies quality by `size` resolution tier instead);
+  - **non-gpt-image routes** on the OpenAI/OpenRouter wire — e.g. built-in `openai/dall-e-3` (which uses `standard`/`hd`) or an OpenRouter route to a non-OpenAI model like Seedream — because the enum above is gpt-image's vocabulary, not the wire format's; and
+  - **any custom provider**, including OpenAI-*compatible* ones — a self-hosted or third-party model may use a different quality vocabulary (e.g. DALL·E 3's `standard`/`hd`) or none at all, so the OpenAI wire format alone does **not** imply the four values above. Passing an unsupported value would only surface as a provider-side 400.
+
+  If `defaultModel` is unset or misconfigured, `quality` stays present (the tool remains fully featured and `execute` surfaces a friendly config error). Use `"low"` for fast drafts and a higher level for final assets or dense text.
+- `size`'s description is tailored per provider — for Ark/Seedream it spells out the 2K-minimum requirement instead of the generic `1024x1024` hint.
+
+Because the schema is fixed at registration, switching models via `/image-gen reload` re-registers the tool so the parameter set tracks the new provider.
+
+**Non-destructive writes:** a saved file never overwrites an existing one. Two calls with `filename: "hero"` produce `hero.png` then `hero-v2.png`, so an earlier result is preserved rather than clobbered. Path reservation is atomic (`O_EXCL`): even many concurrent calls with the same `filename` each claim a distinct path — no two clobber each other.
 
 ### Tool result format
 
@@ -344,6 +359,11 @@ There is intentionally no `model` parameter on the tool — the active model is 
 ## Slash commands
 
 - `/image-gen list` — show the active model, which provider it routes to, whether the key is set, configured providers, and the catalog of built-in model ids.
-- `/image-gen reload` — re-read settings from disk.
+- `/image-gen reload` — re-read settings from disk and re-register the tool so its schema (e.g. whether `quality` is exposed) tracks the newly selected model.
+- `/image-gen generate <prompt>` — generate an image directly from the command line using the active model. Reports the saved file path(s) as a plain-text notification (the command uses `ctx.ui.notify`, which shows a status line, not rendered Markdown — so unlike the tool result it does not emit an inline `![](…)` image). Use the `image_generate` tool from the agent when you want the image rendered inline.
 
 Use `/image-gen list` to verify your config — it will tell you when `defaultModel` is unset, points at a provider with no API key, or names an unknown id.
+
+## Bundled skill
+
+This package ships an `image-gen` skill (`skills/image-gen/SKILL.md`) that Pi loads on demand. It carries the prompting playbook the one-line tool guidance can't hold: when to use raster generation vs repo-native SVG/CSS, generate-vs-edit intent, `n`-is-variants-not-assets, multi-image role labeling, edit invariants, text-in-image handling, and the labeled prompt schema. The tool works without it; the skill makes the model use the tool well.

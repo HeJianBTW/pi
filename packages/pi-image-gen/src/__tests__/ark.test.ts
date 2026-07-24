@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { resolveModel } from '../config.js';
 import { generateImage } from '../generate.js';
 
@@ -18,8 +18,12 @@ function fakeJsonResponse(payload: unknown): Response {
 }
 
 describe('ark provider (Volcengine Seedream)', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it('routes seedream alias to the latest 5.0 model', () => {
-    process.env.ARK_API_KEY = 'ark-test';
+    vi.stubEnv('ARK_API_KEY', 'ark-test');
     const result = resolveModel('seedream', {});
     if ('error' in result) throw new Error(result.error);
     expect(result.provider.id).toBe('ark');
@@ -30,14 +34,14 @@ describe('ark provider (Volcengine Seedream)', () => {
   });
 
   it('routes seedream-4 alias to the 4.0 model', () => {
-    process.env.ARK_API_KEY = 'ark-test';
+    vi.stubEnv('ARK_API_KEY', 'ark-test');
     const result = resolveModel('seedream-4', {});
     if ('error' in result) throw new Error(result.error);
     expect(result.remoteId).toBe('doubao-seedream-4-0-250828');
   });
 
   it('routes seedream-5-pro alias to the 5.0 pro model', () => {
-    process.env.ARK_API_KEY = 'ark-test';
+    vi.stubEnv('ARK_API_KEY', 'ark-test');
     const result = resolveModel('seedream-5-pro', {});
     if ('error' in result) throw new Error(result.error);
     expect(result.provider.id).toBe('ark');
@@ -46,7 +50,7 @@ describe('ark provider (Volcengine Seedream)', () => {
 
   it('text-to-image posts to /images/generations with prompt/n/size as JSON', async () => {
     const cwd = mkdtempSync(join(tmpdir(), 'pi-image-gen-ark-'));
-    process.env.ARK_API_KEY = 'ark-test';
+    vi.stubEnv('ARK_API_KEY', 'ark-test');
 
     const calls: Array<{ url: string; method: string; body: Record<string, unknown> }> = [];
     const fetchImpl: typeof fetch = (async (input, init) => {
@@ -62,7 +66,8 @@ describe('ark provider (Volcengine Seedream)', () => {
     }) as typeof fetch;
 
     const result = await generateImage(
-      { prompt: '一只猫', size: '1024x1024', filename: 'cat' },
+      // `quality` is passed but Seedream has no such knob — assert it's dropped.
+      { prompt: '一只猫', size: '1024x1024', quality: 'high', filename: 'cat' },
       {
         cwd,
         settings: { defaultModel: 'seedream' },
@@ -81,6 +86,7 @@ describe('ark provider (Volcengine Seedream)', () => {
       size: '1024x1024',
     });
     expect(calls[0]?.body.image).toBeUndefined();
+    expect(calls[0]?.body.quality).toBeUndefined();
     expect(result.provider).toBe('ark');
     expect(result.images).toHaveLength(1);
     expect(readFileSync(result.images[0]!.path)).toEqual(PNG_BYTES);
@@ -88,7 +94,7 @@ describe('ark provider (Volcengine Seedream)', () => {
 
   it('image-to-image inlines reference images as data URIs in the JSON body', async () => {
     const cwd = mkdtempSync(join(tmpdir(), 'pi-image-gen-ark-i2i-'));
-    process.env.ARK_API_KEY = 'ark-test';
+    vi.stubEnv('ARK_API_KEY', 'ark-test');
 
     const refPath = join(cwd, 'ref.png');
     writeFileSync(refPath, PNG_BYTES);
@@ -132,7 +138,7 @@ describe('ark provider (Volcengine Seedream)', () => {
 
   it('reports a helpful error when ARK_API_KEY is not set', async () => {
     const cwd = mkdtempSync(join(tmpdir(), 'pi-image-gen-ark-nokey-'));
-    delete process.env.ARK_API_KEY;
+    vi.stubEnv('ARK_API_KEY', undefined);
     await expect(
       generateImage(
         { prompt: 'x' },

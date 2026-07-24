@@ -1,4 +1,11 @@
-import { classifyHttpError, describeNetworkError } from '../errors.js';
+import {
+  describeNetworkError,
+  ImageGenError,
+  missingKeyError,
+  providerLogLabel,
+  readBodyText,
+  throwHttpError,
+} from '../errors.js';
 import type {
   GenerateImageParams,
   ImageProviderAdapter,
@@ -25,7 +32,7 @@ export const geminiAdapter: ImageProviderAdapter = {
     inputs?: ResolvedImageInput[],
   ): Promise<RawImageResult[]> {
     if (!provider.apiKey) {
-      throw new Error(missingKeyMessage(provider));
+      throw missingKeyError(provider);
     }
     const base = withDefaultPath(provider.baseUrl, '/v1beta');
     const url = `${base}/models/${encodeURIComponent(remoteModelId)}:generateContent`;
@@ -68,12 +75,14 @@ export const geminiAdapter: ImageProviderAdapter = {
         signal: signal ?? null,
       });
     } catch (error) {
-      throw new Error(describeNetworkError(error, provider));
+      throw describeNetworkError(error, provider);
     }
-    const text = await safeText(res);
+    // Status first (body-free), then read: a broken/cancelled body is classified
+    // as a network failure rather than swallowed and misreported as invalid JSON.
     if (!res.ok) {
-      throw new Error(classifyHttpError(res, text, provider));
+      await throwHttpError(res, provider);
     }
+    const text = await readBodyText(res, provider);
     let json: {
       candidates?: Array<{
         content?: {
@@ -86,8 +95,10 @@ export const geminiAdapter: ImageProviderAdapter = {
     };
     try {
       json = JSON.parse(text);
-    } catch (error) {
-      throw new Error(`${provider.name} returned invalid JSON: ${(error as Error).message}`);
+    } catch {
+      // The parse error message echoes response bytes, so it's dropped entirely.
+      const detail = `${provider.name} returned invalid JSON.`;
+      throw new ImageGenError(detail, `${providerLogLabel(provider)} returned invalid JSON`);
     }
 
     const out: RawImageResult[] = [];
@@ -113,25 +124,9 @@ export const geminiAdapter: ImageProviderAdapter = {
       }
     }
     if (out.length === 0) {
-      throw new Error(
-        `${provider.name} returned no image data — the model may have refused to generate. Tell the user to rephrase the prompt or try a different model.`,
-      );
+      const detail = `${provider.name} returned no image data — the model may have refused to generate. Tell the user to rephrase the prompt or try a different model.`;
+      throw new ImageGenError(detail, `${providerLogLabel(provider)} returned no image data`);
     }
     return out;
   },
 };
-
-function missingKeyMessage(provider: ResolvedProvider): string {
-  if (provider.builtIn) {
-    return `Provider "${provider.id}" has no API key. Tell the user to set GEMINI_API_KEY (or pi-image-gen.providers.${provider.id}.apiKey in settings.json).`;
-  }
-  return `Provider "${provider.id}" has no API key. Tell the user to set pi-image-gen.customProviders.${provider.id}.apiKey in settings.json.`;
-}
-
-async function safeText(res: Response): Promise<string> {
-  try {
-    return await res.text();
-  } catch {
-    return '<unreadable response body>';
-  }
-}

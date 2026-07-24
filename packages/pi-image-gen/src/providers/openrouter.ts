@@ -1,4 +1,4 @@
-import { describeNetworkError } from '../errors.js';
+import { describeNetworkError, missingKeyError } from '../errors.js';
 import { toDataUri } from '../image-input.js';
 import type {
   GenerateImageParams,
@@ -8,7 +8,7 @@ import type {
   ResolvedProvider,
 } from '../types.js';
 import { withDefaultPath } from '../url.js';
-import { bearerHeaders, missingKeyMessage, parseImagesResponse } from './openai.js';
+import { bearerHeaders, parseImagesResponse } from './openai.js';
 
 /**
  * OpenRouter image API. Looks OpenAI-shaped but the endpoint differs:
@@ -27,7 +27,7 @@ export const openrouterAdapter: ImageProviderAdapter = {
     signal?: AbortSignal,
     inputs?: ResolvedImageInput[],
   ): Promise<RawImageResult[]> {
-    if (!provider.apiKey) throw new Error(missingKeyMessage(provider));
+    if (!provider.apiKey) throw missingKeyError(provider);
     const base = withDefaultPath(provider.baseUrl, '/api/v1');
     const url = `${base}/images`;
     const body: Record<string, unknown> = {
@@ -36,6 +36,7 @@ export const openrouterAdapter: ImageProviderAdapter = {
       n: params.n ?? 1,
     };
     if (params.size) body.size = params.size;
+    if (params.quality) body.quality = params.quality;
     if (inputs && inputs.length > 0) {
       body.input_references = inputs.map((input) => ({
         image_url: { url: toDataUri(input) },
@@ -51,7 +52,7 @@ export const openrouterAdapter: ImageProviderAdapter = {
         signal: signal ?? null,
       });
     } catch (error) {
-      throw new Error(describeNetworkError(error, provider));
+      throw describeNetworkError(error, provider);
     }
     return parseImagesResponse(res, url, provider);
   },

@@ -1,3 +1,4 @@
+import { ImageGenError } from '../errors.js';
 import type { ApiStyle, ImageProviderAdapter } from '../types.js';
 import { arkAdapter } from './ark.js';
 import { dashscopeAdapter } from './dashscope.js';
@@ -15,6 +16,6 @@ const ADAPTERS: Record<ApiStyle, ImageProviderAdapter> = {
 
 export function getAdapter(api: ApiStyle): ImageProviderAdapter {
   const adapter = ADAPTERS[api];
-  if (!adapter) throw new Error(`Unsupported api "${api}".`);
+  if (!adapter) throw new ImageGenError(`Unsupported api "${api}".`, `unsupported api "${api}"`);
   return adapter;
 }

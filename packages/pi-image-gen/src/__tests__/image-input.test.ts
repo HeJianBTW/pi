@@ -60,6 +60,24 @@ describe('resolveImageInputs', () => {
     expect(receivedSignal).toBe(ctrl.signal);
   });
 
+  it('cancels an unread image-input HTTP error body', async () => {
+    let cancelled = false;
+    const fetchImpl: typeof fetch = (async () =>
+      new Response(
+        new ReadableStream({
+          cancel() {
+            cancelled = true;
+          },
+        }),
+        { status: 404 },
+      )) as typeof fetch;
+
+    await expect(
+      resolveImageInputs(['https://example.com/missing.png'], '/tmp', fetchImpl),
+    ).rejects.toThrow(/404/);
+    expect(cancelled).toBe(true);
+  });
+
   it('rejects a long raw base64 blob with a clear error', async () => {
     // 600+ bytes of arbitrary content → 800+ chars base64, no internal padding.
     const blob = Buffer.alloc(600, 0xab).toString('base64');
@@ -70,6 +88,17 @@ describe('resolveImageInputs', () => {
     await expect(resolveImageInputs(['nope.png'], '/tmp', fetch)).rejects.toThrow(
       /not a readable file path/,
     );
+  });
+
+  it('does not echo an unreadable absolute path in the error', async () => {
+    const secretPath = '/Users/alice/secret/photo.png';
+    try {
+      await resolveImageInputs([secretPath], '/tmp', fetch);
+      throw new Error('expected resolveImageInputs to reject');
+    } catch (error) {
+      expect((error as Error).message).toMatch(/not a readable file path/);
+      expect((error as Error).message).not.toContain(secretPath);
+    }
   });
 
   it('accepts arrays of file paths', async () => {
