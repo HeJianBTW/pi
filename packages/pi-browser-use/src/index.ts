@@ -156,7 +156,7 @@ export class DevToolsClient {
     const generation = ++this.generation;
 
     const transport = new StdioClientTransport({
-      command: process.execPath,
+      command: process.env.PI_BROWSER_USE_NODE?.trim() || process.execPath,
       args: [CHROME_DEVTOOLS_MCP_ENTRYPOINT, ...args],
       stderr: 'pipe',
     });

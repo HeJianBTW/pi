@@ -27,6 +27,8 @@ Requires Node.js `^20.19.0 || ^22.12.0 || >=23`, Chrome (stable or newer), and `
 
 `chrome-devtools-mcp` is a compatible runtime dependency and its installed entrypoint is resolved when the extension module loads. A missing or malformed installation fails extension loading immediately; the extension does not download a replacement at connection time. Connection failures expose only allowlisted system error codes or Chrome startup categories, not raw subprocess stderr.
 
+Hosts where `process.execPath` is not a directly executable Node runtime can set `PI_BROWSER_USE_NODE` to the Node command used for the MCP subprocess.
+
 ## Usage
 
 ### As pi-coding-agent Extension (Recommended)
