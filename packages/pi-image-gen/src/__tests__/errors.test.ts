@@ -140,6 +140,11 @@ describe('describeNetworkError', () => {
     expect(err.logSummary).toContain('OpenAI');
     expect(err.logSummary).toMatch(/network-error/);
   });
+
+  it('describes an unclassified network failure without doubled error wording', () => {
+    const { message } = describeNetworkError(new Error('socket failed'), builtIn);
+    expect(message).toBe('OpenAI request failed because of a network error.');
+  });
 });
 
 describe('readBodyText', () => {
@@ -311,6 +316,8 @@ describe('errorMessageForUser', () => {
     expect(msg).not.toContain('/Users/alice');
     expect(msg).not.toContain('ENOENT');
     expect(msg).toMatch(/failed unexpectedly/i);
+    expect(msg).toMatch(/report.*pi-image-gen bug/i);
+    expect(msg).not.toMatch(/logs|stderr/i);
   });
 
   it('never echoes a non-Error throw to the user', () => {

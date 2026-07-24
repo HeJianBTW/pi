@@ -296,6 +296,39 @@ describe('computerUseExtension', () => {
     expect(result.isError).not.toBe(true);
   });
 
+  it('runs the requested tool when the macOS permission probe rejects', async () => {
+    let permissionChecks = 0;
+    let actionCalls = 0;
+    mockCallTool = async (name) => {
+      if (name === 'check_permissions') {
+        permissionChecks++;
+        throw new Error('permission dialog token=secret timed out');
+      }
+      actionCalls++;
+      return { content: [{ type: 'text', text: 'Action executed.' }] };
+    };
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await start();
+
+    const listApps = tools.get('computer_use_list_apps')!;
+    const firstResult = (await listApps.execute('first', {}, undefined, undefined, mockCtx)) as any;
+    const secondResult = (await listApps.execute(
+      'second',
+      {},
+      undefined,
+      undefined,
+      mockCtx,
+    )) as any;
+
+    expect(firstResult.isError).not.toBe(true);
+    expect(secondResult.isError).not.toBe(true);
+    expect(permissionChecks).toBe(1);
+    expect(actionCalls).toBe(2);
+    const logged = errorSpy.mock.calls.map((call) => String(call[0])).join('\n');
+    expect(logged).toContain('macOS permission probe failed');
+    expect(logged).not.toContain('token=secret');
+  });
+
   it('lets one caller cancel without aborting another caller first connection', async () => {
     const connection = abortableDeferred<void>();
     mockConnect = connection.wait;

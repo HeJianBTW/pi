@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { open } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -318,6 +318,50 @@ describe('generateImage', () => {
       ),
     ).rejects.toThrow(/cancelled/i);
     expect(existsSync(join(cwd, '.pi', 'images', 'batch-1.png'))).toBe(false);
+  });
+
+  it('preserves the original batch error when cleanup also fails', async () => {
+    const cwd = makeTmpDir();
+    const firstPath = join(cwd, '.pi', 'images', 'batch-cleanup-1.png');
+    const settings: ImageGenSettings = {
+      defaultModel: 'x-img',
+      customProviders: {
+        provider: {
+          api: 'openai',
+          apiKey: 'k',
+          models: ['x-img'],
+        },
+      },
+    };
+    const fetchImpl: typeof fetch = (async (input) => {
+      const url = typeof input === 'string' ? input : (input as URL).toString();
+      if (url.endsWith('/images/generations')) {
+        return fakeJsonResponse({
+          data: [
+            { b64_json: PNG_BYTES.toString('base64') },
+            { url: 'https://cdn.test/generated.png' },
+          ],
+        });
+      }
+      rmSync(firstPath);
+      mkdirSync(firstPath);
+      throw new Error('download failed token=secret');
+    }) as typeof fetch;
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      await expect(
+        generateImage({ prompt: 'a cat', filename: 'batch-cleanup' }, { cwd, settings, fetchImpl }),
+      ).rejects.toMatchObject({
+        logSummary: 'generated image download failed (network-error)',
+      });
+      const logged = errorSpy.mock.calls.map((call) => String(call[0])).join('\n');
+      expect(logged).toContain('[pi-image-gen] cleanup failed:');
+      expect(logged).not.toContain(firstPath);
+      expect(logged).not.toContain('token=secret');
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 
   it('propagates cancellation into an in-flight image file write', async () => {

@@ -21,24 +21,27 @@ export async function resolveImageInputs(
 ): Promise<ResolvedImageInput[]> {
   if (!raw || raw.length === 0) return [];
   const out: ResolvedImageInput[] = [];
-  for (const entry of raw) {
-    out.push(await resolveOne(entry, cwd, fetchImpl, signal));
+  for (let index = 0; index < raw.length; index++) {
+    const inputLabel = raw.length > 1 ? `Image input #${index + 1}` : 'Image input';
+    out.push(await resolveOne(raw[index]!, inputLabel, cwd, fetchImpl, signal));
   }
   return out;
 }
 
 async function resolveOne(
   value: string,
+  inputLabel: string,
   cwd: string,
   fetchImpl: typeof fetch,
   signal?: AbortSignal,
 ): Promise<ResolvedImageInput> {
   const trimmed = value.trim();
+  const logLabel = inputLabel.toLowerCase();
   // Every throw below is an ImageGenError so it survives the body-free log sink
   // (toLogSummary) with an actionable message; none interpolate the raw value —
   // an image input could be a giant base64 blob or a signed URL.
   if (!trimmed) {
-    throw new ImageGenError('image input is empty.', 'image input empty');
+    throw new ImageGenError(`${inputLabel} is empty.`, `${logLabel} empty`);
   }
 
   // Reject base64 / data: URIs — tool-call payloads don't survive megabyte-sized
@@ -47,16 +50,16 @@ async function resolveOne(
   // tells the model.
   if (/^data:/i.test(trimmed)) {
     throw new ImageGenError(
-      'Image input as a `data:` URI is not supported. Pass a file path (absolute or relative to cwd) or an http(s) URL instead. If you have raw image bytes, write them to a file under .pi/uploads first and pass that path.',
-      'image input rejected (data: URI)',
+      `${inputLabel} as a \`data:\` URI is not supported. Pass a file path (absolute or relative to cwd) or an http(s) URL instead. If you have raw image bytes, write them to a file under .pi/uploads first and pass that path.`,
+      `${logLabel} rejected (data: URI)`,
     );
   }
   // Heuristic for raw base64: long, only base64 chars. Not foolproof but
   // catches the common case where the model dumps a giant base64 blob.
   if (trimmed.length > 256 && !/[\s/\\]/.test(trimmed) && /^[A-Za-z0-9+/]+={0,2}$/.test(trimmed)) {
     throw new ImageGenError(
-      'Image input looks like a raw base64 blob; this is not supported because it bloats the tool argument. Write the bytes to a file path and pass that path instead.',
-      'image input rejected (raw base64)',
+      `${inputLabel} looks like a raw base64 blob; this is not supported because it bloats the tool argument. Write the bytes to a file path and pass that path instead.`,
+      `${logLabel} rejected (raw base64)`,
     );
   }
 
@@ -68,17 +71,17 @@ async function resolveOne(
     try {
       res = await fetchImpl(trimmed, { signal: signal ?? null });
     } catch (error) {
-      throw describeDownloadError('image input', trimmed, { rejected: error });
+      throw describeDownloadError(logLabel, trimmed, { rejected: error });
     }
     if (!res.ok) {
-      await throwDownloadHttpError('image input', trimmed, res);
+      await throwDownloadHttpError(logLabel, trimmed, res);
     }
     // Body reads can fail after headers; keep them in the sanitized download boundary.
     let buf: Uint8Array;
     try {
       buf = new Uint8Array(await res.arrayBuffer());
     } catch (error) {
-      throw describeDownloadError('image input', trimmed, { rejected: error });
+      throw describeDownloadError(logLabel, trimmed, { rejected: error });
     }
     const mimeType =
       res.headers.get('content-type')?.split(';')[0]?.trim() || sniffMime(buf) || 'image/png';
@@ -95,8 +98,8 @@ async function resolveOne(
     // full path) — both are sensitive and would reach stderr via the plain-Error
     // path. Keep the message body-free, path-free, and actionable.
     throw new ImageGenError(
-      'Image input is not a readable file path or http(s) URL. Pass an absolute path, a path relative to the session cwd, or an http(s) URL.',
-      'image input not readable',
+      `${inputLabel} is not a readable file path or http(s) URL. Pass an absolute path, a path relative to the session cwd, or an http(s) URL.`,
+      `${logLabel} not readable`,
     );
   }
   const mimeType = sniffMime(bytes) ?? extToMime(absolute) ?? 'image/png';

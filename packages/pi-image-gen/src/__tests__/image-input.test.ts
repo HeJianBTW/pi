@@ -101,6 +101,23 @@ describe('resolveImageInputs', () => {
     }
   });
 
+  it('identifies the failing entry in a multi-image input without echoing its value', async () => {
+    const secretPath = '/Users/alice/secret/photo.png';
+    const fetchImpl: typeof fetch = (async () =>
+      new Response(PNG_BYTES, {
+        status: 200,
+        headers: { 'content-type': 'image/png' },
+      })) as typeof fetch;
+
+    try {
+      await resolveImageInputs(['https://example.com/ok.png', secretPath], '/tmp', fetchImpl);
+      throw new Error('expected resolveImageInputs to reject');
+    } catch (error) {
+      expect((error as Error).message).toMatch(/Image input #2/);
+      expect((error as Error).message).not.toContain(secretPath);
+    }
+  });
+
   it('accepts arrays of file paths', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'pi-image-input-'));
     const a = join(dir, 'a.png');

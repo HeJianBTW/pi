@@ -88,13 +88,20 @@ export default function computerUseExtension(pi: ExtensionAPI): void {
     if (!macPermissionPromise) {
       const permissionPromise = sessionClient
         .callTool('check_permissions', { prompt: true }, sessionSignal)
-        .then(() => undefined);
+        .then(
+          () => undefined,
+          () => {
+            if (!sessionSignal.aborted) {
+              console.error(
+                '[pi-computer-use] macOS permission probe failed; requested tool will continue',
+              );
+            }
+          },
+        );
       macPermissionPromise = permissionPromise;
-      void permissionPromise.catch(() => {
-        if (macPermissionPromise === permissionPromise) macPermissionPromise = undefined;
-      });
     }
     await waitForPromise(macPermissionPromise, signal);
+    sessionSignal.throwIfAborted();
   }
 
   async function confirmToolCall(
@@ -206,17 +213,6 @@ export default function computerUseExtension(pi: ExtensionAPI): void {
     await ensureConnected(signal);
     const liveTools = await client!.listAllTools(signal);
     registerTools(liveTools);
-
-    if (process.platform === 'darwin') {
-      const pinnedNames = new Set(toolManifest.tools.map((tool) => tool.name));
-      const liveNames = new Set(liveTools.map((tool) => tool.name));
-      const drift = [...pinnedNames].filter((name) => !liveNames.has(name));
-      if (drift.length > 0) {
-        console.error(
-          `[pi-computer-use] bundled tool manifest drift: ${drift.length} pinned tools missing`,
-        );
-      }
-    }
 
     return liveTools.length;
   }

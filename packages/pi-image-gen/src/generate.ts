@@ -117,7 +117,7 @@ export async function generateImage(
         }),
       );
     } catch (cleanupError) {
-      throw describeWriteError('remove an incomplete image batch', cleanupError);
+      logCleanupFailure('remove an incomplete image batch', cleanupError);
     }
     throw error;
   }
@@ -131,6 +131,12 @@ export async function generateImage(
 
 function providerLabel(provider: ResolvedProvider): string {
   return provider.builtIn ? provider.id : `${provider.id} (custom)`;
+}
+
+function logCleanupFailure(operation: string, error: unknown): void {
+  console.error(
+    `[pi-image-gen] cleanup failed: ${describeWriteError(operation, error).logSummary}`,
+  );
 }
 
 function resolveOutputDir(configured: string | undefined, cwd: string): string {
@@ -194,7 +200,7 @@ async function writeUnique(
           await unlink(candidate);
         } catch (cleanupError) {
           if ((cleanupError as NodeJS.ErrnoException).code !== 'ENOENT') {
-            throw describeWriteError('remove the incomplete image file', cleanupError);
+            logCleanupFailure('remove the incomplete image file', cleanupError);
           }
         }
       }

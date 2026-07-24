@@ -34,7 +34,7 @@ export function toLogSummary(error: unknown): string {
 /** user/LLM sink: an ImageGenError's vetted message, else a fixed sentence. */
 export function errorMessageForUser(error: unknown): string {
   if (error instanceof ImageGenError) return error.message;
-  return 'Image generation failed unexpectedly. Check the extension logs (stderr) for details.';
+  return 'Image generation failed unexpectedly. Retry once; if it persists, report a pi-image-gen bug.';
 }
 
 /**
@@ -164,7 +164,7 @@ export function describeNetworkError(error: unknown, provider: ResolvedProvider)
       `Cannot reach ${provider.name}. Tell the user to check network connectivity or verify ${providerBaseUrlLocator(provider)}.`,
     );
   }
-  return err(`${provider.name} request failed with a ${category} error.`);
+  return err(`${provider.name} request failed because of a network error.`);
 }
 
 /** Read a successful provider body, converting mid-stream failures without echoing raw text. */
