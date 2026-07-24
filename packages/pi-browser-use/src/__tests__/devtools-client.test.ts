@@ -91,7 +91,9 @@ describe('DevToolsClient', () => {
 
     it('uses the installed chrome-devtools-mcp entrypoint when PATH has no npx', async () => {
       const originalPath = process.env.PATH;
+      const originalNode = process.env.PI_BROWSER_USE_NODE;
       process.env.PATH = '/usr/bin:/bin:/usr/sbin:/sbin';
+      delete process.env.PI_BROWSER_USE_NODE;
       try {
         const client = new DevToolsClient({ headless: true });
         await client.connect();
@@ -103,6 +105,30 @@ describe('DevToolsClient', () => {
         expect(mockTransports[0]!.opts!.args).not.toContain('chrome-devtools-mcp@latest');
       } finally {
         process.env.PATH = originalPath;
+        if (originalNode === undefined) {
+          delete process.env.PI_BROWSER_USE_NODE;
+        } else {
+          process.env.PI_BROWSER_USE_NODE = originalNode;
+        }
+      }
+    });
+
+    it('uses the host-provided Node command when available', async () => {
+      const originalNode = process.env.PI_BROWSER_USE_NODE;
+      process.env.PI_BROWSER_USE_NODE = '/opt/pi-browser-use/node';
+      try {
+        const client = new DevToolsClient();
+        await client.connect();
+
+        expect(mockTransports[0]!.opts).toMatchObject({
+          command: '/opt/pi-browser-use/node',
+        });
+      } finally {
+        if (originalNode === undefined) {
+          delete process.env.PI_BROWSER_USE_NODE;
+        } else {
+          process.env.PI_BROWSER_USE_NODE = originalNode;
+        }
       }
     });
 
