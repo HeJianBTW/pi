@@ -14,8 +14,8 @@ runtime comes from the official
   accessibility + screenshot state, native input, browser tools, diagnostics,
   recording, and permission policy support
 - Full MCP text, image, and `structuredContent` forwarding
-- Owned daemon + MCP proxy lifecycle with reconnect and AbortSignal propagation
-- A non-prompting permission probe on session start
+- Owned daemon + MCP proxy lifecycle with session-owned reconnect and per-call cancellation
+- A non-prompting Linux/Windows permission probe on session start
 - Once-per-session app-launch approval and confirmation for high-risk operations
 - Bounded text and structured results before they enter Pi's context
 - Optional secondary vision analysis through a configured Pi model
@@ -78,12 +78,21 @@ Use it only when the primary model cannot resolve visual ambiguity.
 
 ## Runtime and permissions
 
-At `session_start`, the extension starts the driver daemon and MCP proxy, then
-registers the exact live `tools/list` surface for that platform and calls
-`check_permissions({ prompt: false })`. The generated macOS 0.9.0 manifest is
-used only to detect release drift. If startup discovery fails, the extension
+On macOS, `session_start` registers the generated 0.9.0 manifest without
+starting the driver. The signed app and MCP proxy start lazily on the first
+computer-use tool call, which requests any missing permissions through
+`check_permissions({ prompt: true })`. Existing grants do not raise another
+system dialog. The requested tool still runs and reports its own capability or
+permission error. Linux and Windows keep eager startup: they discover the exact
+live `tools/list` surface and call
+`check_permissions({ prompt: false })`. If discovery fails, the extension
 registers `computer_use_connect` (and `/computer-use-connect`) so a later retry
-can install the exact live platform contract without advertising another OS's schemas.
+can install the exact live platform contract without advertising another OS's
+schemas.
+
+Driver startup, reconnect, and the first macOS permission probe are session-owned.
+Cancelling a tool stops only that caller's wait or MCP request; session shutdown
+aborts the shared work.
 
 - **Bundled macOS:** launches the signed `CuaDriver.app` through LaunchServices,
   so Accessibility and Screen Recording grants belong to `com.trycua.driver`.
@@ -112,8 +121,8 @@ can install the exact live platform contract without advertising another OS's sc
 5. Re-run `computer_use_get_window_state` and verify the change
 6. `computer_use_end_session`
 
-Tool descriptions and schemas are discovered from the exact live driver, so the
-model receives the platform-specific contract without a separate bundled skill.
+Linux and Windows tool descriptions and schemas come from the exact live driver.
+macOS uses the generated manifest for the bundled driver release.
 
 ## License
 

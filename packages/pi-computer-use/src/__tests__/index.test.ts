@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import toolManifest from '../generated/cua-driver-tools.js';
 
 Object.defineProperty(process, 'platform', { value: 'darwin' });
@@ -16,9 +16,45 @@ type LiveTool = {
   inputSchema: unknown;
 };
 
+function abortableDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  let markStarted!: () => void;
+  let signal: AbortSignal | undefined;
+  let aborted = false;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  const started = new Promise<void>((resolveStarted) => {
+    markStarted = resolveStarted;
+  });
+  return {
+    started,
+    wait(nextSignal?: AbortSignal) {
+      signal = nextSignal;
+      const onAbort = () => {
+        aborted = true;
+        reject(signal?.reason);
+      };
+      signal?.aborted ? onAbort() : signal?.addEventListener('abort', onAbort, { once: true });
+      markStarted();
+      return promise;
+    },
+    resolve,
+    get aborted() {
+      return aborted;
+    },
+  };
+}
+
 let mockConfigContent: string | null = null;
-let mockConnect: () => Promise<void> = async () => {};
-let mockCallTool: (name: string, args: Record<string, unknown>) => UpstreamResult = () => ({
+let mockConnect: (signal?: AbortSignal) => Promise<void> = async () => {};
+let mockCallTool: (
+  name: string,
+  args: Record<string, unknown>,
+  signal?: AbortSignal,
+) => UpstreamResult | Promise<UpstreamResult> = () => ({
   content: [{ type: 'text', text: 'Action executed.' }],
 });
 let mockLiveTools: readonly LiveTool[] = toolManifest.tools;
@@ -28,8 +64,8 @@ let closeCount = 0;
 
 vi.mock('@modelcontextprotocol/sdk/client/index.js', () => ({
   Client: class MockClient {
-    async connect() {
-      return mockConnect();
+    async connect(_transport: unknown, options?: { signal?: AbortSignal }) {
+      return mockConnect(options?.signal);
     }
     async close() {
       closeCount++;
@@ -43,7 +79,11 @@ vi.mock('@modelcontextprotocol/sdk/client/index.js', () => ({
       options: Record<string, unknown> | undefined,
     ) {
       lastRequestOptions = options;
-      return mockCallTool(request.name, request.arguments ?? {});
+      return mockCallTool(
+        request.name,
+        request.arguments ?? {},
+        options?.signal as AbortSignal | undefined,
+      );
     }
   },
 }));
@@ -130,9 +170,12 @@ const mockPi = {
   }),
 };
 
+const { CuaDriverClient } = await import('../mcp-client.js');
 const { default: computerUseExtension } = await import('../index.js');
+const originalCallTool = CuaDriverClient.prototype.callTool;
 
-async function start(config?: Record<string, unknown>) {
+async function start(config?: Record<string, unknown>, platform = 'darwin') {
+  Object.defineProperty(process, 'platform', { value: platform });
   mockConfigContent = config ? JSON.stringify({ 'pi-computer-use': config }) : null;
   tools.clear();
   commands.clear();
@@ -159,7 +202,13 @@ describe('computerUseExtension', () => {
     mockCtx.ui.confirm.mockClear();
   });
 
-  it('registers the complete live Rust 0.9 tool manifest', async () => {
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    for (const handler of handlers.session_shutdown ?? []) await handler({}, mockCtx);
+    Object.defineProperty(process, 'platform', { value: 'darwin' });
+  });
+
+  it('registers the pinned Rust 0.9 tool manifest on macOS', async () => {
     await start();
 
     expect(tools.size).toBe(toolManifest.tools.length);
@@ -169,7 +218,11 @@ describe('computerUseExtension', () => {
     expect(tools.has('computer_use_screenshot')).toBe(false);
   });
 
-  it('registers the live platform schema without adding macOS reference tools', async () => {
+  it('does not start the macOS driver to discover its live schema', async () => {
+    let connects = 0;
+    mockConnect = async () => {
+      connects++;
+    };
     mockLiveTools = [
       {
         name: 'platform_specific_tool',
@@ -180,11 +233,247 @@ describe('computerUseExtension', () => {
 
     await start();
 
-    expect(tools.has('computer_use_platform_specific_tool')).toBe(true);
-    expect(tools.has('computer_use_click')).toBe(false);
+    expect(connects).toBe(0);
+    expect(tools.has('computer_use_platform_specific_tool')).toBe(false);
+    expect(tools.has('computer_use_click')).toBe(true);
   });
 
-  it('connects and performs a non-prompting permission probe on session start', async () => {
+  it('requests macOS permissions once on the first computer-use call', async () => {
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    mockCallTool = (name, args) => {
+      calls.push({ name, args });
+      return name === 'check_permissions'
+        ? {
+            content: [{ type: 'text', text: 'Permissions granted.' }],
+            structuredContent: { accessibility: true, screen_recording: true },
+          }
+        : { content: [{ type: 'text', text: 'ok' }] };
+    };
+    await start();
+
+    const listApps = tools.get('computer_use_list_apps')!;
+    await Promise.all([
+      listApps.execute('first', {}, undefined, undefined, mockCtx),
+      listApps.execute('second', {}, undefined, undefined, mockCtx),
+    ]);
+
+    expect(calls.filter((call) => call.name === 'check_permissions')).toEqual([
+      { name: 'check_permissions', args: { prompt: true } },
+    ]);
+  });
+
+  it('honors an explicit read-only macOS permission check', async () => {
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    mockCallTool = (name, args) => {
+      calls.push({ name, args });
+      return { content: [{ type: 'text', text: 'ok' }] };
+    };
+    await start();
+
+    await tools
+      .get('computer_use_check_permissions')!
+      .execute('check', { prompt: false }, undefined, undefined, mockCtx);
+
+    expect(calls).toEqual([{ name: 'check_permissions', args: { prompt: false } }]);
+  });
+
+  it('lets tools report their own permission requirements', async () => {
+    let actionCalled = false;
+    mockCallTool = (name) => {
+      if (name === 'check_permissions') {
+        return { content: [{ type: 'text', text: 'Permission status unavailable.' }] };
+      }
+      actionCalled = true;
+      return { content: [{ type: 'text', text: 'Action executed.' }] };
+    };
+    await start();
+
+    const result = (await tools
+      .get('computer_use_list_apps')!
+      .execute('list', {}, undefined, undefined, mockCtx)) as any;
+
+    expect(actionCalled).toBe(true);
+    expect(result.isError).not.toBe(true);
+  });
+
+  it('lets one caller cancel without aborting another caller first connection', async () => {
+    const connection = abortableDeferred<void>();
+    mockConnect = connection.wait;
+    await start();
+
+    const controller = new AbortController();
+    const listApps = tools.get('computer_use_list_apps')!;
+    const cancelledCall = listApps.execute('cancelled', {}, controller.signal, undefined, mockCtx);
+    await connection.started;
+    const activeCall = listApps.execute('active', {}, undefined, undefined, mockCtx);
+    controller.abort(new Error('cancelled by user'));
+
+    await expect(cancelledCall).rejects.toThrow('cancelled by user');
+    connection.resolve();
+    const activeResult = (await activeCall) as any;
+    expect(activeResult.isError).not.toBe(true);
+  });
+
+  it('keeps a shared reconnect alive when the first permission probe is cancelled', async () => {
+    let connects = 0;
+    const reconnect = abortableDeferred<void>();
+    mockConnect = (signal) => {
+      connects++;
+      return connects === 1 ? Promise.resolve() : reconnect.wait(signal);
+    };
+    await start();
+
+    let disconnectBeforePermission = true;
+    vi.spyOn(CuaDriverClient.prototype, 'callTool').mockImplementation(function (
+      this: InstanceType<typeof CuaDriverClient>,
+      ...args
+    ) {
+      if (disconnectBeforePermission && args[0] === 'check_permissions') {
+        disconnectBeforePermission = false;
+        lastTransport?.onclose?.();
+      }
+      return originalCallTool.apply(this, args);
+    });
+
+    const controller = new AbortController();
+    const listApps = tools.get('computer_use_list_apps')!;
+    const cancelledCall = listApps.execute('cancelled', {}, controller.signal, undefined, mockCtx);
+    await reconnect.started;
+    const activeCall = listApps.execute('active', {}, undefined, undefined, mockCtx);
+    await Promise.resolve();
+    controller.abort(new Error('cancelled by user'));
+
+    await expect(cancelledCall).rejects.toThrow('cancelled by user');
+    expect(reconnect.aborted).toBe(false);
+    reconnect.resolve();
+    const activeResult = (await activeCall) as any;
+    expect(activeResult.isError).not.toBe(true);
+    expect(connects).toBe(2);
+  });
+
+  it('aborts an unowned first connection when its session shuts down', async () => {
+    const connection = abortableDeferred<void>();
+    mockConnect = connection.wait;
+    await start();
+
+    const call = tools
+      .get('computer_use_list_apps')!
+      .execute('active', {}, undefined, undefined, mockCtx);
+    await connection.started;
+    for (const handler of handlers.session_shutdown ?? []) await handler({}, mockCtx);
+
+    expect(connection.aborted).toBe(true);
+    const result = (await call) as any;
+    expect(result.isError).toBe(true);
+  });
+
+  it('keeps and reuses the first connection when its only caller cancels', async () => {
+    let connects = 0;
+    const connection = abortableDeferred<void>();
+    mockConnect = (signal) => {
+      connects++;
+      return connection.wait(signal);
+    };
+    await start();
+
+    const controller = new AbortController();
+    const listApps = tools.get('computer_use_list_apps')!;
+    const call = listApps.execute('cancelled', {}, controller.signal, undefined, mockCtx);
+    await connection.started;
+    controller.abort(new Error('cancelled by user'));
+
+    await expect(call).rejects.toThrow('cancelled by user');
+    expect(connection.aborted).toBe(false);
+    const retryCall = listApps.execute('retry', {}, undefined, undefined, mockCtx);
+    connection.resolve();
+    const retryResult = (await retryCall) as any;
+    expect(retryResult.isError).not.toBe(true);
+    expect(connects).toBe(1);
+  });
+
+  it('keeps and reuses the permission request when its only caller cancels', async () => {
+    let permissionChecks = 0;
+    const permission = abortableDeferred<UpstreamResult>();
+    mockCallTool = (name, _args, signal) => {
+      if (name !== 'check_permissions') {
+        return { content: [{ type: 'text', text: 'Action executed.' }] };
+      }
+      permissionChecks++;
+      return permission.wait(signal);
+    };
+    await start();
+
+    const controller = new AbortController();
+    const call = tools
+      .get('computer_use_list_apps')!
+      .execute('cancelled', {}, controller.signal, undefined, mockCtx);
+    await permission.started;
+    controller.abort(new Error('cancelled by user'));
+
+    await expect(call).rejects.toThrow('cancelled by user');
+    expect(permission.aborted).toBe(false);
+    const retryCall = tools
+      .get('computer_use_list_apps')!
+      .execute('retry', {}, undefined, undefined, mockCtx);
+    permission.resolve({
+      content: [{ type: 'text', text: 'Permissions granted.' }],
+      structuredContent: { accessibility: true, screen_recording: true },
+    });
+    const retryResult = (await retryCall) as any;
+    expect(retryResult.isError).not.toBe(true);
+    expect(permissionChecks).toBe(1);
+  });
+
+  it('keeps the permission request while another caller is waiting', async () => {
+    const permission = abortableDeferred<UpstreamResult>();
+    mockCallTool = (name, _args, signal) => {
+      if (name !== 'check_permissions') {
+        return { content: [{ type: 'text', text: 'Action executed.' }] };
+      }
+      return permission.wait(signal);
+    };
+    await start();
+
+    const controller = new AbortController();
+    const listApps = tools.get('computer_use_list_apps')!;
+    const cancelledCall = listApps.execute('cancelled', {}, controller.signal, undefined, mockCtx);
+    const activeCall = listApps.execute('active', {}, undefined, undefined, mockCtx);
+    await permission.started;
+    await Promise.resolve();
+    controller.abort(new Error('cancelled by user'));
+
+    await expect(cancelledCall).rejects.toThrow('cancelled by user');
+    expect(permission.aborted).toBe(false);
+    permission.resolve({
+      content: [{ type: 'text', text: 'Permissions granted.' }],
+      structuredContent: { accessibility: true, screen_recording: true },
+    });
+    const activeResult = (await activeCall) as any;
+    expect(activeResult.isError).not.toBe(true);
+  });
+
+  it('aborts an active permission request when its session shuts down', async () => {
+    const permission = abortableDeferred<UpstreamResult>();
+    mockCallTool = (name, _args, signal) => {
+      if (name !== 'check_permissions') {
+        return { content: [{ type: 'text', text: 'Action executed.' }] };
+      }
+      return permission.wait(signal);
+    };
+    await start();
+
+    const call = tools
+      .get('computer_use_list_apps')!
+      .execute('active', {}, undefined, undefined, mockCtx);
+    await permission.started;
+    for (const handler of handlers.session_shutdown ?? []) await handler({}, mockCtx);
+
+    expect(permission.aborted).toBe(true);
+    const result = (await call) as any;
+    expect(result.isError).toBe(true);
+  });
+
+  it('keeps eager discovery and permission probing on non-macOS platforms', async () => {
     let connects = 0;
     let permissionArgs: Record<string, unknown> | undefined;
     mockConnect = async () => {
@@ -195,7 +484,7 @@ describe('computerUseExtension', () => {
       return { content: [{ type: 'text', text: 'ok' }] };
     };
 
-    await start();
+    await start(undefined, 'linux');
 
     expect(connects).toBe(1);
     expect(permissionArgs).toEqual({ prompt: false });
@@ -215,7 +504,7 @@ describe('computerUseExtension', () => {
       },
     ];
 
-    await start();
+    await start(undefined, 'linux');
 
     expect(tools.has('computer_use_click')).toBe(false);
     expect(tools.has('computer_use_connect')).toBe(true);
@@ -234,13 +523,22 @@ describe('computerUseExtension', () => {
 
   it('forwards image content, structured output, and cancellation', async () => {
     await start();
-    mockCallTool = () => ({
-      content: [
-        { type: 'image', data: 'image-base64', mimeType: 'image/png' },
-        { type: 'text', text: 'window state' },
-      ],
-      structuredContent: { snapshot_id: 'snapshot-1', elements: [{ element_token: 'token-1' }] },
-    });
+    mockCallTool = (name) =>
+      name === 'check_permissions'
+        ? {
+            content: [{ type: 'text', text: 'Permissions granted.' }],
+            structuredContent: { accessibility: true, screen_recording: true },
+          }
+        : {
+            content: [
+              { type: 'image', data: 'image-base64', mimeType: 'image/png' },
+              { type: 'text', text: 'window state' },
+            ],
+            structuredContent: {
+              snapshot_id: 'snapshot-1',
+              elements: [{ element_token: 'token-1' }],
+            },
+          };
     const controller = new AbortController();
 
     const result = (await tools
@@ -261,6 +559,9 @@ describe('computerUseExtension', () => {
       connects++;
     };
     await start();
+    await tools
+      .get('computer_use_click')!
+      .execute('id', { pid: 1, x: 2, y: 3 }, undefined, undefined, mockCtx);
     lastTransport?.onclose?.();
 
     await tools
@@ -268,6 +569,86 @@ describe('computerUseExtension', () => {
       .execute('id', { pid: 1, x: 2, y: 3 }, undefined, undefined, mockCtx);
 
     expect(connects).toBe(2);
+  });
+
+  it.each([
+    {
+      label: 'macOS ordinary tools',
+      config: undefined,
+      platform: 'darwin',
+      tool: 'computer_use_list_apps',
+      params: {},
+    },
+    {
+      label: 'macOS vision tools',
+      config: { visionModel: { provider: 'openai', model: 'gpt-4o' } },
+      platform: 'darwin',
+      tool: 'computer_use_analyze_screenshot',
+      params: { pid: 1, window_id: 2 },
+    },
+    {
+      label: 'Linux ordinary tools',
+      config: undefined,
+      platform: 'linux',
+      tool: 'computer_use_list_apps',
+      params: {},
+    },
+  ])('lets one caller cancel without aborting a shared $label reconnect', async (testCase) => {
+    let connects = 0;
+    mockConnect = async () => {
+      connects++;
+    };
+    mockCallTool = (name) =>
+      name === 'check_permissions'
+        ? {
+            content: [{ type: 'text', text: 'Permissions granted.' }],
+            structuredContent: { accessibility: true, screen_recording: true },
+          }
+        : name === 'get_window_state'
+          ? {
+              content: [{ type: 'image', data: 'image-base64', mimeType: 'image/png' }],
+            }
+          : { content: [{ type: 'text', text: 'Action executed.' }] };
+    await start(testCase.config, testCase.platform);
+
+    const tool = tools.get(testCase.tool)!;
+    await tool.execute('warmup', testCase.params, undefined, undefined, mockCtx);
+
+    let disconnectBeforeCall = true;
+    const callToolSpy = vi
+      .spyOn(CuaDriverClient.prototype, 'callTool')
+      .mockImplementation(function (this: InstanceType<typeof CuaDriverClient>, ...args) {
+        if (disconnectBeforeCall) {
+          disconnectBeforeCall = false;
+          lastTransport?.onclose?.();
+        }
+        return originalCallTool.apply(this, args);
+      });
+    const reconnect = abortableDeferred<void>();
+    mockConnect = (signal) => {
+      connects++;
+      return reconnect.wait(signal);
+    };
+
+    const controller = new AbortController();
+    const cancelledCall = tool.execute(
+      'cancelled',
+      testCase.params,
+      controller.signal,
+      undefined,
+      mockCtx,
+    );
+    const activeCall = tool.execute('active', testCase.params, undefined, undefined, mockCtx);
+    await reconnect.started;
+    controller.abort(new Error('cancelled by user'));
+
+    await expect(cancelledCall).rejects.toThrow('cancelled by user');
+    expect(reconnect.aborted).toBe(false);
+    reconnect.resolve();
+    const activeResult = (await activeCall) as any;
+    expect(activeResult.isError).not.toBe(true);
+    expect(connects).toBe(2);
+    callToolSpy.mockRestore();
   });
 
   it('preserves AbortSignal cancellation instead of rewriting it as a connection error', async () => {
@@ -287,10 +668,16 @@ describe('computerUseExtension', () => {
 
   it('returns platform guidance for permission errors', async () => {
     await start();
-    mockCallTool = () => ({
-      content: [{ type: 'text', text: 'ax_not_granted: permission denied' }],
-      isError: true,
-    });
+    mockCallTool = (name) =>
+      name === 'check_permissions'
+        ? {
+            content: [{ type: 'text', text: 'Permissions granted.' }],
+            structuredContent: { accessibility: true, screen_recording: true },
+          }
+        : {
+            content: [{ type: 'text', text: 'ax_not_granted: permission denied' }],
+            isError: true,
+          };
 
     const result = (await tools
       .get('computer_use_click')!
@@ -348,6 +735,12 @@ describe('computerUseExtension', () => {
     let call: { name: string; args: Record<string, unknown> } | undefined;
     await start({ visionModel: { provider: 'openai', model: 'gpt-4o' } });
     mockCallTool = (name, args) => {
+      if (name === 'check_permissions') {
+        return {
+          content: [{ type: 'text', text: 'Permissions granted.' }],
+          structuredContent: { accessibility: true, screen_recording: true },
+        };
+      }
       call = { name, args };
       return { content: [{ type: 'image', data: 'image-base64', mimeType: 'image/png' }] };
     };
@@ -363,8 +756,32 @@ describe('computerUseExtension', () => {
     expect(result.content[0].text).toBe('vision analysis');
   });
 
-  it('closes the MCP client on session shutdown', async () => {
+  it('isolates daemon state and first connection across sessions', async () => {
+    let connects = 0;
+    mockConnect = async () => {
+      connects++;
+    };
+
     await start();
+    const firstTools = new Map(tools);
+    const firstShutdownHandlers = [...(handlers.session_shutdown ?? [])];
+    await start();
+
+    await Promise.all([
+      firstTools.get('computer_use_list_apps')!.execute('first', {}, undefined, undefined, mockCtx),
+      tools.get('computer_use_list_apps')!.execute('second', {}, undefined, undefined, mockCtx),
+    ]);
+
+    expect(connects).toBe(2);
+    for (const handler of firstShutdownHandlers) await handler({}, mockCtx);
+    expect(closeCount).toBe(1);
+    for (const handler of handlers.session_shutdown ?? []) await handler({}, mockCtx);
+    expect(closeCount).toBe(2);
+  });
+
+  it('closes the MCP client on session shutdown after it was used', async () => {
+    await start();
+    await tools.get('computer_use_list_apps')!.execute('id', {}, undefined, undefined, mockCtx);
     for (const handler of handlers.session_shutdown ?? []) await handler({}, mockCtx);
     expect(closeCount).toBeGreaterThan(0);
   });
