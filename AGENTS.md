@@ -165,8 +165,7 @@ This monorepo uses two npm scopes: `@earendil-works/*` for the Pi runtime core p
 import {
   resolveHome,        // ~/.pi/agent (data dir: memories, skills, logs)
   resolveConfigDir,   // config dir (settings.json, policy, auth, models)
-  isProjectTrusted,   // fail-closed adapter for ctx.isProjectTrusted()
-  loadPiSettings,     // load extension config (merges global < agentDir < trusted project)
+  loadPiSettings,     // load extension config (merges global < agentDir < project)
   loadPiPolicyProfiles,
 } from '@amaster.ai/pi-shared/settings';
 ```
@@ -185,12 +184,7 @@ import {
 2. Agent dir: `$PI_CODING_AGENT_DIR/settings.json`
 3. Trusted project: `<cwd>/.pi/settings.json`
 
-Extensions must pass `projectTrusted: isProjectTrusted(ctx)` when loading from an
-extension context. If trust is absent or declined, project settings and policies
-are ignored. `${ENV_VAR:-fallback}` interpolation applies only to global and
-agent-dir settings, never to project settings. Loaders may opt into bare
-`$ENV_VAR` compatibility with `expandBareEnvVars`; bare references do not support
-the `:-fallback` form.
+Extensions must pass `projectTrusted: isProjectTrusted(ctx)` when loading from an extension context. If trust is absent or declined, project settings and policies are ignored. `${ENV_VAR:-fallback}` interpolation applies only to global and agent-dir settings, never to project settings. Loaders may opt into bare `$ENV_VAR` compatibility with `expandBareEnvVars`; bare references do not support the `:-fallback` form.
 
 ---
 
