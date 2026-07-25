@@ -34,7 +34,7 @@ export function resolveOtelExporterConfig(telemetryConfig: TelemetryConfig): Ote
     ...(otel?.errorLabel ? { errorLabel: otel.errorLabel } : {}),
     serviceName: telemetryConfig.serviceName ?? 'pi',
     ...(telemetryConfig.serviceVersion ? { serviceVersion: telemetryConfig.serviceVersion } : {}),
-    includePayloads: telemetryConfig.includePayloads ?? true,
+    includePayloads: telemetryConfig.includePayloads ?? false,
   };
 }
 
@@ -70,7 +70,7 @@ export function resolveOtelConfig(env: TelemetryEnvironment): OtelExporterConfig
     ),
     serviceName,
     ...(serviceVersion ? { serviceVersion } : {}),
-    includePayloads: parseBooleanWithDefault(env.TELEMETRY_INCLUDE_PAYLOADS, true),
+    includePayloads: parseBooleanWithDefault(env.TELEMETRY_INCLUDE_PAYLOADS, false),
   };
 }
 

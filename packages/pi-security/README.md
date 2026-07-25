@@ -60,18 +60,19 @@ Baseline secret protection (denying `.ssh/`, `.env`, `*.pem`, `*.key`, etc.) is 
 
 Profiles can be defined in three places. Higher-priority sources override lower-priority ones with the same name:
 
-1. **Project**: `<cwd>/.pi/policy/<name>.json` (highest priority)
+1. **Trusted project**: `<cwd>/.pi/policy/<name>.json` (highest priority when project trust is accepted)
 2. **Agent**: `<agentDir>/policy/<name>.json`
 3. **User**: `~/.pi/agent/policy/<name>.json`
 4. **Settings**: under `pi-security.security.profiles` in `pi.json`
 
 Each JSON file defines a single profile; the filename (without `.json`) is the profile name.
+Project policies are ignored when project trust is declined or unavailable.
 
 ### JSON config examples
 
 Ready-to-copy samples live under [`examples/`](./examples) and are exercised by the test suite:
 
-- [`examples/reviewer.json`](./examples/reviewer.json) — a project-level file policy. Drop into `<project>/.pi/policy/reviewer.json`. Starts from `read-only`, opens to `workspace-write`, asks on `bash`, denies external network.
+- [`examples/reviewer.json`](./examples/reviewer.json) — a project-level file policy. For a trusted project, drop it into `<project>/.pi/policy/reviewer.json`. Starts from `read-only`, opens to `workspace-write`, asks on `bash`, denies external network.
 - [`examples/auto-review.settings.json`](./examples/auto-review.settings.json) — a `pi.json` snippet that defines a custom `auto-review` profile inline. Extends `default` and asks before package-manager installs (`npm/pnpm/yarn/pip install|add`) via `argsRegex`.
 
 ### Profile schema

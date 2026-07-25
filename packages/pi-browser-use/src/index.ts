@@ -1,6 +1,10 @@
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
-import { loadPiSettings, type PiSettingsOptions } from '@amaster.ai/pi-shared/settings';
+import {
+  isProjectTrusted,
+  loadPiSettings,
+  type PiSettingsOptions,
+} from '@amaster.ai/pi-shared/settings';
 import type { TextContent as AiTextContent } from '@earendil-works/pi-ai';
 import { complete } from '@earendil-works/pi-ai/compat';
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
@@ -331,7 +335,7 @@ export class DevToolsClient {
   }
 }
 
-/** Read the pi-browser-use section from .pi/settings.json. */
+/** Read pi-browser-use settings, including the project layer only when trusted. */
 function loadConfigFromFile(options?: PiSettingsOptions): BrowserUseConfig {
   return loadPiSettings<BrowserUseConfig>('pi-browser-use', {
     ...options,
@@ -559,7 +563,12 @@ export default function browserUseExtension(pi: ExtensionAPI): void {
   }
 
   pi.on('session_start', async (_event, ctx) => {
-    config = resolveConfig(loadConfigFromFile({ cwd: ctx.cwd }));
+    config = resolveConfig(
+      loadConfigFromFile({
+        cwd: ctx.cwd,
+        projectTrusted: isProjectTrusted(ctx),
+      }),
+    );
     client = new DevToolsClient(config);
     await registerUpstreamTools();
     if (config.visionModel) {

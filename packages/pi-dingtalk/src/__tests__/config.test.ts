@@ -42,7 +42,7 @@ describe('loadDingTalkConfig', () => {
       }),
     );
 
-    const config = loadDingTalkConfig(project);
+    const config = loadDingTalkConfig(project, true);
 
     expect(config).toEqual({
       clientId: 'dingabc123',
@@ -60,7 +60,7 @@ describe('loadDingTalkConfig', () => {
       }),
     );
 
-    const config = loadDingTalkConfig(project);
+    const config = loadDingTalkConfig(project, true);
     expect(config).toBeUndefined();
   });
 });

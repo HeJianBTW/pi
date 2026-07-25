@@ -12,7 +12,11 @@ Pi extension for [WeCom (企业微信)](https://work.weixin.qq.com/) workspace �
 
 ## Configuration
 
-Add to your `.pi/settings.json`:
+Add to `~/.pi/agent/settings.json` or a trusted project's `.pi/settings.json`:
+
+Project settings are loaded only after project trust is accepted. For
+environment-backed credentials, use user or agent settings because project
+settings do not expand `${ENV_VAR}`.
 
 ```json
 {

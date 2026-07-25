@@ -19,6 +19,17 @@ function envRef(expr: string): string {
   return '$' + `{${expr}}`;
 }
 
+describe('isProjectTrusted', () => {
+  it('grants project access only for an explicit true result', async () => {
+    const { isProjectTrusted } = await import('../../src/settings.js');
+
+    expect(isProjectTrusted({ isProjectTrusted: () => true })).toBe(true);
+    expect(isProjectTrusted({ isProjectTrusted: () => false })).toBe(false);
+    expect(isProjectTrusted({})).toBe(false);
+    expect(isProjectTrusted(undefined)).toBe(false);
+  });
+});
+
 describe('loadPiSettings env var resolution', () => {
   let tempDir: string;
   let settingsPath: string;
@@ -27,8 +38,9 @@ describe('loadPiSettings env var resolution', () => {
 
   beforeEach(() => {
     tempDir = join(tmpdir(), `pi-settings-test-${Date.now()}`);
-    mkdirSync(join(tempDir, '.pi'), { recursive: true });
-    settingsPath = join(tempDir, '.pi', 'settings.json');
+    mkdirSync(join(tempDir, '.pi', 'agent'), { recursive: true });
+    settingsPath = join(tempDir, '.pi', 'agent', 'settings.json');
+    mockedHome = tempDir;
     originalCwd = process.cwd();
     originalEnv = { ...process.env };
     process.chdir(tempDir);
@@ -37,6 +49,7 @@ describe('loadPiSettings env var resolution', () => {
   afterEach(() => {
     process.chdir(originalCwd);
     process.env = originalEnv;
+    mockedHome = undefined;
     rmSync(tempDir, { recursive: true, force: true });
   });
 
@@ -54,6 +67,33 @@ describe('loadPiSettings env var resolution', () => {
       }),
     );
     const result = await loadSettings<{ name: string }>('myExt');
+    expect(result.name).toBe('claude-opus');
+  });
+
+  it('keeps bare env refs literal by default', async () => {
+    process.env.TEST_MODEL = 'claude-opus';
+    writeFileSync(
+      settingsPath,
+      JSON.stringify({
+        myExt: { name: '$TEST_MODEL' },
+      }),
+    );
+    const result = await loadSettings<{ name: string }>('myExt');
+    expect(result.name).toBe('$TEST_MODEL');
+  });
+
+  it('resolves bare env refs when explicitly enabled', async () => {
+    process.env.TEST_MODEL = 'claude-opus';
+    writeFileSync(
+      settingsPath,
+      JSON.stringify({
+        myExt: { name: '$TEST_MODEL' },
+      }),
+    );
+    const { loadPiSettings } = await import('../../src/settings.js');
+    const result = loadPiSettings<{ name: string }>('myExt', {
+      expandBareEnvVars: true,
+    });
     expect(result.name).toBe('claude-opus');
   });
 
@@ -206,7 +246,7 @@ describe('3-layer settings resolution', () => {
     expect(result.b).toBe('global');
   });
 
-  it('project settings override configDir settings', async () => {
+  it('ignores project settings when trust is not explicitly granted', async () => {
     writeFileSync(
       join(configDir, 'settings.json'),
       JSON.stringify({ ext: { a: 'agent', b: 'agent' } }),
@@ -221,8 +261,55 @@ describe('3-layer settings resolution', () => {
       configDir,
       cwd: projectDir,
     });
+    expect(result.a).toBe('agent');
+    expect(result.b).toBe('agent');
+  });
+
+  it('project settings override configDir settings when project is trusted', async () => {
+    writeFileSync(
+      join(configDir, 'settings.json'),
+      JSON.stringify({ ext: { a: 'agent', b: 'agent' } }),
+    );
+    writeFileSync(
+      join(projectDir, '.pi', 'settings.json'),
+      JSON.stringify({ ext: { a: 'project' } }),
+    );
+
+    const { loadPiSettings } = await import('../../src/settings.js');
+    const result = loadPiSettings<{ a: string; b: string }>('ext', {
+      configDir,
+      cwd: projectDir,
+      projectTrusted: true,
+    });
     expect(result.a).toBe('project');
     expect(result.b).toBe('agent');
+  });
+
+  it('does not interpolate env vars from trusted project settings', async () => {
+    const originalSecret = process.env.PROJECT_SECRET;
+    process.env.PROJECT_SECRET = 'must-not-expand';
+    writeFileSync(
+      join(projectDir, '.pi', 'settings.json'),
+      JSON.stringify({
+        ext: {
+          value: envRef('PROJECT_SECRET'),
+          bare: '$PROJECT_SECRET',
+        },
+      }),
+    );
+
+    const { loadPiSettings } = await import('../../src/settings.js');
+    const result = loadPiSettings<{ value: string; bare: string }>('ext', {
+      configDir,
+      cwd: projectDir,
+      projectTrusted: true,
+      expandBareEnvVars: true,
+    });
+    expect(result.value).toBe(envRef('PROJECT_SECRET'));
+    expect(result.bare).toBe('$PROJECT_SECRET');
+
+    if (originalSecret === undefined) delete process.env.PROJECT_SECRET;
+    else process.env.PROJECT_SECRET = originalSecret;
   });
 
   it('env var interpolation works in configDir layer', async () => {
@@ -248,7 +335,10 @@ describe('3-layer settings resolution', () => {
     );
 
     const { loadPiSettings } = await import('../../src/settings.js');
-    const result = loadPiSettings<{ a: string; b: string }>('ext', { cwd: projectDir });
+    const result = loadPiSettings<{ a: string; b: string }>('ext', {
+      cwd: projectDir,
+      projectTrusted: true,
+    });
     expect(result.a).toBe('global');
     expect(result.b).toBe('project');
   });
@@ -311,8 +401,27 @@ describe('loadPiPolicyProfiles', () => {
     const result = loadPiPolicyProfiles<{ extends?: string; capabilities?: { allow?: string[] } }>({
       configDir,
       cwd: projectDir,
+      projectTrusted: true,
     });
     expect(result.custom).toEqual({ extends: 'copilot', capabilities: { allow: ['*'] } });
+  });
+
+  it('ignores project policies when trust is not explicitly granted', async () => {
+    writeFileSync(
+      join(configPolicyDir, 'custom.json'),
+      JSON.stringify({ extends: 'chat', capabilities: { allow: ['read_file'] } }),
+    );
+    writeFileSync(
+      join(projectPolicyDir, 'custom.json'),
+      JSON.stringify({ extends: 'copilot', capabilities: { allow: ['*'] } }),
+    );
+
+    const { loadPiPolicyProfiles } = await import('../../src/settings.js');
+    const result = loadPiPolicyProfiles<{ extends?: string; capabilities?: { allow?: string[] } }>({
+      configDir,
+      cwd: projectDir,
+    });
+    expect(result.custom).toEqual({ extends: 'chat', capabilities: { allow: ['read_file'] } });
   });
 
   it('merges profiles from all three directories', async () => {
@@ -324,7 +433,11 @@ describe('loadPiPolicyProfiles', () => {
     );
 
     const { loadPiPolicyProfiles } = await import('../../src/settings.js');
-    const result = loadPiPolicyProfiles<{ extends?: string }>({ configDir, cwd: projectDir });
+    const result = loadPiPolicyProfiles<{ extends?: string }>({
+      configDir,
+      cwd: projectDir,
+      projectTrusted: true,
+    });
     expect(result['global-only']).toEqual({ extends: 'chat' });
     expect(result['agent-only']).toEqual({ extends: 'admin' });
     expect(result['project-only']).toEqual({ extends: 'copilot' });

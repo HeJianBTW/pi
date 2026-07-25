@@ -7,8 +7,11 @@ export type DingTalkConfig = {
 
 const SETTINGS_KEY = 'pi-dingtalk';
 
-export function loadDingTalkConfig(cwd: string): DingTalkConfig | undefined {
-  const config = loadPiSettings<DingTalkConfig>(SETTINGS_KEY, { cwd });
+export function loadDingTalkConfig(
+  cwd: string,
+  projectTrusted = false,
+): DingTalkConfig | undefined {
+  const config = loadPiSettings<DingTalkConfig>(SETTINGS_KEY, { cwd, projectTrusted });
   if (!config || (!config.clientId && !config.clientSecret)) return undefined;
   return config;
 }

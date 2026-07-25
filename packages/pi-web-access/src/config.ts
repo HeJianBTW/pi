@@ -48,32 +48,16 @@ const DEFAULT_MODEL: Partial<Record<BuiltInProviderId, string>> = {
 
 // ─── Settings loading ────────────────────────────────────────────────────────
 
-export function loadWebToolSettings(cwd: string): WebToolSettings {
+export function loadWebToolSettings(cwd: string, projectTrusted = false): WebToolSettings {
   try {
     return loadPiSettings<WebToolSettings>(SETTINGS_KEY, {
       cwd,
+      projectTrusted,
+      expandBareEnvVars: true,
     });
   } catch {
     return {};
   }
-}
-
-// ─── Env-var resolution ──────────────────────────────────────────────────────
-
-function resolveString(value: string | undefined): string | undefined {
-  if (!value) return undefined;
-  const replaced = value.replace(
-    /\$\{([^}]+)\}|\$([A-Z_][A-Z0-9_]*)/g,
-    (_match, braced: string | undefined, bare: string | undefined) => {
-      const name = (braced ?? bare) as string | undefined;
-      if (!name) return '';
-      const [varName, ...rest] = name.split(':-');
-      const fallback = rest.join(':-');
-      const env = process.env[varName!];
-      return env !== undefined && env !== '' ? env : fallback;
-    },
-  );
-  return replaced.length > 0 ? replaced : undefined;
 }
 
 // ─── Provider resolution ─────────────────────────────────────────────────────
@@ -96,8 +80,8 @@ export function resolveProvider(
   }
 
   const config = settings.providers?.[requested] ?? {};
-  const apiKey = resolveString(config.apiKey) ?? process.env[ENV_VARS[requested]];
-  const baseUrl = resolveString(config.baseUrl) ?? DEFAULT_BASE_URL[requested];
+  const apiKey = config.apiKey || process.env[ENV_VARS[requested]];
+  const baseUrl = config.baseUrl || DEFAULT_BASE_URL[requested];
 
   const provider: ResolvedProvider = {
     id: requested,

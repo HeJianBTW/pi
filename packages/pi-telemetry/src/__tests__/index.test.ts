@@ -69,6 +69,7 @@ describe('telemetry', () => {
       baseUrl: 'https://cloud.langfuse.com',
       flushAt: 20,
       flushIntervalMs: 5000,
+      includePayloads: false,
     });
 
     expect(
@@ -269,6 +270,17 @@ describe('telemetry', () => {
     });
 
     expect(client.flushed).toBe(1);
+  });
+
+  it('excludes OTEL payloads by default', () => {
+    expect(
+      resolveOtelConfig({
+        OTEL_EXPORTER_OTLP_ENDPOINT: 'https://otel.example.com',
+      }),
+    ).toMatchObject({
+      enabled: true,
+      includePayloads: false,
+    });
   });
 
   it('exports completed spans through a generic OTEL traces endpoint', async () => {

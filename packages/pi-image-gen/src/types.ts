@@ -17,7 +17,7 @@ export type CustomImageProvider = {
   /** Override the API base URL. Optional; defaults to the api's default. */
   baseUrl?: string;
   /**
-   * API key. Supports `$ENV_VAR` and `${ENV_VAR}` syntax — resolved at load time.
+   * API key. User and agent settings support `$ENV_VAR` and `${ENV_VAR}` syntax.
    * Required unless the api does not need one.
    */
   apiKey?: string;

@@ -131,7 +131,7 @@ describe('resolveProvider', () => {
   });
 
   // biome-ignore lint/suspicious/noTemplateCurlyInString: intentional env var syntax test
-  it('resolves ${ENV_VAR} in apiKey', () => {
+  it('does not interpolate ${ENV_VAR} in resolver input', () => {
     process.env.MY_TAVILY_KEY = 'resolved-key';
     const settings: WebToolSettings = {
       // biome-ignore lint/suspicious/noTemplateCurlyInString: intentional
@@ -140,12 +140,12 @@ describe('resolveProvider', () => {
     const result = resolveProvider('tavily', settings);
     expect(result).not.toHaveProperty('error');
     if (!('error' in result)) {
-      expect(result.apiKey).toBe('resolved-key');
+      expect(result.apiKey).toBe(`$${'{MY_TAVILY_KEY}'}`);
     }
   });
 
   // biome-ignore lint/suspicious/noTemplateCurlyInString: intentional env var syntax test
-  it('resolves ${ENV_VAR} in baseUrl', () => {
+  it('does not interpolate ${ENV_VAR} in resolver base URLs', () => {
     process.env.MY_BASE = 'https://custom.example.com';
     const settings: WebToolSettings = {
       // biome-ignore lint/suspicious/noTemplateCurlyInString: intentional
@@ -154,7 +154,21 @@ describe('resolveProvider', () => {
     const result = resolveProvider('kimi', settings);
     expect(result).not.toHaveProperty('error');
     if (!('error' in result)) {
-      expect(result.baseUrl).toBe('https://custom.example.com');
+      expect(result.baseUrl).toBe(`$${'{MY_BASE}'}`);
+    }
+  });
+
+  it('falls back after empty provider overrides', () => {
+    process.env.TAVILY_API_KEY = 'provider-key';
+    const result = resolveProvider('tavily', {
+      providers: {
+        tavily: { apiKey: '', baseUrl: '' },
+      },
+    });
+    expect(result).not.toHaveProperty('error');
+    if (!('error' in result)) {
+      expect(result.apiKey).toBe('provider-key');
+      expect(result.baseUrl).toBe('https://api.tavily.com');
     }
   });
 

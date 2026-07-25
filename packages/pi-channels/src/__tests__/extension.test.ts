@@ -60,9 +60,10 @@ const mockPi = {
 const { default: piChannelsExtension } = await import('../index.js');
 const configModule = await import('../config.js');
 
-function mockCtx() {
+function mockCtx(projectTrusted = true) {
   return {
     cwd: '/workspace',
+    isProjectTrusted: () => projectTrusted,
     ui: {
       notify: vi.fn(),
       setStatus: vi.fn(),
@@ -271,6 +272,20 @@ describe('piChannelsExtension', () => {
       }),
     );
     expect(configModule.loadChannelConfig).not.toHaveBeenCalled();
+  });
+
+  test('channel:reload preserves project trust when session autostart is disabled', async () => {
+    vi.stubEnv('PI_CHANNELS_DISABLE_SESSION_AUTOSTART', '1');
+    piChannelsExtension(mockPi as never);
+
+    await handlers.get('session_start')?.({}, mockCtx(true));
+    const callback = vi.fn();
+    events.get('channel:reload')?.({ callback });
+
+    await vi.waitFor(() => {
+      expect(callback).toHaveBeenCalledWith({ ok: true });
+    });
+    expect(configModule.loadChannelConfig).toHaveBeenCalledWith('/workspace', true);
   });
 
   test('channel:capture resolves with matching incoming token', async () => {

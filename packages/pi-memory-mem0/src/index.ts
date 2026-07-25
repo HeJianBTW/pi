@@ -6,10 +6,11 @@
  * - **open-source**: Runs locally with SQLite vector store (needs OPENAI_API_KEY or Ollama)
  *
  * Configuration via settings.json key "pi-memory-mem0".
- * Supports ${ENV_VAR:-fallback} in all string values.
+ * Supports ${ENV_VAR:-fallback} in user and agent settings.
+ * Trusted project settings are loaded without environment interpolation.
  */
 
-import { loadPiSettings } from '@amaster.ai/pi-shared/settings';
+import { isProjectTrusted, loadPiSettings } from '@amaster.ai/pi-shared/settings';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Prefetch } from './prefetch.js';
 import { createMem0Provider, type Mem0Provider } from './provider.js';
@@ -19,10 +20,11 @@ import type { Mem0ExtensionConfig } from './types.js';
 const SETTINGS_KEY = 'pi-memory-mem0';
 const STATUS_KEY = 'mem0';
 
-function loadConfig(cwd: string): Mem0ExtensionConfig {
+function loadConfig(cwd: string, projectTrusted = false): Mem0ExtensionConfig {
   try {
     return loadPiSettings<Mem0ExtensionConfig>(SETTINGS_KEY, {
       cwd,
+      projectTrusted,
     });
   } catch {
     return {};
@@ -44,7 +46,7 @@ export default function mem0Extension(pi: ExtensionAPI): void {
   let pendingWrite: Promise<void> = Promise.resolve();
 
   pi.on('session_start', async (_event, ctx) => {
-    const config = loadConfig(ctx.cwd);
+    const config = loadConfig(ctx.cwd, isProjectTrusted(ctx));
     const mode = config.mode ?? 'platform';
 
     // Platform mode requires apiKey; OSS mode requires an LLM provider (env key)
@@ -162,7 +164,7 @@ export default function mem0Extension(pi: ExtensionAPI): void {
         return;
       }
 
-      const config = loadConfig(ctx.cwd);
+      const config = loadConfig(ctx.cwd, isProjectTrusted(ctx));
       const userId = resolveUserId(config.userId);
       const parts = args.trim().split(/\s+/).filter(Boolean);
       const subcommand = parts[0]?.toLowerCase() ?? 'status';

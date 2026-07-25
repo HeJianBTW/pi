@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { loadPiSettings, resolveHome } from '@amaster.ai/pi-shared/settings';
+import { isProjectTrusted, loadPiSettings, resolveHome } from '@amaster.ai/pi-shared/settings';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import {
   createExtractionRunner,
@@ -67,10 +67,11 @@ function resolveConfig(raw?: PiMemoryExtensionConfig): ResolvedConfig {
   return resolved;
 }
 
-function loadSettings(cwd: string): PiMemoryExtensionConfig | undefined {
+function loadSettings(cwd: string, projectTrusted = false): PiMemoryExtensionConfig | undefined {
   try {
     const config = loadPiSettings<Partial<PiMemoryExtensionConfig>>(SETTINGS_KEY, {
       cwd,
+      projectTrusted,
     });
     return Object.keys(config).length > 0 ? (config as PiMemoryExtensionConfig) : undefined;
   } catch {
@@ -86,7 +87,7 @@ export default function memoryExtension(
   let extractionRunner: ExtractionRunner | undefined;
 
   pi.on('session_start', async (_event, ctx) => {
-    const fileConfig = loadSettings(ctx.cwd);
+    const fileConfig = loadSettings(ctx.cwd, isProjectTrusted(ctx));
     const config = resolveConfig({ ...fileConfig, ...injectedConfig });
 
     try {

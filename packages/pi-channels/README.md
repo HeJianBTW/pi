@@ -14,6 +14,15 @@ namespace and Slack/Telegram dependencies. This package keeps the same channel
 contract while targeting this repo's `@earendil-works/*` API surface and native
 Feishu/DingTalk/WeCom adapters.
 
+## Configuration
+
+Put the `pi-channels` section in `~/.pi/agent/settings.json`, the configured
+agent directory's `settings.json`, or a project/ancestor `.pi/settings.json`.
+Project-local files are read only after project trust is accepted. `${ENV_VAR}`
+interpolation is supported only in user and agent settings, not in project-local
+files. The direct credential environment variables documented in the examples
+still override loaded adapter values.
+
 ## Channels
 
 - `feishu` - Native Feishu/Lark app messaging backed by the official
@@ -29,6 +38,10 @@ Feishu/DingTalk/WeCom adapters.
 - `webhook` - Generic outgoing HTTP requests.
 
 ## Example
+
+The `${...}` placeholders below assume this section is stored in user or agent
+settings. For trusted project settings, use the corresponding direct credential
+environment variables or literal non-secret values.
 
 ```json
 {

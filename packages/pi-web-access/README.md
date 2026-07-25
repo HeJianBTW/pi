@@ -63,6 +63,10 @@ Search X (Twitter) for posts and social media content. Only registered when xai 
 
 Settings key: `pi-web-access`
 
+Project `.pi/settings.json` values are loaded only after project trust is
+accepted and are not environment-interpolated. User and agent settings retain
+environment interpolation.
+
 ```json
 {
   "pi-web-access": {
@@ -115,7 +119,7 @@ Per-provider configuration. Each provider supports:
 
 | Field | Description |
 |-------|-------------|
-| `apiKey` | API key. Supports `${ENV_VAR}` syntax. |
+| `apiKey` | API key. User and agent settings support `$ENV_VAR` and `${ENV_VAR}`; only the braced form supports `:-fallback`. Project settings keep placeholders literal. |
 | `baseUrl` | Override the default API endpoint. |
 | `model` | Override the default model. |
 | `headers` | Extra headers merged into every request. |

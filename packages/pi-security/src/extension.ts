@@ -5,7 +5,7 @@ import type {
   ToolCallRequest,
   ToolSource,
 } from '@amaster.ai/pi-shared';
-import { loadPiSettings } from '@amaster.ai/pi-shared/settings';
+import { isProjectTrusted, loadPiSettings } from '@amaster.ai/pi-shared/settings';
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -66,7 +66,7 @@ export default function piSecurityExtension(pi: ExtensionAPI): void {
   };
 
   pi.on('session_start', async (_event, ctx) => {
-    state.config = resolvePiSecurityConfig(loadSettings(ctx.cwd));
+    state.config = resolvePiSecurityConfig(loadSettings(ctx.cwd, isProjectTrusted(ctx)));
     state.auditLog = [];
     state.grants = [];
     ctx.ui.setStatus(
@@ -186,7 +186,11 @@ function createGate(ctx: ExtensionContext, state: PiSecurityExtensionState): Sec
   return new SecurityGate({
     profile: state.config.profile,
     ...(state.config.security ? { config: state.config.security } : {}),
-    filePolicies: loadFilePolicies(ctx.cwd, getAgentDir()),
+    filePolicies: loadFilePolicies({
+      cwd: ctx.cwd,
+      configDir: getAgentDir(),
+      projectTrusted: isProjectTrusted(ctx),
+    }),
     approvalHandler: async ({ toolCall, decision }) =>
       resolveApproval(ctx, state, toolCall, decision),
     auditSink: (event) => {
@@ -235,10 +239,11 @@ async function resolveApproval(
   return denyByUser(decision);
 }
 
-function loadSettings(cwd: string): PiSecurityExtensionConfig | undefined {
+function loadSettings(cwd: string, projectTrusted = false): PiSecurityExtensionConfig | undefined {
   try {
     const config = loadPiSettings<Partial<PiSecurityExtensionConfig>>(SETTINGS_KEY, {
       cwd,
+      projectTrusted,
     });
     return Object.keys(config).length > 0 ? (config as PiSecurityExtensionConfig) : undefined;
   } catch {

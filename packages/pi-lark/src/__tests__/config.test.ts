@@ -40,7 +40,7 @@ describe('loadLarkConfig', () => {
       }),
     );
 
-    const config = loadLarkConfig(project);
+    const config = loadLarkConfig(project, true);
 
     expect(config).toEqual({
       appId: 'cli_test123',
@@ -59,7 +59,7 @@ describe('loadLarkConfig', () => {
       }),
     );
 
-    const config = loadLarkConfig(project);
+    const config = loadLarkConfig(project, true);
     expect(config).toBeUndefined();
   });
 });

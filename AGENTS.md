@@ -165,7 +165,8 @@ This monorepo uses two npm scopes: `@earendil-works/*` for the Pi runtime core p
 import {
   resolveHome,        // ~/.pi/agent (data dir: memories, skills, logs)
   resolveConfigDir,   // config dir (settings.json, policy, auth, models)
-  loadPiSettings,     // load extension config (merges global < agentDir < project)
+  isProjectTrusted,   // fail-closed adapter for ctx.isProjectTrusted()
+  loadPiSettings,     // load extension config (merges global < agentDir < trusted project)
   loadPiPolicyProfiles,
 } from '@amaster.ai/pi-shared/settings';
 ```
@@ -182,9 +183,14 @@ import {
 `loadPiSettings<T>(key, options?)` merges config from three layers (low → high priority):
 1. Global: `~/.pi/agent/settings.json`
 2. Agent dir: `$PI_CODING_AGENT_DIR/settings.json`
-3. Project: `<cwd>/.pi/settings.json`
+3. Trusted project: `<cwd>/.pi/settings.json`
 
-Supports `${ENV_VAR:-fallback}` interpolation in values.
+Extensions must pass `projectTrusted: isProjectTrusted(ctx)` when loading from an
+extension context. If trust is absent or declined, project settings and policies
+are ignored. `${ENV_VAR:-fallback}` interpolation applies only to global and
+agent-dir settings, never to project settings. Loaders may opt into bare
+`$ENV_VAR` compatibility with `expandBareEnvVars`; bare references do not support
+the `:-fallback` form.
 
 ---
 
@@ -299,7 +305,7 @@ Rules:
 ## Security / Secrets
 
 - Never log tokens, API keys, cookies, or full user message content
-- Never embed secrets in source — use env vars and `loadPiSettings` with `${ENV_VAR}` interpolation
+- Never embed secrets in source — use env vars and user/agent-dir `loadPiSettings` values with `${ENV_VAR}` interpolation (or `$ENV_VAR` only where the loader documents support)
 - Error messages exposed to users must not leak internal secrets or full stack traces
 - When reading config that may contain credentials, validate early and fail clearly rather than passing bad values downstream
 - Enforcement: no automated pre-commit hook currently — relies on code review. Reviewers should check for: raw error objects passed to `console.error`, response bodies logged verbatim, secrets in string interpolation, and stack traces reaching tool results

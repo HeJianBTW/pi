@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { loadPiSettings } from '@amaster.ai/pi-shared/settings';
+import { isProjectTrusted, loadPiSettings } from '@amaster.ai/pi-shared/settings';
 import { defineTool, type ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
 import { initAmasterProvider } from './adapters/amaster.js';
@@ -76,7 +76,7 @@ export default function piTeamworkExtension(pi: ExtensionAPI): void {
     provider = undefined;
     readyPromise = undefined;
 
-    const config = loadConfig(ctx.cwd);
+    const config = loadConfig(ctx.cwd, isProjectTrusted(ctx));
     if (config.enabled === false) {
       suspendTeamworkTools();
       ctx.ui.setStatus(STATUS_KEY, 'teamwork: disabled');
@@ -615,10 +615,11 @@ function optionalTrimmed<K extends string>(key: K, value: unknown): Partial<Reco
   return trimmed ? ({ [key]: trimmed } as Record<K, string>) : {};
 }
 
-function loadConfig(cwd: string): TeamworkConfig {
+function loadConfig(cwd: string, projectTrusted = false): TeamworkConfig {
   try {
     const config = loadPiSettings<Partial<TeamworkConfig>>(SETTINGS_KEY, {
       cwd,
+      projectTrusted,
     });
     return Object.keys(config).length > 0 ? (config as TeamworkConfig) : {};
   } catch {

@@ -27,12 +27,18 @@ export function loadPolicyDir(dirPath: string): Record<string, SecurityProfileCo
   return result;
 }
 
+export type LoadFilePoliciesOptions = {
+  cwd: string;
+  configDir?: string;
+  projectTrusted?: boolean;
+};
+
 export function loadFilePolicies(
-  cwd: string,
-  configDir?: string,
+  options: LoadFilePoliciesOptions,
 ): Record<string, SecurityProfileConfig> {
   return loadPiPolicyProfiles<SecurityProfileConfig>({
-    cwd,
-    ...(configDir !== undefined ? { configDir } : {}),
+    cwd: options.cwd,
+    projectTrusted: options.projectTrusted === true,
+    ...(options.configDir !== undefined ? { configDir: options.configDir } : {}),
   });
 }

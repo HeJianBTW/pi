@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isProjectTrusted } from '@amaster.ai/pi-shared/settings';
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { ensureDws, getDwsSkillsDir, initDws } from './cli.js';
 import { loadDingTalkConfig } from './config.js';
@@ -19,7 +20,7 @@ export default function piDingTalkExtension(pi: ExtensionAPI): void {
   let skillsDir: string | undefined;
 
   pi.on('session_start', async (_event: unknown, ctx: ExtensionContext) => {
-    const config = loadDingTalkConfig(ctx.cwd);
+    const config = loadDingTalkConfig(ctx.cwd, isProjectTrusted(ctx));
     if (!config?.clientId || !config?.clientSecret) return;
 
     if (existsSync(BUNDLED_SKILLS_DIR)) {

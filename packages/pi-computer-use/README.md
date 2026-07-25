@@ -37,6 +37,9 @@ installation is required.
 
 Configure `.pi/settings.json` or `~/.pi/agent/settings.json`:
 
+Project settings are loaded only after project trust is accepted. `${ENV_VAR}`
+interpolation is supported in user and agent settings, but not in project settings.
+
 ```json
 {
   "pi-computer-use": {

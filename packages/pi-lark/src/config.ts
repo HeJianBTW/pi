@@ -8,8 +8,8 @@ export type LarkConfig = {
 
 const SETTINGS_KEY = 'pi-lark';
 
-export function loadLarkConfig(cwd: string): LarkConfig | undefined {
-  const config = loadPiSettings<LarkConfig>(SETTINGS_KEY, { cwd });
+export function loadLarkConfig(cwd: string, projectTrusted = false): LarkConfig | undefined {
+  const config = loadPiSettings<LarkConfig>(SETTINGS_KEY, { cwd, projectTrusted });
   if (!config || (!config.appId && !config.appSecret)) return undefined;
   return config;
 }

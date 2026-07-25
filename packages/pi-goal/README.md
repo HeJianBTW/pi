@@ -90,6 +90,8 @@ pi --goal '' -p '<prompt>'              Derive the goal from the prompt (at befo
 ## Configuration
 
 Settings key: `pi-goal` (in `~/.pi/agent/settings.json`, agent dir, or project `.pi/settings.json`).
+Project settings are loaded only after project trust is accepted. Environment-variable
+interpolation is available in user and agent settings, but not in project settings.
 
 ```json
 {

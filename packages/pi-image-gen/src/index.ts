@@ -1,3 +1,4 @@
+import { isProjectTrusted } from '@amaster.ai/pi-shared/settings';
 import { StringEnum } from '@earendil-works/pi-ai';
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
@@ -102,7 +103,7 @@ export default function piImageGenExtension(pi: ExtensionAPI): void {
 
   pi.on('session_start', async (_event: unknown, ctx: ExtensionContext) => {
     sessionCwd = ctx.cwd;
-    settings = loadImageGenSettings(ctx.cwd);
+    settings = loadImageGenSettings(ctx.cwd, isProjectTrusted(ctx));
     registerImageTool();
   });
 
@@ -112,7 +113,7 @@ export default function piImageGenExtension(pi: ExtensionAPI): void {
       const raw = (args ?? '').trim();
       const tokens = raw.split(/\s+/).filter(Boolean);
       if (tokens[0] === 'reload') {
-        settings = loadImageGenSettings(ctx.cwd);
+        settings = loadImageGenSettings(ctx.cwd, isProjectTrusted(ctx));
         // Re-register so the schema (e.g. whether `quality` is exposed) tracks
         // the newly loaded model, not just the settings read at execute time.
         registerImageTool();

@@ -1,3 +1,4 @@
+import { isProjectTrusted } from '@amaster.ai/pi-shared/settings';
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
 import { ChatBridge } from './bridge.js';
@@ -34,6 +35,7 @@ type AdapterConnectionState = {
 type ChannelRuntimeContext = {
   cwd: string;
   ui: Pick<ExtensionContext['ui'], 'notify' | 'setStatus'>;
+  isProjectTrusted?: () => boolean;
 };
 
 type ChannelSendEvent = ChannelMessage & {
@@ -56,6 +58,7 @@ export default function piChannelsExtension(pi: ExtensionAPI): void {
   const registry = new ChannelRegistry();
   let bridge: ChatBridge | null = null;
   let sessionCwd = process.cwd();
+  let sessionCtx: ChannelRuntimeContext | null = null;
   let currentCtx: ChannelRuntimeContext | null = null;
   let configFingerprint = '';
   let configReloading = false;
@@ -94,7 +97,7 @@ export default function piChannelsExtension(pi: ExtensionAPI): void {
   registry.setOnIncoming(async (message) => {
     pi.events.emit('channel:receive', message);
     const captured = notifyCaptureWaiters(message);
-    autoFillEmptyRouteRecipient(sessionCwd, message, log);
+    autoFillEmptyRouteRecipient(sessionCwd, isProjectTrusted(currentCtx), message, log);
     if (captured) return;
     const turn = bridge?.isActive() ? channelIncomingTurn(message) : undefined;
     if (turn) pi.events.emit('channel:turn', turn);
@@ -110,7 +113,7 @@ export default function piChannelsExtension(pi: ExtensionAPI): void {
     configReloading = true;
     try {
       sessionCwd = ctx.cwd;
-      const config = loadChannelConfig(ctx.cwd);
+      const config = loadChannelConfig(ctx.cwd, isProjectTrusted(ctx));
       const nextFingerprint = JSON.stringify(config);
       if (!force && nextFingerprint === configFingerprint && !lastError)
         return registry.getErrors();
@@ -164,8 +167,9 @@ export default function piChannelsExtension(pi: ExtensionAPI): void {
   }
 
   pi.on('session_start', async (_event: unknown, ctx: ExtensionContext) => {
+    sessionCtx = ctx;
+    sessionCwd = ctx.cwd;
     if (sessionAutostartDisabled()) {
-      sessionCwd = ctx.cwd;
       log('session_start_skipped', {
         reason: 'PI_CHANNELS_DISABLE_SESSION_AUTOSTART',
         cwd: ctx.cwd,
@@ -173,11 +177,11 @@ export default function piChannelsExtension(pi: ExtensionAPI): void {
       return;
     }
     currentCtx = ctx;
-    sessionCwd = ctx.cwd;
     await applyChannelConfig(ctx, 'session_start', false);
   });
 
   pi.on('session_shutdown', async (_event: unknown, ctx: ExtensionContext) => {
+    sessionCtx = null;
     currentCtx = null;
     connectedAt = undefined;
     lastError = undefined;
@@ -487,7 +491,7 @@ export default function piChannelsExtension(pi: ExtensionAPI): void {
       cwd?: unknown;
       callback?: (result: { ok: boolean; error?: string }) => void;
     };
-    const ctx = currentCtx ?? channelContextFromReload(data);
+    const ctx = currentCtx ?? sessionCtx ?? channelContextFromReload(data);
     if (!ctx) {
       data.callback?.({ ok: false, error: 'pi-channels session is not active.' });
       return;
@@ -702,6 +706,7 @@ function channelIncomingTurn(message: IncomingMessage):
 
 function autoFillEmptyRouteRecipient(
   cwd: string,
+  projectTrusted: boolean,
   message: { adapter: string; sender: string; metadata?: Record<string, unknown> },
   log: (event: string, data?: Record<string, unknown>, level?: string) => void,
 ): void {
@@ -711,30 +716,34 @@ function autoFillEmptyRouteRecipient(
 
   try {
     let filledRoute: string | undefined;
-    const updated = updateLocalChannelConfig(cwd, (config) => {
-      const routes = config.routes ?? {};
-      const fillableRoutes = Object.entries(routes).filter(
-        ([, route]) => route.adapter === message.adapter && !trimToUndefined(route.recipient),
-      );
-      const captureRoutes = fillableRoutes.filter(([, route]) => route.capture === true);
-      const routesToFill = captureRoutes.length > 0 ? captureRoutes : fillableRoutes;
-      if (routesToFill.length !== 1) return config;
+    const updated = updateLocalChannelConfig(
+      cwd,
+      (config) => {
+        const routes = config.routes ?? {};
+        const fillableRoutes = Object.entries(routes).filter(
+          ([, route]) => route.adapter === message.adapter && !trimToUndefined(route.recipient),
+        );
+        const captureRoutes = fillableRoutes.filter(([, route]) => route.capture === true);
+        const routesToFill = captureRoutes.length > 0 ? captureRoutes : fillableRoutes;
+        if (routesToFill.length !== 1) return config;
 
-      const [routeName, route] = routesToFill[0]!;
-      filledRoute = routeName;
-      return {
-        ...config,
-        routes: {
-          ...routes,
-          [routeName]: {
-            ...route,
-            recipient,
-            capture: false,
-            ...(displayName && !trimToUndefined(route.name) ? { name: displayName } : {}),
+        const [routeName, route] = routesToFill[0]!;
+        filledRoute = routeName;
+        return {
+          ...config,
+          routes: {
+            ...routes,
+            [routeName]: {
+              ...route,
+              recipient,
+              capture: false,
+              ...(displayName && !trimToUndefined(route.name) ? { name: displayName } : {}),
+            },
           },
-        },
-      } satisfies ChannelConfig;
-    });
+        } satisfies ChannelConfig;
+      },
+      projectTrusted,
+    );
 
     if (updated && filledRoute) {
       log('route_recipient_auto_filled', {

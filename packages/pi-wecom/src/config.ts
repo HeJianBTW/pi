@@ -7,8 +7,8 @@ export type WeComConfig = {
 
 const SETTINGS_KEY = 'pi-wecom';
 
-export function loadWeComConfig(cwd: string): WeComConfig | undefined {
-  const config = loadPiSettings<WeComConfig>(SETTINGS_KEY, { cwd });
+export function loadWeComConfig(cwd: string, projectTrusted = false): WeComConfig | undefined {
+  const config = loadPiSettings<WeComConfig>(SETTINGS_KEY, { cwd, projectTrusted });
   if (!config || (!config.botId && !config.botSecret)) return undefined;
   return config;
 }

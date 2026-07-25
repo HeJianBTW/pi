@@ -619,7 +619,7 @@ export function resolveLangfuseExporterConfig(
     flushIntervalMs: lf?.flushIntervalMs ?? DEFAULT_FLUSH_INTERVAL_MS,
     serviceName: telemetryConfig.serviceName ?? 'pi-server',
     ...(telemetryConfig.serviceVersion ? { serviceVersion: telemetryConfig.serviceVersion } : {}),
-    includePayloads: telemetryConfig.includePayloads ?? true,
+    includePayloads: telemetryConfig.includePayloads ?? false,
   };
 }
 
@@ -644,7 +644,7 @@ export function resolveLangfuseConfig(env: TelemetryEnvironment): LangfuseExport
     ...(serviceVersion ? { serviceVersion } : {}),
     includePayloads: parseBooleanWithDefault(
       env.TELEMETRY_INCLUDE_PAYLOADS ?? env.LANGFUSE_INCLUDE_PAYLOADS,
-      true,
+      false,
     ),
   };
 }

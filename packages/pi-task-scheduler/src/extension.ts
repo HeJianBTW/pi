@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { loadPiSettings, resolveHome } from '@amaster.ai/pi-shared/settings';
+import { isProjectTrusted, loadPiSettings, resolveHome } from '@amaster.ai/pi-shared/settings';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import {
   PersistentTaskScheduler,
@@ -39,10 +39,11 @@ function resolveConfig(raw?: PiSchedulerExtensionConfig): ResolvedConfig {
   return resolved;
 }
 
-function loadSettings(cwd: string): PiSchedulerExtensionConfig | undefined {
+function loadSettings(cwd: string, projectTrusted = false): PiSchedulerExtensionConfig | undefined {
   try {
     const config = loadPiSettings<Partial<PiSchedulerExtensionConfig>>(SETTINGS_KEY, {
       cwd,
+      projectTrusted,
     });
     return Object.keys(config).length > 0 ? (config as PiSchedulerExtensionConfig) : undefined;
   } catch {
@@ -58,7 +59,7 @@ export default function taskSchedulerExtension(
   let ownsScheduler = false;
 
   pi.on('session_start', async (_event, ctx) => {
-    const fileConfig = loadSettings(ctx.cwd);
+    const fileConfig = loadSettings(ctx.cwd, isProjectTrusted(ctx));
     const config = resolveConfig({ ...fileConfig, ...injectedConfig });
 
     try {

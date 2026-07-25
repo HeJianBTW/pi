@@ -1,3 +1,4 @@
+import { isProjectTrusted } from '@amaster.ai/pi-shared/settings';
 import {
   buildSessionContext,
   type ExtensionAPI,
@@ -126,7 +127,7 @@ export default function goalExtension(
   let pendingDerive = false;
 
   pi.on('session_start', async (_event, ctx) => {
-    const fileConfig = loadSettings(ctx.cwd);
+    const fileConfig = loadSettings(ctx.cwd, isProjectTrusted(ctx));
     config = resolveConfig({ ...fileConfig, ...injectedConfig });
     registry = ctx.modelRegistry as unknown as GoalModelRegistry;
     ctx.ui.setStatus(STATUS_KEY, config.model ? 'goal: none' : 'goal: disabled (no model)');

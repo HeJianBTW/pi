@@ -22,6 +22,7 @@ vi.mock('../otel.js', () => ({
   })),
 }));
 
+import { loadConfigFromFile } from '../config.js';
 import { NoopRuntimeEventExporter } from '../index.js';
 import { createLangfuseExporter } from '../langfuse.js';
 import { createOtelExporter } from '../otel.js';
@@ -58,6 +59,7 @@ describe('telemetryExtension', () => {
     handlers.clear();
     mockPi.on.mockClear();
     mockPi.registerTool.mockClear();
+    (loadConfigFromFile as ReturnType<typeof vi.fn>).mockClear();
     (createLangfuseExporter as ReturnType<typeof vi.fn>).mockClear();
     (createOtelExporter as ReturnType<typeof vi.fn>).mockClear();
 
@@ -90,10 +92,40 @@ describe('telemetryExtension', () => {
 
   test('initializes exporter from config on session_start', async () => {
     telemetryExtension(mockPi as any);
-    await fireEvent('session_start', { type: 'session_start', reason: 'startup' });
+    await fireEvent(
+      'session_start',
+      { type: 'session_start', reason: 'startup' },
+      { cwd: '/project', isProjectTrusted: () => false },
+    );
 
+    expect(loadConfigFromFile).toHaveBeenCalledWith({
+      cwd: '/project',
+      projectTrusted: false,
+    });
     expect(createLangfuseExporter).toHaveBeenCalledTimes(1);
     expect(createOtelExporter).toHaveBeenCalledTimes(1);
+  });
+
+  test('does not retain an exporter after telemetry is disabled in a later session', async () => {
+    const previousExporter = {
+      publish: vi.fn(() => Promise.resolve()),
+      flush: vi.fn(() => Promise.resolve()),
+      close: vi.fn(() => Promise.resolve()),
+    };
+    (createLangfuseExporter as ReturnType<typeof vi.fn>)
+      .mockReturnValueOnce(previousExporter)
+      .mockReturnValueOnce(new NoopRuntimeEventExporter());
+
+    telemetryExtension(mockPi as any);
+    await fireEvent('session_start', { type: 'session_start', reason: 'startup' });
+    await fireEvent('session_start', { type: 'session_start', reason: 'new' });
+    await fireEvent('turn_start', {
+      type: 'turn_start',
+      turnIndex: 0,
+      timestamp: 1700000000000,
+    });
+
+    expect(previousExporter.publish).not.toHaveBeenCalled();
   });
 
   test('publishes chat_turn_started on turn_start', async () => {

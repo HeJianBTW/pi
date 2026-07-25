@@ -29,7 +29,7 @@ export interface TelemetryConfig {
 
 const DEFAULTS: TelemetryConfig = {
   serviceName: 'pi-server',
-  includePayloads: true,
+  includePayloads: false,
 };
 
 export function resolveConfig(config?: TelemetryConfig): TelemetryConfig {

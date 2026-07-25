@@ -17,36 +17,16 @@ import type {
 
 const SETTINGS_KEY = 'pi-image-gen';
 
-export function loadImageGenSettings(cwd: string): ImageGenSettings {
+export function loadImageGenSettings(cwd: string, projectTrusted = false): ImageGenSettings {
   try {
     return loadPiSettings<ImageGenSettings>(SETTINGS_KEY, {
       cwd,
+      projectTrusted,
+      expandBareEnvVars: true,
     });
   } catch {
     return {};
   }
-}
-
-/**
- * Returns the resolved value for an apiKey/header field. Supports `$VAR`
- * and `${VAR}` env substitution; returns undefined for missing env vars
- * so downstream code can fall through to defaults.
- *
- * pi-shared/settings already runs `${VAR}` substitution on settings.json
- * payloads, but we re-run resolution here so that settings constructed in
- * code (or read from other sources) get the same treatment.
- */
-function resolveString(value: string | undefined): string | undefined {
-  if (!value) return undefined;
-  const replaced = value.replace(/\$\{([^}]+)\}|\$([A-Z_][A-Z0-9_]*)/g, (_match, braced, bare) => {
-    const name = (braced ?? bare) as string | undefined;
-    if (!name) return '';
-    const [varName, ...rest] = name.split(':-');
-    const fallback = rest.join(':-');
-    const env = process.env[varName!];
-    return env !== undefined && env !== '' ? env : fallback;
-  });
-  return replaced.length > 0 ? replaced : undefined;
 }
 
 function buildBuiltInProvider(
@@ -54,11 +34,11 @@ function buildBuiltInProvider(
   settings: ImageGenSettings,
 ): ResolvedProvider | null {
   const override = settings.providers?.[id] ?? {};
-  const apiKey = resolveString(override.apiKey) ?? process.env[ENV_VARS[id]];
+  const apiKey = override.apiKey || process.env[ENV_VARS[id]];
   const provider: ResolvedProvider = {
     id,
     api: DEFAULT_API_STYLE[id],
-    baseUrl: resolveString(override.baseUrl) ?? DEFAULT_BASE_URL[id],
+    baseUrl: override.baseUrl || DEFAULT_BASE_URL[id],
     name: PROVIDER_DISPLAY_NAME[id],
     builtIn: true,
   };
@@ -70,7 +50,7 @@ function buildBuiltInProvider(
 function buildCustomProvider(name: string, raw: CustomImageProvider): ResolvedProvider | null {
   const api = raw.api;
   if (!api) return null;
-  const baseUrl = resolveString(raw.baseUrl) ?? DEFAULT_BASE_URL[api as BuiltInProviderId];
+  const baseUrl = raw.baseUrl || DEFAULT_BASE_URL[api as BuiltInProviderId];
   if (!baseUrl) return null;
   const provider: ResolvedProvider = {
     id: name,
@@ -79,7 +59,7 @@ function buildCustomProvider(name: string, raw: CustomImageProvider): ResolvedPr
     name: raw.name ?? name,
     builtIn: false,
   };
-  const apiKey = resolveString(raw.apiKey);
+  const apiKey = raw.apiKey;
   if (apiKey) provider.apiKey = apiKey;
   if (raw.headers) provider.headers = raw.headers;
   return provider;

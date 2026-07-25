@@ -20,6 +20,11 @@ When the extension starts and `multica` is not found on `$PATH`, it will automat
 
 Set `autoInstall: false` to disable this behavior.
 
+Configuration may live in user/agent settings or in a trusted project's
+`.pi/settings.json`. Project settings are ignored when trust is declined and do
+not expand `${ENV_VAR}`; keep environment-backed credentials in user or agent
+settings.
+
 ### Mode 1 — Self-hosted server
 
 For teams running their own Multica server. The extension runs `multica setup self-host` with the provided URLs, then authenticates with the token:
