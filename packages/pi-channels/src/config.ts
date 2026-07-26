@@ -9,27 +9,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
-function resolveEnvVars(value: unknown): unknown {
-  if (typeof value === 'string') {
-    return value.replace(/\$\{([^}]+)\}/g, (_match, expr: string) => {
-      const [name, ...rest] = expr.split(':-');
-      const fallback = rest.join(':-');
-      const envVal = process.env[name!];
-      return envVal !== undefined && envVal !== '' ? envVal : fallback;
-    });
-  }
-  if (Array.isArray(value)) return value.map(resolveEnvVars);
-  if (isRecord(value)) {
-    const result: Record<string, unknown> = {};
-    for (const [key, nested] of Object.entries(value)) result[key] = resolveEnvVars(nested);
-    return result;
-  }
-  return value;
-}
-
 function section(settings: Record<string, unknown>): ChannelConfig {
   const value = settings[SETTINGS_KEY];
-  return isRecord(value) ? (resolveEnvVars(value) as ChannelConfig) : {};
+  return isRecord(value) ? (value as ChannelConfig) : {};
 }
 
 function readSettingsFile(path: string): Record<string, unknown> {
@@ -45,7 +27,9 @@ function writeSettingsFile(path: string, settings: Record<string, unknown>): voi
   writeFileSync(path, `${JSON.stringify(settings, null, 2)}\n`);
 }
 
-function discoverLocalSettingsFiles(cwd: string): string[] {
+function discoverLocalSettingsFiles(cwd: string, projectTrusted: boolean): string[] {
+  if (!projectTrusted) return [];
+
   const found: string[] = [];
   const seen = new Set<string>();
 
@@ -55,9 +39,6 @@ function discoverLocalSettingsFiles(cwd: string): string[] {
     seen.add(resolved);
     found.push(resolved);
   };
-
-  const agentDir = resolveConfigDir();
-  add(join(agentDir, 'settings.json'));
 
   let current = resolve(cwd);
   const upwards: string[] = [];
@@ -89,11 +70,10 @@ function mergeChannelConfig(base: ChannelConfig, override: ChannelConfig): Chann
   };
 }
 
-export function loadChannelConfig(cwd: string): ChannelConfig {
-  const agentDir = resolveConfigDir();
-  const config = loadPiSettings<ChannelConfig>(SETTINGS_KEY, { cwd });
+export function loadChannelConfig(cwd: string, projectTrusted = false): ChannelConfig {
+  const config = loadPiSettings<ChannelConfig>(SETTINGS_KEY, { cwd, projectTrusted });
 
-  const settingsFiles = discoverLocalSettingsFiles(cwd);
+  const settingsFiles = discoverLocalSettingsFiles(cwd, projectTrusted);
   const local = settingsFiles.reduce(
     (merged, path) => mergeChannelConfig(merged, section(readSettingsFile(path))),
     {} as ChannelConfig,
@@ -105,7 +85,6 @@ export function loadChannelConfig(cwd: string): ChannelConfig {
   if (process.env.DEBUG?.includes('pi-channels')) {
     console.error('[pi-channels] config', {
       cwd,
-      agentDir,
       settingsFiles,
       adapters: Object.keys(merged.adapters ?? {}),
       routes: Object.keys(merged.routes ?? {}),
@@ -118,8 +97,12 @@ export function loadChannelConfig(cwd: string): ChannelConfig {
 export function updateLocalChannelConfig(
   cwd: string,
   update: (config: ChannelConfig) => ChannelConfig,
+  projectTrusted = false,
 ): boolean {
-  const settingsFile = discoverLocalSettingsFiles(cwd).at(-1);
+  const agentSettingsFile = join(resolveConfigDir(), 'settings.json');
+  const settingsFile =
+    discoverLocalSettingsFiles(cwd, projectTrusted).at(-1) ??
+    (existsSync(agentSettingsFile) ? agentSettingsFile : undefined);
   if (!settingsFile) return false;
 
   const settings = readSettingsFile(settingsFile);

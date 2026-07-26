@@ -42,7 +42,10 @@ function setup() {
 // pi-web-access / pi-memory. Fire it so `tools` is populated. With no settings
 // on disk the resolved api is null, which yields the fully-featured schema.
 async function startSession(handlers: Map<string, Handler>, cwd = '/tmp') {
-  await handlers.get('session_start')?.({}, { cwd, hasUI: true, ui: { notify: vi.fn() } });
+  await handlers.get('session_start')?.(
+    {},
+    { cwd, isProjectTrusted: () => true, hasUI: true, ui: { notify: vi.fn() } },
+  );
 }
 
 function caps(
@@ -273,7 +276,10 @@ describe('image_generate execute error surfaces are sanitized', () => {
 
   const runExecute = async (cwd: string, params: Record<string, unknown> = { prompt: 'a cat' }) => {
     const { tools, handlers } = setup();
-    await handlers.get('session_start')?.({}, { cwd, hasUI: true, ui: { notify: vi.fn() } });
+    await handlers.get('session_start')?.(
+      {},
+      { cwd, isProjectTrusted: () => true, hasUI: true, ui: { notify: vi.fn() } },
+    );
     const tool = tools.get('image_generate');
     if (!tool) throw new Error('tool not registered');
     return (await tool.execute('call-1', params, undefined, undefined, {

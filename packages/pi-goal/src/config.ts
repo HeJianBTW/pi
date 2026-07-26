@@ -58,9 +58,9 @@ export function resolveConfig(raw?: PiGoalConfig): ResolvedGoalConfig {
   return resolved;
 }
 
-export function loadSettings(cwd: string): PiGoalConfig | undefined {
+export function loadSettings(cwd: string, projectTrusted = false): PiGoalConfig | undefined {
   try {
-    const config = loadPiSettings<Partial<PiGoalConfig>>(SETTINGS_KEY, { cwd });
+    const config = loadPiSettings<Partial<PiGoalConfig>>(SETTINGS_KEY, { cwd, projectTrusted });
     return Object.keys(config).length > 0 ? (config as PiGoalConfig) : undefined;
   } catch {
     return undefined;

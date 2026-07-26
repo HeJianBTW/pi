@@ -31,7 +31,7 @@ describe('resolveModel', () => {
     expect(result.provider.baseUrl).toContain('dashscope.aliyuncs.com');
   });
 
-  it('respects per-provider apiKey override with env-var interpolation', () => {
+  it('does not interpolate environment variables in resolver input', () => {
     process.env.MY_KEY = 'override-key';
     const settings: ImageGenSettings = {
       providers: {
@@ -43,8 +43,19 @@ describe('resolveModel', () => {
     };
     const result = resolveModel('gpt-image-2', settings);
     if ('error' in result) throw new Error(result.error);
-    expect(result.provider.apiKey).toBe('override-key');
+    expect(result.provider.apiKey).toBe(`$${'{MY_KEY}'}`);
     expect(result.provider.baseUrl).toBe('https://proxy.example.com/v1');
+  });
+
+  it('falls back to the provider environment key after an empty override', () => {
+    process.env.OPENAI_API_KEY = 'provider-key';
+    const result = resolveModel('gpt-image-2', {
+      providers: {
+        openai: { apiKey: '' },
+      },
+    });
+    if ('error' in result) throw new Error(result.error);
+    expect(result.provider.apiKey).toBe('provider-key');
   });
 
   it('matches a custom provider by alias', () => {
@@ -54,7 +65,7 @@ describe('resolveModel', () => {
         'my-sd': {
           api: 'openai',
           baseUrl: 'https://api.my-sd.test/v1',
-          apiKey: '$MY_SD_KEY',
+          apiKey: 'sd-key',
           models: [{ id: 'sd-3-large', alias: 'sd3' }, 'sd-3-medium'],
         },
       },
@@ -69,6 +80,21 @@ describe('resolveModel', () => {
     const b = resolveModel('sd-3-medium', settings);
     if ('error' in b) throw new Error(b.error);
     expect(b.remoteId).toBe('sd-3-medium');
+  });
+
+  it('falls back to the API default after an empty custom provider base URL', () => {
+    const result = resolveModel('custom-image', {
+      customProviders: {
+        gateway: {
+          api: 'openai',
+          baseUrl: '',
+          apiKey: 'gateway-key',
+          models: ['custom-image'],
+        },
+      },
+    });
+    if ('error' in result) throw new Error(result.error);
+    expect(result.provider.baseUrl).toBe('https://api.openai.com/v1');
   });
 
   it('supports <provider>/<remote-id> fallback for openrouter', () => {

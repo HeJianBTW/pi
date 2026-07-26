@@ -144,7 +144,7 @@ describe('loadFilePolicies', () => {
       JSON.stringify({ extends: 'full-access', sandbox: 'full-access' }),
     );
 
-    const result = loadFilePolicies(cwd);
+    const result = loadFilePolicies({ cwd, projectTrusted: true });
     expect(result.custom).toEqual({ extends: 'full-access', sandbox: 'full-access' });
   });
 
@@ -155,7 +155,7 @@ describe('loadFilePolicies', () => {
       JSON.stringify({ extends: 'full-access' }),
     );
 
-    const result = loadFilePolicies(cwd);
+    const result = loadFilePolicies({ cwd, projectTrusted: true });
     expect(result['user-only']).toEqual({ extends: 'read-only' });
     expect(result['project-only']).toEqual({ extends: 'full-access' });
   });
@@ -164,7 +164,7 @@ describe('loadFilePolicies', () => {
     rmSync(projectDir, { recursive: true });
     writeFileSync(join(userDir, 'only-user.json'), JSON.stringify({ extends: 'read-only' }));
 
-    const result = loadFilePolicies(cwd);
+    const result = loadFilePolicies({ cwd, projectTrusted: true });
     expect(result['only-user']).toEqual({ extends: 'read-only' });
   });
 
@@ -175,7 +175,7 @@ describe('loadFilePolicies', () => {
       JSON.stringify({ extends: 'full-access' }),
     );
 
-    const result = loadFilePolicies(cwd);
+    const result = loadFilePolicies({ cwd, projectTrusted: true });
     expect(result['only-project']).toEqual({ extends: 'full-access' });
   });
 
@@ -183,7 +183,7 @@ describe('loadFilePolicies', () => {
     rmSync(userDir, { recursive: true });
     rmSync(projectDir, { recursive: true });
 
-    const result = loadFilePolicies(cwd);
+    const result = loadFilePolicies({ cwd, projectTrusted: true });
     expect(result).toEqual({});
   });
 });
@@ -225,7 +225,7 @@ describe('loadFilePolicies 3-layer with agentDir', () => {
       }),
     );
 
-    const result = loadFilePolicies(cwd, agentDir);
+    const result = loadFilePolicies({ cwd, configDir: agentDir, projectTrusted: true });
     expect(result['agent-profile']).toEqual({
       sandbox: 'workspace-write',
       approval: 'on-request',
@@ -239,7 +239,7 @@ describe('loadFilePolicies 3-layer with agentDir', () => {
       JSON.stringify({ extends: 'full-access' }),
     );
 
-    const result = loadFilePolicies(cwd, agentDir);
+    const result = loadFilePolicies({ cwd, configDir: agentDir, projectTrusted: true });
     expect(result.custom).toEqual({ extends: 'full-access' });
   });
 
@@ -252,7 +252,7 @@ describe('loadFilePolicies 3-layer with agentDir', () => {
       }),
     );
 
-    const filePolicies = loadFilePolicies(cwd, agentDir);
+    const filePolicies = loadFilePolicies({ cwd, configDir: agentDir, projectTrusted: true });
     const policy = resolveCapabilityPolicy('agent-profile', {}, filePolicies);
     expect(isCapabilityExposed('read', policy)).toBe(true);
     expect(isCapabilityExposed('write', policy)).toBe(true);

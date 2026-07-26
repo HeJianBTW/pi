@@ -1,3 +1,4 @@
+import { isProjectTrusted } from '@amaster.ai/pi-shared/settings';
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
 import { type ComputerUseConfig, loadConfigFromFile, resolveConfig } from './config.js';
@@ -397,7 +398,12 @@ export default function computerUseExtension(pi: ExtensionAPI): void {
   }
 
   pi.on('session_start', async (_event, ctx) => {
-    config = resolveConfig(loadConfigFromFile({ cwd: ctx.cwd }));
+    config = resolveConfig(
+      loadConfigFromFile({
+        cwd: ctx.cwd,
+        projectTrusted: isProjectTrusted(ctx),
+      }),
+    );
     client = undefined;
     sessionAbortController = new AbortController();
     macPermissionPromise = undefined;

@@ -5,6 +5,7 @@ import type {
   RuntimeLlmUsage,
   RuntimeModelConfig,
 } from '@amaster.ai/pi-shared';
+import { isProjectTrusted } from '@amaster.ai/pi-shared/settings';
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { loadConfigFromFile, resolveConfig } from './config.js';
 import {
@@ -215,16 +216,20 @@ export default function telemetryExtension(pi: ExtensionAPI): void {
   let lastModelConfig: RuntimeModelConfig = { provider: 'unknown', model: 'unknown' };
 
   pi.on('session_start', async (_event, ctx) => {
-    const config = resolveConfig(loadConfigFromFile({ cwd: ctx.cwd }));
+    const config = resolveConfig(
+      loadConfigFromFile({
+        cwd: ctx.cwd,
+        projectTrusted: isProjectTrusted(ctx),
+      }),
+    );
     const langfuse = createLangfuseExporter(config);
     const otel = createOtelExporter(config);
 
     const active = [langfuse, otel].filter((e) => !(e instanceof NoopRuntimeEventExporter));
-    if (active.length > 1) {
-      exporter = new CompositeRuntimeEventExporter(active);
-    } else if (active.length === 1) {
-      exporter = active[0]!;
-    }
+    exporter =
+      active.length > 1
+        ? new CompositeRuntimeEventExporter(active)
+        : (active[0] ?? new NoopRuntimeEventExporter());
   });
 
   pi.on('input', async (event) => {

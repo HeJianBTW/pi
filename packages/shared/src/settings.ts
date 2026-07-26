@@ -6,37 +6,59 @@ export type PiSettingsOptions = {
   cwd?: string;
   /** Override for the config directory. If not set, resolveConfigDir() is used. */
   configDir?: string;
+  /** Whether project-local settings and policies may be read. Defaults to false. */
+  projectTrusted?: boolean;
+  /** Also expand bare $ENV_VAR references in global and agent-dir settings. */
+  expandBareEnvVars?: boolean;
 };
 
-function resolveEnvVars(value: unknown): unknown {
+export function isProjectTrusted(
+  context: { isProjectTrusted?: () => boolean } | null | undefined,
+): boolean {
+  return context?.isProjectTrusted?.() === true;
+}
+
+function resolveEnvVars(value: unknown, expandBareEnvVars: boolean): unknown {
   if (typeof value === 'string') {
-    return value.replace(/\$\{([^}]+)\}/g, (_match, expr: string) => {
-      const [name, ...rest] = expr.split(':-');
-      const fallback = rest.join(':-');
-      const envVal = process.env[name!];
-      if (envVal !== undefined && envVal !== '') return envVal;
-      return fallback;
-    });
+    const pattern = expandBareEnvVars ? /\$\{([^}]+)\}|\$([A-Z_][A-Z0-9_]*)/g : /\$\{([^}]+)\}/g;
+    return value.replace(
+      pattern,
+      (_match, braced: string | undefined, bare: string | undefined) => {
+        const expr = braced ?? bare ?? '';
+        const [name, ...rest] = expr.split(':-');
+        const fallback = rest.join(':-');
+        const envVal = process.env[name!];
+        if (envVal !== undefined && envVal !== '') return envVal;
+        return fallback;
+      },
+    );
   }
   if (Array.isArray(value)) {
-    return value.map(resolveEnvVars);
+    return value.map((item) => resolveEnvVars(item, expandBareEnvVars));
   }
   if (value && typeof value === 'object') {
     const result: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(value)) {
-      result[k] = resolveEnvVars(v);
+      result[k] = resolveEnvVars(v, expandBareEnvVars);
     }
     return result;
   }
   return value;
 }
 
-function readSettingsSection<T>(filePath: string, key: string): Partial<T> {
+function readSettingsSection<T>(
+  filePath: string,
+  key: string,
+  options: { expandEnv: boolean; expandBareEnvVars: boolean },
+): Partial<T> {
   try {
     const raw = readFileSync(filePath, 'utf-8');
     const parsed = JSON.parse(raw);
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      return resolveEnvVars(parsed[key] ?? {}) as Partial<T>;
+      const section = parsed[key] ?? {};
+      return (
+        options.expandEnv ? resolveEnvVars(section, options.expandBareEnvVars) : section
+      ) as Partial<T>;
     }
     return {};
   } catch {
@@ -72,22 +94,36 @@ export function resolveAgentDir(override?: string): string {
 
 /**
  * Load extension config from pi-agent settings files.
- * Reads from global (~/.pi/agent/settings.json), agentDir (env/param), and project (<cwd>/.pi/settings.json).
+ * Reads from global (~/.pi/agent/settings.json), agentDir (env/param), and trusted project
+ * (<cwd>/.pi/settings.json) settings.
  * Priority from low to high: global < agentDir < project.
+ * Environment variables are expanded only in the global and agentDir layers.
  */
 export function loadPiSettings<T>(key: string, options?: PiSettingsOptions): T {
   const globalDir = resolve(join(homedir(), '.pi', 'agent'));
   const configDir = resolveConfigDir(options?.configDir);
   const cwd = options?.cwd ?? process.cwd();
 
-  const globalSettings = readSettingsSection<T>(join(globalDir, 'settings.json'), key);
+  const globalSettings = readSettingsSection<T>(join(globalDir, 'settings.json'), key, {
+    expandEnv: true,
+    expandBareEnvVars: options?.expandBareEnvVars === true,
+  });
 
   const configSettings =
     configDir === globalDir
       ? ({} as Partial<T>)
-      : readSettingsSection<T>(join(configDir, 'settings.json'), key);
+      : readSettingsSection<T>(join(configDir, 'settings.json'), key, {
+          expandEnv: true,
+          expandBareEnvVars: options?.expandBareEnvVars === true,
+        });
 
-  const projectSettings = readSettingsSection<T>(join(cwd, '.pi', 'settings.json'), key);
+  const projectSettings =
+    options?.projectTrusted === true
+      ? readSettingsSection<T>(join(cwd, '.pi', 'settings.json'), key, {
+          expandEnv: false,
+          expandBareEnvVars: false,
+        })
+      : ({} as Partial<T>);
 
   return { ...globalSettings, ...configSettings, ...projectSettings } as T;
 }
@@ -126,7 +162,10 @@ export function loadPiPolicyProfiles<T>(options?: PiSettingsOptions): Record<str
     configPolicyDir === globalDir
       ? ({} as Record<string, T>)
       : loadJsonProfileDir<T>(configPolicyDir);
-  const projectPolicies = loadJsonProfileDir<T>(projectDir);
+  const projectPolicies =
+    options?.projectTrusted === true
+      ? loadJsonProfileDir<T>(projectDir)
+      : ({} as Record<string, T>);
 
   return { ...globalPolicies, ...configPolicies, ...projectPolicies };
 }

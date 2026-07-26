@@ -33,6 +33,11 @@ User ←→ Agent ←→ Mem0 OSS Memory
 
 ## Quick Start
 
+Store configuration in user/agent settings or in a trusted project's
+`.pi/settings.json`. Project settings are ignored when trust is declined and do
+not expand `${ENV_VAR}`; the environment-backed examples below therefore belong
+in user or agent settings.
+
 ### Platform Mode
 
 ```json

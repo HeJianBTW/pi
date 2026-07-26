@@ -1,8 +1,8 @@
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import { loadChannelConfig } from '../config.js';
+import { loadChannelConfig, updateLocalChannelConfig } from '../config.js';
 
 describe('loadChannelConfig', () => {
   let base: string;
@@ -44,7 +44,7 @@ describe('loadChannelConfig', () => {
       }),
     );
 
-    const config = loadChannelConfig(workspace);
+    const config = loadChannelConfig(workspace, true);
 
     expect(Object.keys(config.adapters ?? {})).toEqual(['feishu']);
     expect(config.routes?.ops).toEqual({ adapter: 'feishu', recipient: 'oc_test' });
@@ -56,6 +56,7 @@ describe('loadChannelConfig', () => {
     const workspace = join(base, 'workspace');
     mkdirSync(piHome, { recursive: true });
     mkdirSync(workspace, { recursive: true });
+    delete process.env.PI_CODING_AGENT_DIR;
     process.env.PI_AGENT_HOME = piHome;
     writeFileSync(
       join(piHome, 'settings.json'),
@@ -77,6 +78,44 @@ describe('loadChannelConfig', () => {
     expect(config.routes?.ops).toEqual({
       adapter: 'webhook',
       recipient: 'https://example.test/hook',
+    });
+  });
+
+  test('updates agent settings when no project settings file exists', () => {
+    const workspace = join(base, 'workspace');
+    const agentSettings = join(base, 'agent', 'settings.json');
+    mkdirSync(workspace, { recursive: true });
+    mkdirSync(join(base, 'agent'), { recursive: true });
+    writeFileSync(
+      agentSettings,
+      JSON.stringify({
+        'pi-channels': {
+          routes: {
+            ops: { adapter: 'webhook', recipient: '' },
+          },
+        },
+      }),
+    );
+
+    const updated = updateLocalChannelConfig(
+      workspace,
+      (config) => ({
+        ...config,
+        routes: {
+          ...config.routes,
+          ops: { adapter: 'webhook', recipient: 'https://example.test/hook' },
+        },
+      }),
+      true,
+    );
+
+    expect(updated).toBe(true);
+    expect(JSON.parse(readFileSync(agentSettings, 'utf-8'))).toMatchObject({
+      'pi-channels': {
+        routes: {
+          ops: { adapter: 'webhook', recipient: 'https://example.test/hook' },
+        },
+      },
     });
   });
 });

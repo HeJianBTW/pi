@@ -765,6 +765,7 @@ describe('piTeamworkExtension AMaster provider', () => {
       },
       {
         cwd: settingsDir,
+        isProjectTrusted: () => true,
         ui: {
           setStatus: (_key: string, value: string) => statusUpdates.push(value),
           notify: vi.fn(),
@@ -833,6 +834,7 @@ describe('piTeamworkExtension AMaster provider', () => {
       {},
       {
         cwd: settingsDir,
+        isProjectTrusted: () => true,
         ui: {
           setStatus: vi.fn(),
           notify: vi.fn(),
@@ -896,6 +898,7 @@ describe('piTeamworkExtension AMaster provider', () => {
       { amasterEmployee: { apiKey: 'session-key' } },
       {
         cwd: settingsDir,
+        isProjectTrusted: () => true,
         ui: {
           setStatus: vi.fn(),
           notify: vi.fn(),
@@ -969,6 +972,7 @@ describe('piTeamworkExtension AMaster provider', () => {
         },
         {
           cwd: settingsDir,
+          isProjectTrusted: () => true,
           ui: {
             setStatus: vi.fn(),
             notify: vi.fn(),
@@ -1078,6 +1082,7 @@ describe('piTeamworkExtension AMaster provider', () => {
         { amasterEmployee: { apiKey: 'session-key' } },
         {
           cwd: settingsDir,
+          isProjectTrusted: () => true,
           ui: {
             setStatus: vi.fn(),
             notify: vi.fn(),
@@ -1169,6 +1174,7 @@ describe('piTeamworkExtension AMaster provider', () => {
       {},
       {
         cwd: settingsDir,
+        isProjectTrusted: () => true,
         ui: {
           setStatus: vi.fn(),
           notify: vi.fn(),
@@ -1222,6 +1228,7 @@ describe('piTeamworkExtension AMaster provider', () => {
       { amasterEmployee: { apiKey: 'session-key' } },
       {
         cwd: settingsDir,
+        isProjectTrusted: () => true,
         ui: {
           setStatus: vi.fn(),
           notify: vi.fn(),
@@ -1278,6 +1285,7 @@ describe('piTeamworkExtension AMaster provider', () => {
       {},
       {
         cwd: settingsDir,
+        isProjectTrusted: () => true,
         ui: {
           setStatus: vi.fn(),
           notify: vi.fn(),
@@ -1344,6 +1352,7 @@ describe('piTeamworkExtension Multica provider', () => {
       {},
       {
         cwd: settingsDir,
+        isProjectTrusted: () => true,
         ui: {
           setStatus: vi.fn(),
           notify: vi.fn(),
@@ -1394,6 +1403,7 @@ describe('piTeamworkExtension Multica provider', () => {
     )?.[1];
     const ctx = {
       cwd: settingsDir,
+      isProjectTrusted: () => true,
       ui: {
         setStatus: vi.fn(),
         notify: vi.fn(),
@@ -1449,6 +1459,7 @@ describe('piTeamworkExtension Multica provider', () => {
     )?.[1];
     const ctx = {
       cwd: settingsDir,
+      isProjectTrusted: () => true,
       ui: {
         setStatus: vi.fn(),
         notify: vi.fn(),
@@ -1508,6 +1519,7 @@ describe('piTeamworkExtension Multica provider', () => {
     )?.[1];
     const ctx = {
       cwd: settingsDir,
+      isProjectTrusted: () => true,
       ui: {
         setStatus: vi.fn(),
         notify: vi.fn(),
@@ -1563,6 +1575,7 @@ describe('piTeamworkExtension Multica provider', () => {
     )?.[1];
     const ctx = {
       cwd: settingsDir,
+      isProjectTrusted: () => true,
       ui: {
         setStatus: vi.fn(),
         notify: vi.fn(),
@@ -1640,6 +1653,7 @@ describe('piTeamworkExtension Multica provider', () => {
     const statusUpdates: string[] = [];
     const ctx = {
       cwd: settingsDir,
+      isProjectTrusted: () => true,
       ui: {
         setStatus: (_key: string, value: string) => statusUpdates.push(value),
         notify: vi.fn(),
@@ -1709,6 +1723,7 @@ describe('piTeamworkExtension Multica provider', () => {
       {},
       {
         cwd: settingsDir,
+        isProjectTrusted: () => true,
         ui: {
           setStatus: vi.fn(),
           notify: vi.fn(),
@@ -1752,6 +1767,7 @@ describe('piTeamworkExtension Multica provider', () => {
       {},
       {
         cwd: settingsDir,
+        isProjectTrusted: () => true,
         ui: {
           setStatus: vi.fn(),
           notify: vi.fn(),

@@ -83,6 +83,10 @@ pi.extensions → session_start → creates file-based scheduler → registers t
 
 Configuration via settings key `pi-scheduler`:
 
+Project `.pi/settings.json` values are loaded only after project trust is
+accepted and are not environment-interpolated. User and agent settings retain
+environment interpolation.
+
 ```json
 {
   "pi-scheduler": {

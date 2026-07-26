@@ -57,7 +57,7 @@ describe('examples/reviewer.json', () => {
   });
 
   it('exposes workspace-write capabilities (read + write + bash)', () => {
-    const filePolicies = loadFilePolicies(cwd);
+    const filePolicies = loadFilePolicies({ cwd, projectTrusted: true });
     const policy = resolveCapabilityPolicy('reviewer', {}, filePolicies);
     expect(isCapabilityExposed('read', policy)).toBe(true);
     expect(isCapabilityExposed('write', policy)).toBe(true);
@@ -66,7 +66,7 @@ describe('examples/reviewer.json', () => {
   });
 
   it('asks for approval on bash via custom rule', () => {
-    const filePolicies = loadFilePolicies(cwd);
+    const filePolicies = loadFilePolicies({ cwd, projectTrusted: true });
     const engine = createSecurityPolicyEngineForProfile('reviewer', {}, filePolicies);
     const result = engine.evaluate({
       request,
@@ -77,7 +77,7 @@ describe('examples/reviewer.json', () => {
   });
 
   it('denies bash commands that touch external network', () => {
-    const filePolicies = loadFilePolicies(cwd);
+    const filePolicies = loadFilePolicies({ cwd, projectTrusted: true });
     const engine = createSecurityPolicyEngineForProfile('reviewer', {}, filePolicies);
     const result = engine.evaluate({
       request,
@@ -88,7 +88,7 @@ describe('examples/reviewer.json', () => {
   });
 
   it('asks for approval on workspace writes (inherited from on-request approval)', () => {
-    const filePolicies = loadFilePolicies(cwd);
+    const filePolicies = loadFilePolicies({ cwd, projectTrusted: true });
     const engine = createSecurityPolicyEngineForProfile('reviewer', {}, filePolicies);
     const result = engine.evaluate({
       request,
@@ -100,7 +100,7 @@ describe('examples/reviewer.json', () => {
   });
 
   it('still denies secret reads (baseline rule inherited from read-only)', () => {
-    const filePolicies = loadFilePolicies(cwd);
+    const filePolicies = loadFilePolicies({ cwd, projectTrusted: true });
     const engine = createSecurityPolicyEngineForProfile('reviewer', {}, filePolicies);
     const result = engine.evaluate({
       request,

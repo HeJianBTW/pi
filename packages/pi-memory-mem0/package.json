@@ -54,7 +54,7 @@
     "mem0ai": "3.0.7"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": ">=0.74.0",
+    "@earendil-works/pi-coding-agent": ">=0.79.1",
     "typebox": "*"
   },
   "peerDependenciesMeta": {

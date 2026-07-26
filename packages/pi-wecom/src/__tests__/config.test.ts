@@ -39,7 +39,7 @@ describe('loadWeComConfig', () => {
       }),
     );
 
-    const config = loadWeComConfig(project);
+    const config = loadWeComConfig(project, true);
 
     expect(config).toEqual({
       botId: 'bot_abc123',
@@ -57,7 +57,7 @@ describe('loadWeComConfig', () => {
       }),
     );
 
-    const config = loadWeComConfig(project);
+    const config = loadWeComConfig(project, true);
     expect(config).toBeUndefined();
   });
 });

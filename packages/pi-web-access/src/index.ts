@@ -1,3 +1,4 @@
+import { isProjectTrusted } from '@amaster.ai/pi-shared/settings';
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
 import { loadWebToolSettings, resolveProvider, resolveSearchProvider } from './config.js';
@@ -35,7 +36,7 @@ export default function piWebToolExtension(pi: ExtensionAPI): void {
   let settings: WebToolSettings = {};
 
   pi.on('session_start', async (_event: unknown, ctx: ExtensionContext) => {
-    settings = loadWebToolSettings(ctx.cwd);
+    settings = loadWebToolSettings(ctx.cwd, isProjectTrusted(ctx));
 
     const searchResolved = resolveSearchProvider(settings);
     const hasSearch = !('error' in searchResolved) && Boolean(searchResolved.apiKey);

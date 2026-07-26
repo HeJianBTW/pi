@@ -38,7 +38,12 @@ Traces are scoped to user input boundaries (not individual turns). A single user
 
 ## Configuration
 
-Configuration is read from `.pi/settings.json` under the `"pi-telemetry"` key. Project-level settings (`.pi/settings.json` in the working directory) take priority over user-level settings (`~/.pi/agent/settings.json`).
+Configuration is read from the `"pi-telemetry"` section of, in increasing
+priority, `~/.pi/agent/settings.json`, the configured agent directory's
+`settings.json` (for example `$PI_CODING_AGENT_DIR/settings.json`), and a trusted
+project's `.pi/settings.json`. Project settings are ignored when project trust
+is declined. Environment variables are expanded only in user and agent-directory
+settings.
 
 ```json
 {
@@ -71,7 +76,7 @@ Configuration is read from `.pi/settings.json` under the `"pi-telemetry"` key. P
 |-------|------|---------|-------------|
 | `serviceName` | `string` | `"pi-server"` | Service name for traces |
 | `serviceVersion` | `string` | — | Service version for traces |
-| `includePayloads` | `boolean` | `true` | Include chat payloads, tool args, LLM I/O |
+| `includePayloads` | `boolean` | `false` | Include chat payloads, tool args, LLM I/O |
 
 ### Langfuse Config
 
@@ -111,4 +116,4 @@ const otel = createOtelExporter(config);
 
 ## Privacy
 
-Runtime events may include user prompts, assistant responses, tool arguments, tool outputs, and model inputs/outputs. Set `includePayloads: false` to strip these from exported telemetry. For finer control, construct an exporter directly and pass `redactEvent`.
+Runtime events omit user prompts, assistant responses, tool arguments, tool outputs, and model inputs/outputs by default. Set `includePayloads: true` to include them. For finer control, construct an exporter directly and pass `redactEvent`.
