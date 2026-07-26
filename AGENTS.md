@@ -6,6 +6,51 @@ This monorepo contains Pi extensions (`packages/pi-*`), a shared library (`packa
 
 ---
 
+## Required Agent Skills
+
+Two external skill sets are mandatory when developing in this repo. Install them for your harness before starting work; if your harness cannot install skills, follow the rules inlined below.
+
+### ponytail — minimal-code discipline
+
+> https://github.com/DietrichGebert/ponytail
+
+Every code change follows ponytail's ladder — stop at the first rung that holds:
+
+```
+1. Does this need to exist?   → no: skip it (YAGNI)
+2. Already in this codebase?  → reuse it, don't rewrite (check sibling packages and packages/shared first)
+3. Stdlib does it?            → use it
+4. Native platform feature?   → use it
+5. Installed dependency?      → use it — no new deps for one-call problems
+6. One line?                  → one line
+7. Only then: the minimum that works
+```
+
+The ladder runs *after* understanding the problem, never instead of it: read the code the change touches and trace the real flow before picking a rung. Lazy about the solution, never about reading — and never about trust-boundary validation, data-loss handling, security, or accessibility.
+
+Install:
+- Claude Code: `/plugin marketplace add DietrichGebert/ponytail`, then `/plugin install ponytail@ponytail` (two separate prompts)
+- Codex: `codex plugin marketplace add DietrichGebert/ponytail && codex plugin add ponytail@ponytail`, then trust its two lifecycle hooks under `/hooks`
+
+### mattpocock/skills — engineering workflow skills
+
+> https://github.com/mattpocock/skills
+
+Use this skill set for process work in this repo:
+- `triage` — processing new issues/PRs (labels: the `type/*` + `P0`–`P3` set managed by `.github/workflows/labeler.yml`)
+- `to-spec` / `to-tickets` — before non-trivial implementations
+- `tdd` — behavior changes in packages with existing coverage (see Unit Test Convention)
+- `diagnosing-bugs` — no fix without a reproduced root cause
+- `research`, `code-review`, `resolving-merge-conflicts` — as named
+
+Install:
+- Any harness (skills.sh): `npx skills@latest add mattpocock/skills` — include `/setup-matt-pocock-skills` and run it once per clone (issue tracker: GitHub)
+- Claude Code plugin: `/plugin marketplace add mattpocock/skills`, then `/plugin install mattpocock-skills@mattpocock`
+
+Files the skills.sh installer copies into the repo are local tooling — do not commit them unless the team explicitly adopts a skill as a local fork.
+
+---
+
 ## Pi Extension Fundamentals
 
 > Full docs: https://pi.dev/docs/latest/extensions
