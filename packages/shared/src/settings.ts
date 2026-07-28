@@ -10,6 +10,8 @@ export type PiSettingsOptions = {
   projectTrusted?: boolean;
   /** Also expand bare $ENV_VAR references in global and agent-dir settings. */
   expandBareEnvVars?: boolean;
+  /** Refuse malformed/unreadable trusted project settings instead of ignoring them. */
+  strictProjectSettings?: boolean;
 };
 
 export function isProjectTrusted(
@@ -49,19 +51,28 @@ function resolveEnvVars(value: unknown, expandBareEnvVars: boolean): unknown {
 function readSettingsSection<T>(
   filePath: string,
   key: string,
-  options: { expandEnv: boolean; expandBareEnvVars: boolean },
+  options: { expandEnv: boolean; expandBareEnvVars: boolean; strict?: boolean },
 ): Partial<T> {
   try {
     const raw = readFileSync(filePath, 'utf-8');
     const parsed = JSON.parse(raw);
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
       const section = parsed[key] ?? {};
+      if (!section || typeof section !== 'object' || Array.isArray(section)) {
+        if (options.strict) throw new Error('project settings section must be an object');
+        return {};
+      }
       return (
         options.expandEnv ? resolveEnvVars(section, options.expandBareEnvVars) : section
       ) as Partial<T>;
     }
+    if (options.strict) throw new Error('project settings root must be an object');
     return {};
-  } catch {
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {};
+    if (options.strict) {
+      throw new Error('Trusted project settings are unreadable or malformed.', { cause: error });
+    }
     return {};
   }
 }
@@ -122,6 +133,7 @@ export function loadPiSettings<T>(key: string, options?: PiSettingsOptions): T {
       ? readSettingsSection<T>(join(cwd, '.pi', 'settings.json'), key, {
           expandEnv: false,
           expandBareEnvVars: false,
+          strict: options?.strictProjectSettings === true,
         })
       : ({} as Partial<T>);
 

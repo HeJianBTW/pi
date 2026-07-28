@@ -285,6 +285,20 @@ describe('3-layer settings resolution', () => {
     expect(result.b).toBe('agent');
   });
 
+  it('can fail closed on malformed trusted project settings', async () => {
+    writeFileSync(join(projectDir, '.pi', 'settings.json'), '{broken');
+
+    const { loadPiSettings } = await import('../../src/settings.js');
+    expect(() =>
+      loadPiSettings('ext', {
+        configDir,
+        cwd: projectDir,
+        projectTrusted: true,
+        strictProjectSettings: true,
+      }),
+    ).toThrow(/project settings/i);
+  });
+
   it('does not interpolate env vars from trusted project settings', async () => {
     const originalSecret = process.env.PROJECT_SECRET;
     process.env.PROJECT_SECRET = 'must-not-expand';
