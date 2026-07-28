@@ -1,0 +1,189 @@
+# pi-video-gen
+
+Pi extension for agentic video generation. Ships the single-clip primitive
+(`video_generate`), the multi-shot render pipeline (`video_render`), the
+read-only `video_capabilities` query, a `/video-gen` command, and the
+`video-gen` skill that orchestrates the full shot-book workflow together with
+[pi-image-gen](../pi-image-gen) (all image work).
+
+## Providers
+
+| Wire format | Models | Status |
+|---|---|---|
+| `ark` (Volcengine Ark) | Seedance 2.0 standard / fast / mini | ✅ built-in |
+| `dashscope` (Alibaba) | HappyHorse 1.1 / 1.0 (t2v/i2v/r2v auto-routed) | ✅ built-in |
+| `kling` (Kuaishou) | Kling 3.0 Turbo / 3.0 Omni (API 2.0) | ✅ built-in |
+| `openrouter` | google/veo-3.1 (+ custom models) | ✅ built-in |
+| `newapi` | self-hosted NewAPI relay (Kling / Jimeng / Vidu / Gemini channels) | ✅ via `customProviders` — `baseUrl` **required** |
+| custom | your own endpoints | ✅ via `customProviders` |
+
+Registry entries are written against provider documentation (each adapter's
+header notes the source) and are pending live smoke tests against real
+accounts — verify with `/video-gen doctor` + one small paid clip before heavy
+use. Seedance 2.5 stays on the roadmap until its official API ID and parameter
+contract are published.
+
+## Setup
+
+Global settings (`~/.pi/agent/settings.json`):
+
+```jsonc
+{
+  "pi-video-gen": {
+    "defaultModel": "seedance",                  // alias of doubao-seedance-2-0-260128
+    "providers": {
+      "ark": { "apiKey": "${ARK_API_KEY}" }      // Volcengine Ark key
+    },
+    "rateLimit": { "maxRequestsPerMinute": 2, "maxRequestsPerDay": 20 },
+    "concurrency": { "clips": 2 }
+  }
+}
+```
+
+**Custom providers** (same idea as pi-image-gen's — point any Ark-compatible
+endpoint at your own models; string models get conservative capabilities,
+object models declare them):
+
+```jsonc
+{
+  "pi-video-gen": {
+    "defaultModel": "fast9",
+    "customProviders": {
+      "myproxy": {
+        "api": "ark",
+        "baseUrl": "https://proxy.example/api/v3",
+        "apiKey": "${MY_PROXY_KEY}",
+        "models": [
+          "seedance-lite-x",
+          { "id": "remote-model-9", "alias": "fast9",
+            "capabilities": { "maxReferenceImages": 2, "durations": [2, 30],
+              "resolutions": ["480p", "720p", "1080p"], "aspectRatios": ["16:9", "9:16"],
+              "nativeAudio": true, "supportsFirstLastFrame": true } }
+        ]
+      }
+    }
+  }
+}
+```
+
+**NewAPI notes** ([video format docs](https://www.newapi.ai/zh/docs/api/ai-model/videos/createvideogeneration)):
+NewAPI is a self-hosted relay, so the `newapi` wire format has NO default
+endpoint — `baseUrl` is mandatory and resolution fails with the exact
+settings path to fix when it is absent. Both the server root
+(`"https://newapi.example.com"`) and the OpenAI-style `"…/v1"` form are
+accepted. Channel-specific parameters ride in `metadata` following the
+upstream doc examples: `aspect_ratio` + `resolution` (Jimeng/Vidu style),
+`image_tail` for the last frame (Kling style) and `image_urls` for extra
+reference images (Jimeng style); the first frame goes in the top-level
+`image` field. There is no documented audio toggle or idempotency key, so
+ambiguous submits are parked for manual resolution rather than auto-retried:
+
+```jsonc
+{
+  "pi-video-gen": {
+    "defaultModel": "kling-v1",
+    "customProviders": {
+      "newapi": {
+        "api": "newapi",
+        "baseUrl": "https://newapi.example.com",   // REQUIRED
+        "apiKey": "${NEWAPI_API_KEY}",
+        "models": ["kling-v1", "jimeng_vgfm_t2v_l20", "viduq1"]
+      }
+    }
+  }
+}
+```
+
+**Kling notes** (verified against kling.ai/document-api via browser, 2026-07):
+current Kling API 2.0 uses a plain API key (`providers.kling.apiKey`, env
+`KLING_API_KEY`) — the JWT ak/sk scheme is legacy. The model lives in the URL
+path (`kling-3.0-turbo` / `kling-3.0`); default base is
+`api-singapore.klingai.com` (regional endpoints via `baseUrl`). Kling 3.0 Omni
+supports last-frame, native audio and 4k; Turbo is first-frame-only and
+silent. Submits carry `external_task_id` (our request fingerprint), so
+ambiguous failures are looked up first; an inconclusive lookup is parked for
+manual resolution rather than blindly resubmitted.
+
+**HappyHorse notes**: no native audio and no last-frame interpolation
+(`nativeAudio: false`, `supportsFirstLastFrame: false` in the capability table,
+so the tools hide/reject those options). One call takes either a first frame
+(i2v) OR reference images (r2v, prompt them as `[Image 1]`, `[Image 2]`, …),
+not both. The default endpoint is the classic `dashscope.aliyuncs.com` (no
+workspace id needed); if you use a new Bailian workspace, set
+`providers.dashscope.baseUrl` to `https://{workspaceId}.cn-beijing.maas.aliyuncs.com`.
+Video/task URLs expire after 24h — clips are downloaded immediately.
+
+**Trust boundary**: `providers.*`, `customProviders.*` and `ffmpegPath` are
+honored ONLY from global / agent-dir settings — project-level
+`.pi/settings.json` can set `outputDir`, `defaultModel`, `rateLimit`,
+`concurrency` only (and only when the project is trusted). A malicious repo
+cannot redirect your API key or swap binaries.
+
+**ffmpeg**: required for multi-shot concat and installed automatically with
+the plugin through a platform-specific optional npm package. The main plugin
+stays small, while `pi install npm:@amaster.ai/pi-video-gen` downloads only
+the LGPL FFmpeg build matching the current OS and CPU. Supported bundled
+targets are macOS 11+ arm64/x64, glibc Linux arm64/x64 (built on Ubuntu 22.04),
+and Windows x64; musl Linux uses a system FFmpeg through PATH. Resolution order:
+`ffmpegPath` setting → `FFMPEG_PATH` env → installed platform package →
+ffmpeg-static (development only) → PATH. An automatic bundled candidate that
+is present but not runnable is skipped so it cannot mask a working PATH
+installation. Check with `/video-gen doctor`.
+Release CI builds every platform package from the pinned official FFmpeg
+source with external-library autodetection disabled; the exact source archive,
+build script, license, and provenance ship beside each binary.
+
+## Tools
+
+| Tool | What it does |
+|---|---|
+| `video_generate` | One short clip from a prompt (+ optional first/last frame images). Paid, minutes per clip. Interrupted after receiving a task id? Resume with the returned `jobId`; an ambiguous submit is parked and never resubmitted automatically. |
+| `video_render` | Multi-shot film from `<jobDir>/render-input.json`: snapshots + hashes all frames, submits one paid task per shot (resume-aware, finished shots never re-bill), downloads clips, ffmpeg-concats into `final_video.mp4`. |
+| `video_capabilities` | Read-only: active model's capability table + registered models. Call before composing prompts or shot books. |
+
+## Commands
+
+| Command | What it does |
+|---|---|
+| `/video-gen generate <prompt>` | Same as the `video_generate` tool |
+| `/video-gen render <spec>` | Same as the `video_render` tool |
+| `/video-gen recover <jobId>` | List ambiguous render shots; explicitly `reset` a confirmed-absent task or `adopt <taskId>` found in the provider console |
+| `/video-gen models` | List registered models + key readiness |
+| `/video-gen reload` | Reload settings |
+| `/video-gen doctor` | Environment check (key, ffmpeg, `image_generate`, output dir, trust) |
+
+## The shot-book workflow (multi-shot films)
+
+Driven by the `video-gen` skill in conversation:
+
+1. **Shot book** — the agent authors a shot book (characters + shots with
+   first/last-frame descriptions, motion, audio, continuity) and you review it
+   in chat. Default small: 1 scene, 3–5 shots.
+2. **Frames** — the agent generates character portraits and per-shot frames via
+   `image_generate` (pi-image-gen), tracking real returned paths in
+   `assets.json`.
+3. **Render** — after explicit confirmation, ONE `video_render` call pays for
+   and stitches everything.
+
+## Jobs on disk
+
+```
+<cwd>/.video-gen/<jobId>/
+├── render-input.json   # immutable spec (revisions = new job dir)
+├── assets.json         # semantic assets ↔ image_generate's real returned paths
+├── manifest.json       # state + per-shot remote handles + frame SHA-256 (atomic, single writer)
+├── shots/<shotId>/first_frame.png|last_frame.png|video.mp4
+└── final_video.mp4
+```
+
+Crash or cancel mid-render? Rerun the same spec path — the input fingerprint
+(spec + frame hashes + model/provider) is verified, then persisted handles
+resume via `inspect` without re-billing. NOTE: cancelling stops local polling
+only; the remote task may keep running and billable (Ark cancellation support
+is unverified). If submit completion is ambiguous, rerun is blocked until
+`/video-gen recover <jobId>` explicitly resets or adopts the affected shot.
+Single-clip ambiguous submits are also persisted and blocked; check the provider
+console before starting another generation. Single-job resume independently
+recomputes the request fingerprint from its frozen `input.json`; an inspect 404
+keeps the remote handle and parks the job as ambiguous instead of declaring it
+safe to resubmit.

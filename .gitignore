@@ -28,3 +28,11 @@ dist/
 
 # Dependencies
 node_modules/
+
+# Release-time native artifacts
+packages/pi-video-gen/platforms/ffmpeg-*/bin/
+packages/pi-video-gen/platforms/ffmpeg-*/LICENSE
+packages/pi-video-gen/platforms/ffmpeg-*/SOURCE.md
+packages/pi-video-gen/platforms/ffmpeg-*/source/
+.video-gen/
+video-output/

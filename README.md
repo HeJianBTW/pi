@@ -28,6 +28,7 @@ product-specific UI.
 | Extension | `@amaster.ai/pi-security` | Resource-aware security policy engine and tool authorization. |
 | Extension | `@amaster.ai/pi-teamwork` | Team collaboration and issue management via Multica. |
 | Extension | `@amaster.ai/pi-image-gen` | Image generation via OpenAI gpt-image, Google Nano Banana, Alibaba Qwen-Image, OpenRouter, and custom providers. |
+| Extension | `@amaster.ai/pi-video-gen` | Agentic video generation: single-clip and multi-shot render pipelines via Seedance (Volcengine Ark), HappyHorse (DashScope), Kling, and OpenRouter (Veo), with bundled LGPL FFmpeg. |
 | Extension | `@amaster.ai/pi-lark` | Lark/Feishu workspace integration through lark-cli, including calendar, docs, drive, sheets, Base, tasks, mail, wiki, and IM skills. |
 | Extension | `@amaster.ai/pi-wecom` | WeCom workspace integration through wecom-cli, including contacts, messages, meetings, schedules, todos, docs, and smart sheets. |
 | Extension | `@amaster.ai/pi-dingtalk` | DingTalk workspace integration through dws CLI, including calendar, docs, chat, todos, sheets, AI tables, approvals, mail, wiki, and meeting minutes. |

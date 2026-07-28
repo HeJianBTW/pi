@@ -29,8 +29,81 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 jobs:
+  build-video-ffmpeg:
+    name: build pi-video-gen FFmpeg (${{ matrix.target }})
+    strategy:
+      matrix:
+        include:
+          - target: darwin-arm64
+            runner: macos-15
+          - target: darwin-x64
+            runner: macos-15-intel
+          - target: linux-x64
+            runner: ubuntu-22.04
+          - target: linux-arm64
+            runner: ubuntu-22.04
+          - target: win32-x64
+            runner: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Install cross compiler
+        if: matrix.target == 'linux-arm64' || matrix.target == 'win32-x64'
+        run: |
+          sudo apt-get update
+          if [ "${{ matrix.target }}" = "linux-arm64" ]; then
+            sudo apt-get install -y gcc-aarch64-linux-gnu qemu-user
+          else
+            sudo apt-get install -y gcc-mingw-w64-x86-64 wine64
+          fi
+
+      - name: Build minimal LGPL FFmpeg
+        run: packages/pi-video-gen/scripts/build-ffmpeg.sh "${{ matrix.target }}"
+
+      - name: Verify FFmpeg binary
+        shell: bash
+        run: |
+          bin="packages/pi-video-gen/platforms/ffmpeg-${{ matrix.target }}/bin/ffmpeg"
+          case "${{ matrix.target }}" in
+            darwin-*)
+              "$bin" -version
+              xcrun vtool -show-build "$bin" | grep -q 'minos 11.0'
+              ;;
+            linux-x64)
+              "$bin" -version
+              ldd "$bin"
+              ;;
+            linux-arm64)
+              qemu-aarch64 -L /usr/aarch64-linux-gnu "$bin" -version
+              aarch64-linux-gnu-readelf -h "$bin" | grep -q 'AArch64'
+              ;;
+            win32-x64)
+              WINEDEBUG=-all /usr/lib/wine/wine64 "${bin}.exe" -version
+              x86_64-w64-mingw32-objdump -f "${bin}.exe" | grep -q 'pei-x86-64'
+              ;;
+          esac
+
+      - name: Preserve executable permissions
+        run: |
+          tar -czf "pi-video-gen-ffmpeg-${{ matrix.target }}.tar.gz" \
+            -C "packages/pi-video-gen/platforms/ffmpeg-${{ matrix.target }}" \
+            bin LICENSE SOURCE.md source
+
+      - name: Upload platform package payload
+        uses: actions/upload-artifact@v4
+        with:
+          name: pi-video-gen-ffmpeg-${{ matrix.target }}
+          path: pi-video-gen-ffmpeg-${{ matrix.target }}.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
   publish:
     name: publish packages
+    needs: build-video-ffmpeg
     runs-on:
       - instance-hnpsq9go
       - linux
@@ -47,6 +120,49 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Download darwin-arm64 FFmpeg
+        uses: actions/download-artifact@v4
+        with:
+          name: pi-video-gen-ffmpeg-darwin-arm64
+          path: .release-artifacts/darwin-arm64
+
+      - name: Download darwin-x64 FFmpeg
+        uses: actions/download-artifact@v4
+        with:
+          name: pi-video-gen-ffmpeg-darwin-x64
+          path: .release-artifacts/darwin-x64
+
+      - name: Download linux-arm64 FFmpeg
+        uses: actions/download-artifact@v4
+        with:
+          name: pi-video-gen-ffmpeg-linux-arm64
+          path: .release-artifacts/linux-arm64
+
+      - name: Download linux-x64 FFmpeg
+        uses: actions/download-artifact@v4
+        with:
+          name: pi-video-gen-ffmpeg-linux-x64
+          path: .release-artifacts/linux-x64
+
+      - name: Download win32-x64 FFmpeg
+        uses: actions/download-artifact@v4
+        with:
+          name: pi-video-gen-ffmpeg-win32-x64
+          path: .release-artifacts/win32-x64
+
+      - name: Prepare FFmpeg platform packages
+        run: |
+          tar -xzf .release-artifacts/darwin-arm64/pi-video-gen-ffmpeg-darwin-arm64.tar.gz \
+            -C packages/pi-video-gen/platforms/ffmpeg-darwin-arm64
+          tar -xzf .release-artifacts/darwin-x64/pi-video-gen-ffmpeg-darwin-x64.tar.gz \
+            -C packages/pi-video-gen/platforms/ffmpeg-darwin-x64
+          tar -xzf .release-artifacts/linux-arm64/pi-video-gen-ffmpeg-linux-arm64.tar.gz \
+            -C packages/pi-video-gen/platforms/ffmpeg-linux-arm64
+          tar -xzf .release-artifacts/linux-x64/pi-video-gen-ffmpeg-linux-x64.tar.gz \
+            -C packages/pi-video-gen/platforms/ffmpeg-linux-x64
+          tar -xzf .release-artifacts/win32-x64/pi-video-gen-ffmpeg-win32-x64.tar.gz \
+            -C packages/pi-video-gen/platforms/ffmpeg-win32-x64
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -106,10 +222,16 @@ jobs:
 
           const rootPackageFile = path.join(process.cwd(), "package.json");
           const packagesDir = path.join(process.cwd(), "packages");
-          const packageFiles = fs.readdirSync(packagesDir, { withFileTypes: true })
+          const topLevelPackageFiles = fs.readdirSync(packagesDir, { withFileTypes: true })
             .filter((entry) => entry.isDirectory())
             .map((entry) => path.join(packagesDir, entry.name, "package.json"))
             .filter((file) => fs.existsSync(file));
+          const platformPackagesDir = path.join(packagesDir, "pi-video-gen", "platforms");
+          const platformPackageFiles = fs.readdirSync(platformPackagesDir, { withFileTypes: true })
+            .filter((entry) => entry.isDirectory())
+            .map((entry) => path.join(platformPackagesDir, entry.name, "package.json"))
+            .filter((file) => fs.existsSync(file));
+          const packageFiles = [...topLevelPackageFiles, ...platformPackageFiles];
 
           const packages = packageFiles.map((file) => ({
             file,
