@@ -36,6 +36,7 @@ concurrency:
 permissions:
   contents: read
   issues: write
+  pull-requests: write
 
 env:
   # Run JavaScript actions (checkout, setup-node, pnpm/action-setup, etc.) on
