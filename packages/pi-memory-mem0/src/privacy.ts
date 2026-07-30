@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
-import { scanForThreats } from '@amaster.ai/pi-memory/threat-patterns';
+import { scanForThreats } from '@amaster.ai/pi-shared/threat-patterns';
 
 export function scopeMemoryUserId(baseUserId: string, cwd: string): string {
   const project = createHash('sha256').update(path.resolve(cwd)).digest('hex').slice(0, 12);
