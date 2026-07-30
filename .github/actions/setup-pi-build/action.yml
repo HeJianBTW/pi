@@ -18,6 +18,12 @@ inputs:
       pi-memory-mem0's OSS sqlite store needs this.
     required: false
     default: 'false'
+  install-video-tools:
+    description: >
+      When 'true', expose ffmpeg-static plus a pinned ffprobe on PATH for
+      pi-video-gen tests and local composition E2E.
+    required: false
+    default: 'false'
   set-pi-agent-dir:
     description: >
       When 'true', point PI_CODING_AGENT_DIR at $RUNNER_TEMP/pi-agent so
@@ -75,6 +81,47 @@ runs:
     - name: Install dependencies
       shell: bash
       run: pnpm install --frozen-lockfile
+
+    - name: Setup FFmpeg test runtime
+      if: inputs.install-video-tools == 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        VIDEO_TOOLS_ROOT="$RUNNER_TEMP/pi-video-tools"
+        FFPROBE_ROOT="$VIDEO_TOOLS_ROOT/ffprobe-package"
+        BIN_DIR="$VIDEO_TOOLS_ROOT/bin"
+        mkdir -p "$BIN_DIR"
+        npm install \
+          --prefix "$FFPROBE_ROOT" \
+          --no-package-lock \
+          --no-save \
+          --ignore-scripts \
+          @ffprobe-installer/ffprobe@2.1.2
+        FFMPEG_BIN="$(
+          node --input-type=module -e "
+            import { createRequire } from 'node:module';
+            process.stdout.write(
+              createRequire(new URL('./packages/pi-video-gen/package.json', import.meta.url))(
+                'ffmpeg-static',
+              ),
+            );
+          "
+        )"
+        FFPROBE_BIN="$(
+          FFPROBE_ROOT="$FFPROBE_ROOT" node -e "
+            process.stdout.write(
+              require(
+                process.env.FFPROBE_ROOT + '/node_modules/@ffprobe-installer/ffprobe'
+              ).path,
+            );
+          "
+        )"
+        chmod 0755 "$FFMPEG_BIN" "$FFPROBE_BIN"
+        ln -sf "$FFMPEG_BIN" "$BIN_DIR/ffmpeg"
+        ln -sf "$FFPROBE_BIN" "$BIN_DIR/ffprobe"
+        "$BIN_DIR/ffmpeg" -version
+        "$BIN_DIR/ffprobe" -version
+        echo "$BIN_DIR" >> "$GITHUB_PATH"
 
     - name: Force-fetch better-sqlite3 prebuilt binary
       if: inputs.prebuild-better-sqlite3 == 'true'

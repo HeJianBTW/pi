@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import {
   copyFileSync,
   existsSync,
@@ -19,7 +19,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { probeDuration, probeStreams, resolveFfprobe } from '../ffmpeg.js';
 import { ActiveJobs, hashFileSha256, loadTimelineJob } from '../jobs/store.js';
 import { CancelledError } from '../providers/task.js';
-import { renderTextOverlay } from '../text-layer.js';
+import { renderBurnedSubtitle, renderTextOverlay } from '../text-layer.js';
 import { runTimeline } from '../timeline-render.js';
 import type { TtsProvider } from '../tts/edge-tts.js';
 
@@ -37,6 +37,94 @@ async function makeImage(
   await sharp({ create: { width: 640, height: 360, channels: 3, background: color } })
     .png()
     .toFile(p);
+  return p;
+}
+
+function makeVideo(dir: string, name: string): string {
+  mkdirSync(dir, { recursive: true });
+  const p = join(dir, name);
+  execFileSync(
+    ffmpegStaticBin,
+    [
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      'color=c=red:s=640x360:r=25:d=1',
+      '-f',
+      'lavfi',
+      '-i',
+      'color=c=blue:s=640x360:r=25:d=2',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=880:sample_rate=48000:duration=3',
+      '-filter_complex',
+      '[0:v][1:v]concat=n=2:v=1:a=0[v]',
+      '-map',
+      '[v]',
+      '-map',
+      '2:a',
+      '-c:v',
+      'mpeg4',
+      '-q:v',
+      '4',
+      '-c:a',
+      'aac',
+      p,
+    ],
+    { stdio: 'ignore' },
+  );
+  return p;
+}
+
+function makeVideoWithLongerAudio(dir: string, name: string): string {
+  mkdirSync(dir, { recursive: true });
+  const p = join(dir, name);
+  execFileSync(
+    ffmpegStaticBin,
+    [
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      'color=c=red:s=640x360:r=25:d=1',
+      '-f',
+      'lavfi',
+      '-i',
+      'sine=frequency=880:sample_rate=48000:duration=3',
+      '-map',
+      '0:v',
+      '-map',
+      '1:a',
+      '-c:v',
+      'mpeg4',
+      '-c:a',
+      'aac',
+      p,
+    ],
+    { stdio: 'ignore' },
+  );
+  return p;
+}
+
+function makeAudio(dir: string, name: string, frequency: number): string {
+  mkdirSync(dir, { recursive: true });
+  const p = join(dir, name);
+  execFileSync(
+    ffmpegStaticBin,
+    [
+      '-y',
+      '-f',
+      'lavfi',
+      '-i',
+      `sine=frequency=${frequency}:sample_rate=48000:duration=3`,
+      '-c:a',
+      'libmp3lame',
+      p,
+    ],
+    { stdio: 'ignore' },
+  );
   return p;
 }
 
@@ -75,7 +163,27 @@ function parseSrtTimestamp(value: string): number {
   return hours! * 3600 + minutes! * 60 + seconds! + milliseconds! / 1000;
 }
 
-describe('timeline pipeline (C1–C3)', () => {
+function toneAmplitude(videoPath: string, frequency: number): number {
+  const decoded = spawnSync(
+    ffmpegStaticBin,
+    ['-i', videoPath, '-map', '0:a:0', '-t', '1', '-f', 'f32le', '-ac', '1', '-ar', '48000', '-'],
+    { maxBuffer: 2 * 1024 * 1024 },
+  );
+  expect(decoded.status).toBe(0);
+  const pcm = decoded.stdout;
+  const samples = Math.floor(pcm.length / 4);
+  let real = 0;
+  let imaginary = 0;
+  for (let i = 0; i < samples; i += 1) {
+    const value = pcm.readFloatLE(i * 4);
+    const angle = (2 * Math.PI * frequency * i) / 48_000;
+    real += value * Math.cos(angle);
+    imaginary -= value * Math.sin(angle);
+  }
+  return (2 * Math.hypot(real, imaginary)) / samples;
+}
+
+describe('timeline pipeline (C1–C4)', () => {
   let cwd: string;
 
   beforeEach(() => {
@@ -134,6 +242,68 @@ describe('timeline pipeline (C1–C3)', () => {
       .map((row, index) => row - brightRows[index]!)
       .filter((gap) => gap > 1);
     expect(gaps.length).toBeGreaterThan(0);
+  });
+
+  it('wraps long burned subtitles inside the video safe area', async () => {
+    const out = join(cwd, 'wrapped-subtitle.png');
+    await renderBurnedSubtitle({
+      text: 'This long subtitle must wrap across several readable lines instead of being clipped by either side of the video frame.',
+      style: {
+        fontSize: 32,
+        textColor: '#ff0000',
+        backgroundColor: '#0000ff',
+        backgroundOpacity: 1,
+      },
+      width: 640,
+      height: 360,
+      outPath: out,
+    });
+
+    const { data, info } = await sharp(out).raw().toBuffer({ resolveWithObject: true });
+    let minTextX = info.width;
+    let maxTextX = -1;
+    for (let y = 0; y < info.height; y += 1) {
+      for (let x = 0; x < info.width; x += 1) {
+        const offset = (y * info.width + x) * info.channels;
+        if (data[offset]! > 180 && data[offset + 1]! < 100 && data[offset + 2]! < 100) {
+          minTextX = Math.min(minTextX, x);
+          maxTextX = Math.max(maxTextX, x);
+        }
+      }
+    }
+    expect(minTextX).toBeGreaterThan(20);
+    expect(maxTextX).toBeLessThan(620);
+  });
+
+  it('keeps wide Latin glyphs inside the burned-subtitle safe area', async () => {
+    const out = join(cwd, 'wide-subtitle.png');
+    await renderBurnedSubtitle({
+      text: 'WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW',
+      style: {
+        fontSize: 32,
+        textColor: '#ff0000',
+        backgroundColor: '#0000ff',
+        backgroundOpacity: 1,
+      },
+      width: 640,
+      height: 360,
+      outPath: out,
+    });
+
+    const { data, info } = await sharp(out).raw().toBuffer({ resolveWithObject: true });
+    let minTextX = info.width;
+    let maxTextX = -1;
+    for (let y = 0; y < info.height; y += 1) {
+      for (let x = 0; x < info.width; x += 1) {
+        const offset = (y * info.width + x) * info.channels;
+        if (data[offset]! > 180 && data[offset + 1]! < 100 && data[offset + 2]! < 100) {
+          minTextX = Math.min(minTextX, x);
+          maxTextX = Math.max(maxTextX, x);
+        }
+      }
+    }
+    expect(minTextX).toBeGreaterThan(20);
+    expect(maxTextX).toBeLessThan(620);
   });
 
   it('records a cancelled manifest when local rendering is aborted', async () => {
@@ -391,7 +561,7 @@ describe('timeline pipeline (C1–C3)', () => {
     for (const f of result.qcFrames) expect(existsSync(f)).toBe(true);
 
     // artifacts cached: overlays, audio, segments
-    expect(existsSync(join(jobDir, 'overlays', 's2.png'))).toBe(true);
+    expect(existsSync(join(jobDir, 'overlays', 'text-s2.png'))).toBe(true);
     expect(existsSync(join(jobDir, 'audio', 's1.mp3'))).toBe(true);
     expect(existsSync(join(jobDir, 'segments', 's1.mp4'))).toBe(true);
 
@@ -409,6 +579,427 @@ describe('timeline pipeline (C1–C3)', () => {
     const streams = await probeStreams(ffprobe.path, result.finalVideoPath);
     expect(streams.audioLayout).not.toBe('none');
     expect(streams.subtitleCodec).toBe('mov_text');
+  }, 15_000);
+
+  it('mixes a trimmed video segment and its source audio into the timeline', async () => {
+    const image = await makeImage(cwd, 'intro.png', { r: 20, g: 30, b: 40 });
+    const video = makeVideo(cwd, 'demo.mp4');
+    const jobDir = join(cwd, '.video-gen', 'mixed-media');
+    mkdirSync(jobDir, { recursive: true });
+    const specPath = join(jobDir, 'timeline-input.json');
+    writeFileSync(
+      specPath,
+      JSON.stringify({
+        output: { resolution: '640x360', fps: 25 },
+        segments: [
+          {
+            id: 'intro',
+            image,
+            durationSec: 1.5,
+            transitionTo: { type: 'xfade', style: 'fade', durationSec: 0.5 },
+          },
+          {
+            id: 'demo',
+            video,
+            trimStartSec: 1.1,
+            durationSec: 1.2,
+            fit: 'cover',
+            sourceAudio: { volume: 0.5 },
+          },
+        ],
+      }),
+    );
+
+    const result = await runTimeline({ timelineSpecPath: specPath, ...baseOpts(cwd) });
+    expect(result.durationSec).toBeCloseTo(2.2, 1);
+
+    const frame = join(cwd, 'video-frame.png');
+    execFileSync(
+      ffmpegStaticBin,
+      ['-y', '-ss', '1.7', '-i', result.finalVideoPath, '-frames:v', '1', frame],
+      { stdio: 'ignore' },
+    );
+    const stats = await sharp(frame).stats();
+    expect(stats.channels[2]!.mean).toBeGreaterThan(stats.channels[0]!.mean * 2);
+
+    const volume = spawnSync(
+      ffmpegStaticBin,
+      ['-i', result.finalVideoPath, '-af', 'volumedetect', '-f', 'null', '-'],
+      { encoding: 'utf-8' },
+    );
+    expect(volume.status).toBe(0);
+    const meanDb = Number(volume.stderr.match(/mean_volume:\s*(-?[\d.]+) dB/)?.[1]);
+    expect(meanDb).toBeGreaterThan(-40);
+  }, 15_000);
+
+  it('keeps a segment named bgm separate from a same-extension BGM snapshot', async () => {
+    const video = makeVideo(cwd, 'visual.mp4');
+    const bgm = makeAudio(cwd, 'music.mp4', 220);
+    const jobDir = join(cwd, '.video-gen', 'bgm-segment');
+    mkdirSync(jobDir, { recursive: true });
+    const specPath = join(jobDir, 'timeline-input.json');
+    writeFileSync(
+      specPath,
+      JSON.stringify({
+        output: { resolution: '640x360', fps: 25 },
+        bgm,
+        segments: [{ id: 'bgm', video, durationSec: 1, sourceAudio: { muted: true } }],
+      }),
+    );
+
+    const result = await runTimeline({ timelineSpecPath: specPath, ...baseOpts(cwd) });
+    expect(result.durationSec).toBeCloseTo(1, 1);
+  }, 15_000);
+
+  it('preserves source-audio gain when padding the segment with silence', async () => {
+    const video = makeVideo(cwd, 'source-volume.mp4');
+    const jobDir = join(cwd, '.video-gen', 'source-volume');
+    mkdirSync(jobDir, { recursive: true });
+    const specPath = join(jobDir, 'timeline-input.json');
+    writeFileSync(
+      specPath,
+      JSON.stringify({
+        output: { resolution: '640x360', fps: 25 },
+        segments: [
+          {
+            id: 'demo',
+            video,
+            durationSec: 1,
+            sourceAudio: { volume: 1 },
+          },
+        ],
+      }),
+    );
+
+    const result = await runTimeline({ timelineSpecPath: specPath, ...baseOpts(cwd) });
+    expect(toneAmplitude(result.finalVideoPath, 880)).toBeGreaterThan(0.09);
+  }, 15_000);
+
+  it('keeps source-audio gain stable when narration is mixed in', async () => {
+    const video = makeVideo(cwd, 'source-with-narration.mp4');
+    const jobDir = join(cwd, '.video-gen', 'source-with-narration');
+    mkdirSync(jobDir, { recursive: true });
+    const specPath = join(jobDir, 'timeline-input.json');
+    writeFileSync(
+      specPath,
+      JSON.stringify({
+        output: { resolution: '640x360', fps: 25 },
+        segments: [
+          {
+            id: 'demo',
+            video,
+            durationSec: 3,
+            sourceAudio: { volume: 1 },
+            narration: 'Narration over source audio',
+          },
+        ],
+      }),
+    );
+
+    const result = await runTimeline({ timelineSpecPath: specPath, ...baseOpts(cwd) });
+    expect(toneAmplitude(result.finalVideoPath, 880)).toBeGreaterThan(0.09);
+  }, 15_000);
+
+  it('keeps source-audio gain stable when BGM is mixed in', async () => {
+    const video = makeVideo(cwd, 'source-with-bgm.mp4');
+    const bgm = makeAudio(cwd, 'source-bgm.mp3', 220);
+    const jobDir = join(cwd, '.video-gen', 'source-with-bgm');
+    mkdirSync(jobDir, { recursive: true });
+    const specPath = join(jobDir, 'timeline-input.json');
+    writeFileSync(
+      specPath,
+      JSON.stringify({
+        output: { resolution: '640x360', fps: 25 },
+        bgm,
+        segments: [
+          {
+            id: 'demo',
+            video,
+            durationSec: 1,
+            sourceAudio: { volume: 1 },
+          },
+        ],
+      }),
+    );
+
+    const result = await runTimeline({ timelineSpecPath: specPath, ...baseOpts(cwd) });
+    expect(toneAmplitude(result.finalVideoPath, 880)).toBeGreaterThan(0.09);
+  }, 15_000);
+
+  it('rejects a video trim window beyond the source duration', async () => {
+    const video = makeVideo(cwd, 'short.mp4');
+    const jobDir = join(cwd, '.video-gen', 'trim-overflow');
+    mkdirSync(jobDir, { recursive: true });
+    const specPath = join(jobDir, 'timeline-input.json');
+    writeFileSync(
+      specPath,
+      JSON.stringify({
+        output: { resolution: '640x360', fps: 25 },
+        segments: [
+          {
+            id: 'demo',
+            video,
+            trimStartSec: 2.5,
+            durationSec: 1,
+          },
+        ],
+      }),
+    );
+
+    await expect(runTimeline({ timelineSpecPath: specPath, ...baseOpts(cwd) })).rejects.toThrow(
+      /beyond the 3\.00s source video/,
+    );
+  });
+
+  it('validates trims against the video stream instead of longer container audio', async () => {
+    const video = makeVideoWithLongerAudio(cwd, 'long-audio.mp4');
+    const jobDir = join(cwd, '.video-gen', 'video-stream-duration');
+    mkdirSync(jobDir, { recursive: true });
+    const specPath = join(jobDir, 'timeline-input.json');
+    writeFileSync(
+      specPath,
+      JSON.stringify({
+        output: { resolution: '640x360', fps: 25 },
+        segments: [{ id: 'demo', video, durationSec: 2 }],
+      }),
+    );
+
+    await expect(runTimeline({ timelineSpecPath: specPath, ...baseOpts(cwd) })).rejects.toThrow(
+      /beyond the 1\.00s source video/,
+    );
+  });
+
+  it('rejects narration that does not fit a fixed-duration video segment', async () => {
+    const video = makeVideo(cwd, 'fixed-window.mp4');
+    const jobDir = join(cwd, '.video-gen', 'fixed-video-window');
+    mkdirSync(jobDir, { recursive: true });
+    const specPath = join(jobDir, 'timeline-input.json');
+    writeFileSync(
+      specPath,
+      JSON.stringify({
+        output: { resolution: '640x360', fps: 25 },
+        segments: [
+          {
+            id: 'demo',
+            video,
+            durationSec: 1,
+            narration: 'Narration longer than the selected video window',
+          },
+        ],
+      }),
+    );
+
+    await expect(runTimeline({ timelineSpecPath: specPath, ...baseOpts(cwd) })).rejects.toThrow(
+      /narration .*does not fit.*1\.00s video duration/i,
+    );
+  });
+
+  it('keeps the requested video duration when shorter narration fits', async () => {
+    const video = makeVideo(cwd, 'short-narration.mp4');
+    const jobDir = join(cwd, '.video-gen', 'short-video-narration');
+    mkdirSync(jobDir, { recursive: true });
+    const specPath = join(jobDir, 'timeline-input.json');
+    writeFileSync(
+      specPath,
+      JSON.stringify({
+        output: { resolution: '640x360', fps: 25 },
+        segments: [{ id: 'demo', video, durationSec: 1, narration: 'Short narration' }],
+      }),
+    );
+    const shortTts: TtsProvider = {
+      name: 'short',
+      async synthesize({ outPath }) {
+        execFileSync(
+          ffmpegStaticBin,
+          [
+            '-y',
+            '-f',
+            'lavfi',
+            '-i',
+            'sine=frequency=440:sample_rate=48000',
+            '-t',
+            '0.5',
+            '-c:a',
+            'libmp3lame',
+            outPath,
+          ],
+          { stdio: 'ignore' },
+        );
+        return { audioPath: outPath };
+      },
+    };
+
+    const result = await runTimeline({
+      timelineSpecPath: specPath,
+      ...baseOpts(cwd),
+      tts: shortTts,
+    });
+    expect(result.durationSec).toBeCloseTo(1, 1);
+  }, 15_000);
+
+  it('mixes source audio and narration in the final timeline audio', async () => {
+    const video = makeVideo(cwd, 'narrated-demo.mp4');
+    const bgm = makeAudio(cwd, 'bgm.mp3', 220);
+    const jobDir = join(cwd, '.video-gen', 'narrated-video');
+    mkdirSync(jobDir, { recursive: true });
+    const specPath = join(jobDir, 'timeline-input.json');
+    writeFileSync(
+      specPath,
+      JSON.stringify({
+        output: { resolution: '640x360', fps: 25 },
+        bgm,
+        segments: [
+          {
+            id: 'demo',
+            video,
+            durationSec: 3,
+            sourceAudio: { volume: 0.5 },
+            narration: 'Narration over source audio',
+          },
+        ],
+      }),
+    );
+
+    const result = await runTimeline({ timelineSpecPath: specPath, ...baseOpts(cwd) });
+    expect(toneAmplitude(result.finalVideoPath, 220)).toBeGreaterThan(0.002);
+    expect(toneAmplitude(result.finalVideoPath, 440)).toBeGreaterThan(0.01);
+    expect(toneAmplitude(result.finalVideoPath, 880)).toBeGreaterThan(0.005);
+  }, 15_000);
+
+  it('burns styled narration subtitles into the video when requested', async () => {
+    const image = await makeImage(cwd, 'white.png', { r: 255, g: 255, b: 255 });
+    const jobDir = join(cwd, '.video-gen', 'burned-subtitles');
+    mkdirSync(jobDir, { recursive: true });
+    const specPath = join(jobDir, 'timeline-input.json');
+    writeFileSync(
+      specPath,
+      JSON.stringify({
+        output: { resolution: '640x360', fps: 25 },
+        subtitles: {
+          mode: 'burn',
+          fontSize: 30,
+          textColor: '#ff0000',
+          backgroundColor: '#0000ff',
+          backgroundOpacity: 1,
+        },
+        segments: [
+          {
+            id: 'caption',
+            image,
+            durationSec: 3,
+            overlay: { title: 'BRAND', position: 'top-left' },
+            narration: 'Burned subtitle',
+          },
+        ],
+      }),
+    );
+
+    const result = await runTimeline({ timelineSpecPath: specPath, ...baseOpts(cwd) });
+    const streams = await probeStreams(resolveFfprobe().path, result.finalVideoPath);
+    expect(streams.subtitleCodec).toBe('none');
+
+    const frame = join(cwd, 'burned-frame.png');
+    execFileSync(
+      ffmpegStaticBin,
+      ['-y', '-ss', '1', '-i', result.finalVideoPath, '-frames:v', '1', frame],
+      { stdio: 'ignore' },
+    );
+    const { data, info } = await sharp(frame).raw().toBuffer({ resolveWithObject: true });
+    let hasRedText = false;
+    let hasBluePlate = false;
+    for (let offset = 0; offset < data.length; offset += info.channels) {
+      const red = data[offset]!;
+      const green = data[offset + 1]!;
+      const blue = data[offset + 2]!;
+      hasRedText ||= red > 180 && green < 100 && blue < 100;
+      hasBluePlate ||= blue > 180 && red < 100 && green < 100;
+    }
+    expect(hasRedText).toBe(true);
+    expect(hasBluePlate).toBe(true);
+  }, 15_000);
+
+  it('stops showing a burned subtitle when its narration cue ends', async () => {
+    const image = await makeImage(cwd, 'cue-white.png', { r: 255, g: 255, b: 255 });
+    const jobDir = join(cwd, '.video-gen', 'burned-subtitle-cue');
+    mkdirSync(jobDir, { recursive: true });
+    const specPath = join(jobDir, 'timeline-input.json');
+    writeFileSync(
+      specPath,
+      JSON.stringify({
+        output: { resolution: '640x360', fps: 25 },
+        subtitles: {
+          mode: 'burn',
+          fontSize: 30,
+          textColor: '#ff0000',
+          backgroundColor: '#0000ff',
+          backgroundOpacity: 1,
+        },
+        segments: [{ id: 'caption', image, durationSec: 3, narration: 'Short cue' }],
+      }),
+    );
+
+    const result = await runTimeline({ timelineSpecPath: specPath, ...baseOpts(cwd) });
+    const frame = join(cwd, 'after-burned-cue.png');
+    execFileSync(
+      ffmpegStaticBin,
+      ['-y', '-ss', '2.7', '-i', result.finalVideoPath, '-frames:v', '1', frame],
+      { stdio: 'ignore' },
+    );
+    const { data, info } = await sharp(frame).raw().toBuffer({ resolveWithObject: true });
+    let hasBluePlate = false;
+    for (let offset = 0; offset < data.length; offset += info.channels) {
+      const red = data[offset]!;
+      const green = data[offset + 1]!;
+      const blue = data[offset + 2]!;
+      hasBluePlate ||= blue > 180 && red < 100 && green < 100;
+    }
+    expect(hasBluePlate).toBe(false);
+  }, 15_000);
+
+  it('keeps burned subtitles separate from another segment overlay with a colliding id', async () => {
+    const image = await makeImage(cwd, 'collision-white.png', { r: 255, g: 255, b: 255 });
+    const jobDir = join(cwd, '.video-gen', 'overlay-name-collision');
+    mkdirSync(jobDir, { recursive: true });
+    const specPath = join(jobDir, 'timeline-input.json');
+    writeFileSync(
+      specPath,
+      JSON.stringify({
+        output: { resolution: '640x360', fps: 25 },
+        subtitles: {
+          mode: 'burn',
+          fontSize: 30,
+          textColor: '#ff0000',
+          backgroundColor: '#0000ff',
+          backgroundOpacity: 1,
+        },
+        segments: [
+          { id: 'caption', image, durationSec: 3, narration: 'Burned subtitle' },
+          {
+            id: 'caption_subtitle',
+            image,
+            durationSec: 1,
+            overlay: { title: 'SECOND', position: 'top-left' },
+          },
+        ],
+      }),
+    );
+
+    const result = await runTimeline({ timelineSpecPath: specPath, ...baseOpts(cwd) });
+    const frame = join(cwd, 'second-overlay-frame.png');
+    execFileSync(
+      ffmpegStaticBin,
+      ['-y', '-ss', '3.5', '-i', result.finalVideoPath, '-frames:v', '1', frame],
+      { stdio: 'ignore' },
+    );
+    const { data, info } = await sharp(frame).raw().toBuffer({ resolveWithObject: true });
+    let hasBluePlate = false;
+    for (let offset = 0; offset < data.length; offset += info.channels) {
+      const red = data[offset]!;
+      const green = data[offset + 1]!;
+      const blue = data[offset + 2]!;
+      hasBluePlate ||= blue > 180 && red < 100 && green < 100;
+    }
+    expect(hasBluePlate).toBe(false);
   }, 15_000);
 
   it('keeps narration and subtitles aligned across a long xfade', async () => {
@@ -498,17 +1089,17 @@ describe('timeline pipeline (C1–C3)', () => {
     );
     await runTimeline({ timelineSpecPath: specPath, ...baseOpts(cwd) });
     const segMtime = readFileSync(join(jobDir, 'segments', 's1.mp4')).byteLength;
-    const frozenImageInode = statSync(join(jobDir, 'assets', 's1.png')).ino;
+    const frozenImageInode = statSync(join(jobDir, 'assets', 'segment-s1.png')).ino;
 
     const again = await runTimeline({ timelineSpecPath: specPath, ...baseOpts(cwd) });
     expect(existsSync(again.finalVideoPath)).toBe(true);
     expect(again.subtitlePath && existsSync(again.subtitlePath)).toBe(true);
     expect(readFileSync(join(jobDir, 'segments', 's1.mp4')).byteLength).toBe(segMtime);
-    expect(statSync(join(jobDir, 'assets', 's1.png')).ino).toBe(frozenImageInode);
+    expect(statSync(join(jobDir, 'assets', 'segment-s1.png')).ino).toBe(frozenImageInode);
 
-    writeFileSync(join(jobDir, 'assets', 's1.png'), 'tampered frozen image');
+    writeFileSync(join(jobDir, 'assets', 'segment-s1.png'), 'tampered frozen image');
     await expect(runTimeline({ timelineSpecPath: specPath, ...baseOpts(cwd) })).rejects.toThrow(
-      /Frozen image snapshot/,
+      /Frozen media snapshot/,
     );
   });
 
@@ -606,7 +1197,7 @@ describe('timeline pipeline (C1–C3)', () => {
     );
     await runTimeline({ timelineSpecPath: specPath, ...baseOpts(cwd) });
     const manifest = loadTimelineJob(jobDir)!;
-    delete manifest.artifactHashes['overlays/s1.png'];
+    delete manifest.artifactHashes['overlays/text-s1.png'];
     writeFileSync(join(jobDir, 'manifest.json'), JSON.stringify(manifest));
 
     await expect(runTimeline({ timelineSpecPath: specPath, ...baseOpts(cwd) })).rejects.toThrow(
@@ -659,7 +1250,7 @@ describe('timeline pipeline (C1–C3)', () => {
     await runTimeline({ timelineSpecPath: specPath, ...baseOpts(cwd) });
     const manifest = loadTimelineJob(jobDir)!;
     manifest.state = 'failed';
-    delete manifest.artifactHashes['overlays/s1.png'];
+    delete manifest.artifactHashes['overlays/text-s1.png'];
     writeFileSync(join(jobDir, 'manifest.json'), JSON.stringify(manifest));
     const controller = new AbortController();
 

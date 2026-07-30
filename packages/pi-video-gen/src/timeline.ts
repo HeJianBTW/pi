@@ -3,8 +3,8 @@ import { safeBasename, VideoGenError } from './errors.js';
 import { assertSafeId } from './jobs/store.js';
 
 /**
- * TimelineSpec (C1+): agent-authored promo/explainer video from still images,
- * text overlays, TTS narration, and motion — rendered LOCALLY, no video model.
+ * TimelineSpec (C1+): agent-authored promo/explainer video from images/video
+ * clips, text overlays, TTS narration, and motion — rendered LOCALLY.
  *
  * File: `<jobDir>/timeline-input.json`; parent dir is the job (same identity
  * rules as compose/render jobs).
@@ -36,10 +36,27 @@ export type TimelineTransition = {
   durationSec: number;
 };
 
+export type TimelineSourceAudio = {
+  muted?: boolean | undefined;
+  volume?: number | undefined;
+};
+
+export type TimelineSubtitles = {
+  mode?: 'soft' | 'burn' | undefined;
+  fontSize?: number | undefined;
+  textColor?: string | undefined;
+  backgroundColor?: string | undefined;
+  backgroundOpacity?: number | undefined;
+};
+
 export type TimelineSegment = {
   id: string;
-  image: string;
+  image?: string | undefined;
+  video?: string | undefined;
   durationSec: number | 'auto';
+  trimStartSec?: number | undefined;
+  fit?: 'contain' | 'cover' | undefined;
+  sourceAudio?: TimelineSourceAudio | undefined;
   motion?: Motion | undefined;
   transitionTo?: TimelineTransition | undefined;
   overlay?: TimelineOverlay | undefined;
@@ -53,11 +70,13 @@ export type TimelineSpec = {
     | undefined;
   voice?: string | undefined;
   bgm?: string | null | undefined;
+  subtitles?: TimelineSubtitles | undefined;
   ttsFailureMode?: 'fail' | 'silent-subtitles' | undefined;
   segments: TimelineSegment[];
 };
 
 const RESOLUTION_RE = /^(\d{3,4})x(\d{3,4})$/;
+const HEX_COLOR_RE = /^#[0-9a-f]{6}$/i;
 const MAX_OUTPUT_DIMENSION = 4096;
 const XFADE_STYLES = new Set([
   'fade',
@@ -96,6 +115,62 @@ export function parseTimelineSpec(raw: string): TimelineSpec {
     (!spec.output || typeof spec.output !== 'object' || Array.isArray(spec.output))
   ) {
     throw new VideoGenError('output must be an object.', 'timeline: bad output');
+  }
+  if (
+    spec.subtitles !== undefined &&
+    (!spec.subtitles || typeof spec.subtitles !== 'object' || Array.isArray(spec.subtitles))
+  ) {
+    throw new VideoGenError('subtitles must be an object.', 'timeline: bad subtitles');
+  }
+  if (spec.subtitles?.mode !== undefined && !['soft', 'burn'].includes(spec.subtitles.mode)) {
+    throw new VideoGenError(
+      'subtitles.mode must be "soft" or "burn".',
+      'timeline: bad subtitle mode',
+    );
+  }
+  if (
+    spec.subtitles?.fontSize !== undefined &&
+    (typeof spec.subtitles.fontSize !== 'number' ||
+      !Number.isFinite(spec.subtitles.fontSize) ||
+      spec.subtitles.fontSize < 12 ||
+      spec.subtitles.fontSize > 256)
+  ) {
+    throw new VideoGenError(
+      'subtitles.fontSize must be a number from 12 to 256.',
+      'timeline: bad subtitle size',
+    );
+  }
+  for (const key of ['textColor', 'backgroundColor'] as const) {
+    const value = spec.subtitles?.[key];
+    if (value !== undefined && (typeof value !== 'string' || !HEX_COLOR_RE.test(value))) {
+      throw new VideoGenError(
+        `subtitles.${key} must be a six-digit hex color such as "#ffffff".`,
+        'timeline: bad subtitle color',
+      );
+    }
+  }
+  if (
+    spec.subtitles?.backgroundOpacity !== undefined &&
+    (typeof spec.subtitles.backgroundOpacity !== 'number' ||
+      !Number.isFinite(spec.subtitles.backgroundOpacity) ||
+      spec.subtitles.backgroundOpacity < 0 ||
+      spec.subtitles.backgroundOpacity > 1)
+  ) {
+    throw new VideoGenError(
+      'subtitles.backgroundOpacity must be a number from 0 to 1.',
+      'timeline: bad subtitle opacity',
+    );
+  }
+  if (
+    spec.subtitles?.mode !== 'burn' &&
+    ['fontSize', 'textColor', 'backgroundColor', 'backgroundOpacity'].some(
+      (key) => spec.subtitles?.[key as keyof TimelineSubtitles] !== undefined,
+    )
+  ) {
+    throw new VideoGenError(
+      'Custom subtitle styling requires subtitles.mode "burn"; soft mov_text styling is player-controlled.',
+      'timeline: soft subtitle style',
+    );
   }
   if (spec.output?.resolution !== undefined) {
     const match =
@@ -158,10 +233,75 @@ export function parseTimelineSpec(raw: string): TimelineSpec {
       throw new VideoGenError(`Duplicate segment id "${seg.id}".`, 'timeline: dup id');
     }
     seen.add(seg.id);
-    if (typeof seg.image !== 'string' || seg.image.trim() === '') {
+    const hasImage = typeof seg.image === 'string' && seg.image.trim() !== '';
+    const hasVideo = typeof seg.video === 'string' && seg.video.trim() !== '';
+    if (Number(hasImage) + Number(hasVideo) !== 1) {
       throw new VideoGenError(
-        `${where}.image is required (path to a png/jpg from image_generate or a screenshot).`,
-        'timeline: no image',
+        `${where} must contain exactly one of image or video as a non-empty path.`,
+        'timeline: bad media source',
+      );
+    }
+    if (seg.fit !== undefined && !['contain', 'cover'].includes(seg.fit)) {
+      throw new VideoGenError(
+        `${where}.fit must be "contain" or "cover".`,
+        'timeline: bad media fit',
+      );
+    }
+    if (seg.trimStartSec !== undefined) {
+      if (!hasVideo) {
+        throw new VideoGenError(
+          `${where}.trimStartSec is only valid for video segments.`,
+          'timeline: image trim',
+        );
+      }
+      if (
+        typeof seg.trimStartSec !== 'number' ||
+        !Number.isFinite(seg.trimStartSec) ||
+        seg.trimStartSec < 0
+      ) {
+        throw new VideoGenError(
+          `${where}.trimStartSec must be a non-negative number.`,
+          'timeline: bad trim',
+        );
+      }
+    }
+    if (
+      seg.sourceAudio !== undefined &&
+      (!seg.sourceAudio || typeof seg.sourceAudio !== 'object' || Array.isArray(seg.sourceAudio))
+    ) {
+      throw new VideoGenError(
+        `${where}.sourceAudio must be an object.`,
+        'timeline: bad source audio',
+      );
+    }
+    if (seg.sourceAudio !== undefined && !hasVideo) {
+      throw new VideoGenError(
+        `${where}.sourceAudio is only valid for video segments.`,
+        'timeline: image source audio',
+      );
+    }
+    if (seg.sourceAudio?.muted !== undefined && typeof seg.sourceAudio.muted !== 'boolean') {
+      throw new VideoGenError(
+        `${where}.sourceAudio.muted must be a boolean.`,
+        'timeline: bad source mute',
+      );
+    }
+    if (
+      seg.sourceAudio?.volume !== undefined &&
+      (typeof seg.sourceAudio.volume !== 'number' ||
+        !Number.isFinite(seg.sourceAudio.volume) ||
+        seg.sourceAudio.volume < 0 ||
+        seg.sourceAudio.volume > 2)
+    ) {
+      throw new VideoGenError(
+        `${where}.sourceAudio.volume must be a number from 0 to 2.`,
+        'timeline: bad source volume',
+      );
+    }
+    if (hasVideo && seg.durationSec === 'auto') {
+      throw new VideoGenError(
+        `${where}: video segments require a numeric durationSec.`,
+        'timeline: video auto duration',
       );
     }
     if (seg.durationSec !== 'auto') {
@@ -186,6 +326,12 @@ export function parseTimelineSpec(raw: string): TimelineSpec {
       throw new VideoGenError(
         `${where}.motion must be one of ${MOTIONS.join(', ')} (got "${seg.motion}").`,
         'timeline: bad motion',
+      );
+    }
+    if (hasVideo && seg.motion !== undefined) {
+      throw new VideoGenError(
+        `${where}.motion is only valid for image segments; video motion comes from the source clip.`,
+        'timeline: video motion',
       );
     }
     if (seg.transitionTo) {
@@ -270,17 +416,22 @@ export function parseTimelineSpec(raw: string): TimelineSpec {
   return spec;
 }
 
-/** Verify every referenced image exists as a regular file. */
-export async function assertImagesReadable(
+export function timelineSourcePath(segment: TimelineSegment): string {
+  return segment.image ?? segment.video!;
+}
+
+/** Verify every referenced image/video exists as a regular file. */
+export async function assertMediaReadable(
   spec: TimelineSpec,
   resolvePath: (p: string) => string,
 ): Promise<void> {
   for (const seg of spec.segments) {
-    const st = await lstat(resolvePath(seg.image)).catch(() => null);
+    const source = timelineSourcePath(seg);
+    const st = await lstat(resolvePath(source)).catch(() => null);
     if (!st?.isFile()) {
       throw new VideoGenError(
-        `Segment "${seg.id}" image is not a readable file: ${safeBasename(seg.image)}. Generate it with image_generate first.`,
-        'timeline: image unreadable',
+        `Segment "${seg.id}" media source is not a readable file: ${safeBasename(source)}.`,
+        'timeline: media unreadable',
       );
     }
   }

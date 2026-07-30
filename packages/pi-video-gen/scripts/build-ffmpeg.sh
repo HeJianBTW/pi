@@ -110,7 +110,7 @@ FF_CONFIGURE_BASE="--disable-autodetect --disable-debug --disable-doc --disable-
   --enable-encoder=mpeg4,aac,pcm_s16le,png,movtext \
   --enable-parser=h264,aac,mpeg4video,mpegaudio \
   --enable-indev=lavfi \
-  --enable-filter=copy,format,aformat,aresample,scale,crop,zoompan,xfade,overlay,pad,fade,amix,volume,trim,atrim,concat,settb,setsar,fps,anullsrc,color,sine \
+  --enable-filter=copy,format,aformat,aresample,scale,crop,zoompan,xfade,overlay,pad,fade,amix,alimiter,volume,trim,atrim,concat,settb,setsar,fps,anullsrc,color,sine \
   --enable-bsf=h264_mp4toannexb,aac_adtstoasc"
 
 if [ "${GPL_VARIANT:-}" = "1" ]; then

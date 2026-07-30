@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   concatVideos,
+  probeVideoDuration,
   resolveFfmpeg,
   resolveFfprobe,
   resolveGplFfmpeg,
@@ -104,6 +105,24 @@ describe('resolveFfmpeg', () => {
       source: 'env',
       runnable: false,
     });
+  });
+});
+
+describe('probeVideoDuration', () => {
+  afterEach(() => {
+    rmSync(suiteDir, { recursive: true, force: true });
+  });
+
+  it('uses a per-stream DURATION tag when numeric stream duration is absent', async () => {
+    mkdirSync(suiteDir, { recursive: true });
+    const ffprobe = join(suiteDir, 'ffprobe');
+    writeFileSync(
+      ffprobe,
+      '#!/bin/sh\nprintf \'{"streams":[{"tags":{"DURATION":"00:00:01.250000000"}}]}\'\n',
+    );
+    chmodSync(ffprobe, 0o755);
+
+    await expect(probeVideoDuration(ffprobe, join(suiteDir, 'sample.webm'))).resolves.toBe(1.25);
   });
 });
 

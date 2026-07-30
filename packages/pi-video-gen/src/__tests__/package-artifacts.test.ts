@@ -58,6 +58,7 @@ describe('pi-video-gen package artifacts', () => {
     expect(script).toMatch(/--enable-decoder=[^\n]*mjpeg/);
     expect(script).toMatch(/--enable-decoder=[^\n]*webp/);
     expect(script).toMatch(/--enable-decoder=[^\n]*gif/);
+    expect(script).toMatch(/--enable-filter=[^\n]*alimiter/);
     expect(script).toContain('MACOSX_DEPLOYMENT_TARGET=11.0');
     // Base (LGPL) build has NO third-party codec libs; the opt-in GPL_VARIANT
     // branch may add libx264 only inside its own guarded section.
@@ -87,6 +88,10 @@ describe('pi-video-gen package artifacts', () => {
     expect(publishWorkflow).toContain('amix=inputs=2');
     expect(publishWorkflow).toContain('mov_text');
     expect(publishWorkflow).toContain('timeline-smoke-qc.png');
+    expect(publishWorkflow).toContain('mixed-media-smoke');
+    expect(publishWorkflow).toContain('volume=0.5[src]');
+    expect(publishWorkflow).toContain('duration=first:normalize=0');
+    expect(publishWorkflow).toContain('alimiter=limit=0.95:level=false');
     expect(publishWorkflow).toContain('libx264');
   });
 

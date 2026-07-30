@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import sharp from 'sharp';
 import { VideoGenError } from './errors.js';
-import type { OverlayPosition, TimelineOverlay } from './timeline.js';
+import type { OverlayPosition, TimelineOverlay, TimelineSubtitles } from './timeline.js';
 
 /**
  * Text overlay rendering (C1): SVG template → PNG overlay via sharp.
@@ -41,6 +41,52 @@ function escapeXml(text: string): string {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+function estimatedTextWidth(text: string, fontSize: number): number {
+  return Array.from(text).reduce((width, char) => {
+    if (/\s/u.test(char)) return width + fontSize * 0.33;
+    if (
+      /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Extended_Pictographic}]/u.test(
+        char,
+      ) ||
+      /[MWmw@%&]/u.test(char)
+    ) {
+      return width + fontSize;
+    }
+    if (/[A-Z0-9]/u.test(char)) return width + fontSize * 0.75;
+    return width + fontSize * 0.62;
+  }, 0);
+}
+
+function wrapSubtitleLines(text: string, fontSize: number, maxWidth: number): string[] {
+  const lines: string[] = [];
+  for (const paragraph of text.split('\n')) {
+    let line = '';
+    for (const token of paragraph.match(/\s+|[^\s]+/gu) ?? []) {
+      const candidate = line + token;
+      if (line.trim() && estimatedTextWidth(candidate, fontSize) > maxWidth) {
+        lines.push(line.trim());
+        line = token.trimStart();
+      } else {
+        line = candidate;
+      }
+      while (estimatedTextWidth(line, fontSize) > maxWidth) {
+        const chars = Array.from(line);
+        let cut = 1;
+        while (
+          cut < chars.length &&
+          estimatedTextWidth(chars.slice(0, cut + 1).join(''), fontSize) <= maxWidth
+        ) {
+          cut += 1;
+        }
+        lines.push(chars.slice(0, cut).join('').trim());
+        line = chars.slice(cut).join('').trimStart();
+      }
+    }
+    if (line.trim()) lines.push(line.trim());
+  }
+  return lines;
 }
 
 function positionFor(
@@ -113,6 +159,54 @@ export async function renderTextOverlay(opts: {
   }
   const svg = overlaySvg(opts.overlay, opts.width, opts.height);
   // Render the SVG at ~2x density for crisp text, then downscale to frame size.
+  await sharp(Buffer.from(svg, 'utf-8'), { density: 150 })
+    .resize(opts.width, opts.height)
+    .png()
+    .toFile(opts.outPath);
+  return opts.outPath;
+}
+
+/** Render one narration cue as a branded, bottom-centered burned subtitle. */
+export async function renderBurnedSubtitle(opts: {
+  text: string;
+  style: TimelineSubtitles;
+  width: number;
+  height: number;
+  outPath: string;
+}): Promise<string> {
+  if (/\p{Script=Han}/u.test(opts.text) && !hasCjkFont()) {
+    throw new VideoGenError(
+      'A CJK font is required for burned Chinese subtitles. Install PingFang, Microsoft YaHei, Noto Sans CJK, or WenQuanYi, then retry.',
+      'text-layer: CJK font missing',
+    );
+  }
+  const fontSize = opts.style.fontSize ?? Math.max(20, Math.round(opts.height * 0.032));
+  const lineHeight = Math.round(fontSize * 1.35);
+  const margin = Math.round(opts.height * SAFE_MARGIN_RATIO);
+  const padding = Math.round(fontSize * 0.5);
+  const lines = wrapSubtitleLines(opts.text, fontSize, opts.width - margin * 2 - padding * 2);
+  const blockHeight = Math.max(1, lines.length) * lineHeight;
+  if (blockHeight + padding * 2 > opts.height - margin * 2) {
+    throw new VideoGenError(
+      'Burned subtitle text is too long to fit the video frame. Shorten the narration or reduce subtitles.fontSize.',
+      'text-layer: subtitle too long',
+    );
+  }
+  const plateY = opts.height - margin - blockHeight - padding;
+  const textY = plateY + padding + fontSize;
+  const textColor = opts.style.textColor ?? '#ffffff';
+  const backgroundColor = opts.style.backgroundColor ?? '#000000';
+  const backgroundOpacity = opts.style.backgroundOpacity ?? 0.55;
+  const tspans = lines
+    .map(
+      (line, index) =>
+        `<tspan x="${Math.round(opts.width / 2)}" y="${textY + index * lineHeight}">${escapeXml(line)}</tspan>`,
+    )
+    .join('');
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${opts.width}" height="${opts.height}">
+    <rect x="0" y="${plateY}" width="${opts.width}" height="${blockHeight + padding * 2}" fill="${backgroundColor}" fill-opacity="${backgroundOpacity}"/>
+    <text font-size="${fontSize}" font-weight="500" fill="${textColor}" text-anchor="middle" font-family="${FONT_STACK}">${tspans}</text>
+  </svg>`;
   await sharp(Buffer.from(svg, 'utf-8'), { density: 150 })
     .resize(opts.width, opts.height)
     .png()

@@ -101,10 +101,12 @@ describe('pi-video-gen extension', () => {
     expect(Object.keys(params)).toEqual(['composeSpecPath']);
   });
 
-  it('guides timeline compose to reuse existing images before generating missing sources', () => {
+  it('guides timeline compose to reuse existing media before generating missing sources', () => {
     const guidance = tools.get('video_compose')!.promptGuidelines?.join('\n') ?? '';
-    expect(guidance).toMatch(/reuse existing images or screenshots first/i);
-    expect(guidance).toMatch(/generate only missing source material/i);
+    expect(guidance).toMatch(/reuse existing images\/screenshots\/clips first/i);
+    expect(guidance).toMatch(/generate only missing visuals/i);
+    expect(guidance).toMatch(/exactly one image or video/i);
+    expect(guidance).toMatch(/subtitles\.mode "burn"/i);
     expect(guidance).not.toMatch(/generate images first/i);
   });
 

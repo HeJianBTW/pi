@@ -152,7 +152,7 @@ jobs:
               [4:a]atrim=0:0.25[a1];
               [a0][a1]concat=n=2:v=0:a=1[voice];
               [5:a]atrim=0:0.5[bgm];
-              [voice][bgm]amix=inputs=2:duration=first[a]"
+              [voice][bgm]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.95:level=false[a]"
             -map "[v]" -map "[a]" -map 6:s
             -t 0.8 -c:a aac -c:s mov_text -y
           )
@@ -160,8 +160,17 @@ jobs:
             "timeline-smoke-${{ matrix.target }}.mp4"
           run_ffmpeg "$gpl" "${smoke_args[@]}" -c:v libx264 \
             "timeline-smoke-${{ matrix.target }}-h264.mp4"
+          run_ffmpeg "$bin" \
+            -ss 0.1 -t 0.3 -i "timeline-smoke-${{ matrix.target }}.mp4" \
+            -f lavfi -i anullsrc=r=48000:cl=stereo \
+            -filter_complex "
+              [0:v]scale=64:64:force_original_aspect_ratio=increase,crop=64:64,fps=25[v];
+              [0:a]volume=0.5[src];
+              [src][1:a]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.95:level=false[a]" \
+            -map "[v]" -map "[a]" -t 0.3 -c:v mpeg4 -c:a aac -y \
+            "mixed-media-smoke-${{ matrix.target }}.mp4"
           run_ffmpeg "$bin" -ss 0.2 \
-            -i "timeline-smoke-${{ matrix.target }}.mp4" \
+            -i "mixed-media-smoke-${{ matrix.target }}.mp4" \
             -frames:v 1 -y timeline-smoke-qc.png
 
       - name: Preserve executable permissions

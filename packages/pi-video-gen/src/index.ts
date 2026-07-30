@@ -602,7 +602,7 @@ export default function piVideoGenExtension(pi: ExtensionAPI): void {
     try {
       const name = p.composeSpecPath.split(/[\\/]/).pop() ?? '';
       if (name === 'timeline-input.json') {
-        // Timeline compose (C1–C3): images + overlays + TTS + motion, local render.
+        // Timeline compose (C1–C4): mixed media + overlays + TTS, local render.
         const result = await runTimeline({
           timelineSpecPath: p.composeSpecPath,
           cwd: ctx.cwd,
@@ -769,7 +769,7 @@ export default function piVideoGenExtension(pi: ExtensionAPI): void {
       name: 'video_compose',
       label: 'Compose Video Clips',
       description:
-        'Local video assembly, no paid models. Two specs: <jobDir>/compose-input.json (C0: lossless concat of 2+ existing mp4 clips, ffprobe stream precheck) or <jobDir>/timeline-input.json (C1+: promo from still images + text overlays + TTS narration + kenburns motion, rendered locally).',
+        'Local video assembly, no paid models. Two specs: <jobDir>/compose-input.json (C0: lossless concat of 2+ existing mp4 clips, ffprobe stream precheck) or <jobDir>/timeline-input.json (C1+: promo from mixed images/video clips + overlays + TTS + transitions + soft or burned subtitles, rendered locally).',
       parameters: Type.Object({
         composeSpecPath: Type.String({
           description:
@@ -777,11 +777,12 @@ export default function piVideoGenExtension(pi: ExtensionAPI): void {
         }),
       }),
       promptSnippet:
-        'Assemble video locally — lossless clip concat (C0) or a promo timeline (images + overlays + TTS narration + motion), no paid models',
+        'Assemble video locally — lossless clip concat (C0) or a mixed image/video promo timeline with TTS and soft/burned subtitles, no paid models',
       promptGuidelines: [
-        'Two modes: <jobDir>/compose-input.json (C0: concat 2+ existing mp4 clips) or <jobDir>/timeline-input.json (promo: still images + text overlays + TTS narration + kenburns motion + xfade transitions, all local).',
+        'Two modes: <jobDir>/compose-input.json (C0: concat 2+ compatible mp4 clips) or <jobDir>/timeline-input.json (promo: mixed images/video + overlays + TTS + xfade + soft/burned subtitles, all local).',
         'For C0: every ordered stream across all clips must match (codec/resolution/fps/timebase/pix_fmt/sample-rate/audio layout) — mismatches are reported via ffprobe, never silently transcoded. Do NOT use for AI video generation (use video_generate/video_render).',
-        'For timeline: reuse existing images or screenshots first and generate only missing source material with image_generate; write narration in each segment (Edge TTS is free — no paid confirmation needed), and put Chinese titles/subtitles in overlay (rendered locally, never from an image model).',
+        'For timeline: each segment contains exactly one image or video. Video uses numeric durationSec with optional trimStartSec, fit, and sourceAudio; image may use auto duration and motion.',
+        'Reuse existing images/screenshots/clips first and generate only missing visuals with image_generate. Put Chinese titles in overlay and use subtitles.mode "burn" when narration subtitles must appear directly in the frames.',
         'Timeline TTS failures stop by default. Set ttsFailureMode "silent-subtitles" in timeline-input.json only after the user explicitly accepts silent audio with preserved subtitles.',
         'Local compute — no paid-model confirmation needed, but tell the user the segment/clip count and planned duration before calling.',
         'The spec is immutable per job directory: rerunning the same path resumes identical input; changing input means a NEW job directory.',

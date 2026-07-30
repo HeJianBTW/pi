@@ -17,6 +17,7 @@ import { safeBasename, VideoGenError } from './errors.js';
 import {
   probeDuration,
   probeStreams,
+  probeVideoDuration,
   resolveFfmpeg,
   resolveFfprobe,
   resolveGplFfmpeg,
@@ -31,26 +32,27 @@ import {
   saveTimelineJob,
   type TimelineJobManifest,
 } from './jobs/store.js';
-import { renderTextOverlay } from './text-layer.js';
+import { renderBurnedSubtitle, renderTextOverlay } from './text-layer.js';
 import {
-  assertImagesReadable,
+  assertMediaReadable,
   type Motion,
   parseTimelineSpec,
   type TimelineSegment,
+  timelineSourcePath,
 } from './timeline.js';
 import { edgeTtsProvider, parseVoiceRef, type TtsProvider } from './tts/edge-tts.js';
 import type { VideoGenSettings } from './types.js';
 
 /**
- * Timeline compose pipeline (C1–C3): promo/explainer videos from still
- * images + text overlays + TTS narration + motion, rendered LOCALLY with the
+ * Timeline compose pipeline (C1–C4): promo/explainer videos from images/video
+ * clips + text overlays + TTS narration + motion, rendered LOCALLY with the
  * vendored ffmpeg — no video-generation model, near-zero marginal cost.
  *
  * Pipeline (all stages are artifact-cached in the job dir, so a rerun after
  * interruption resumes where it stopped):
- *   timeline-input.json → overlays (sharp) → narration (Edge TTS) → segment
- *   mp4s (kenburns/overlay per segment) → xfade/concat video track →
- *   narration/silence audio track (+BGM ducking) → mov_text subtitles →
+ *   timeline-input.json → overlays/subtitles (sharp) → narration (Edge TTS) →
+ *   normalized segment mp4s → xfade/concat video track →
+ *   source/narration audio (+BGM ducking) → optional mov_text subtitles →
  *   ffprobe duration + QC frame extraction.
  */
 
@@ -202,10 +204,13 @@ function motionFilter(
   width: number,
   height: number,
   fps: number,
+  fit: 'contain' | 'cover' = 'contain',
 ): string {
   const m = motion ?? 'static';
   if (m === 'static') {
-    return `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1`;
+    return fit === 'cover'
+      ? `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1`
+      : `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1`;
   }
   const bigW = Math.round(width * 1.5);
   const bigH = Math.round(height * 1.5);
@@ -251,6 +256,20 @@ function splitCueText(text: string, maxLen = 24): string {
 
 function transitionOverlap(segment: TimelineSegment): number {
   return segment.transitionTo?.durationSec ?? 0;
+}
+
+function isSourceAudioEnabled(segment: TimelineSegment & { sourceHasAudio?: boolean }): boolean {
+  return Boolean(
+    segment.video &&
+      segment.sourceHasAudio &&
+      !segment.sourceAudio?.muted &&
+      (segment.sourceAudio?.volume ?? 1) > 0,
+  );
+}
+
+function segmentSnapshotName(segment: TimelineSegment): string {
+  const source = timelineSourcePath(segment);
+  return `segment-${segment.id}${extname(source) || (segment.video ? '.mp4' : '.png')}`;
 }
 
 export async function runTimeline(opts: {
@@ -340,49 +359,49 @@ export async function runTimeline(opts: {
       }
     }
 
-    // ── 2. stage images (and BGM) into a FRESH staging dir, verify fingerprint
+    // ── 2. stage media (and BGM) into a FRESH staging dir, verify fingerprint
     //    against the manifest, then swap in as the job's frozen assets. The old
     //    job's assets/ is NEVER modified before the fingerprint check passes.
-    opts.onUpdate?.('Freezing segment images…');
-    await assertImagesReadable(spec, (p) => resolve(cwd, p));
+    opts.onUpdate?.('Freezing segment media…');
+    await assertMediaReadable(spec, (p) => resolve(cwd, p));
     const assetsDir = join(jobDir, 'assets');
     const stagingDir = await mkdtemp(join(jobDir, '.assets-staging-'));
     // Directory-realpath guard on the JOB dir itself (staging sits inside it).
     const realJob = await realpath(jobDir);
-    const imageHashes: Record<string, string> = {};
-    const imageSnaps: Record<string, string> = {};
+    const mediaHashes: Record<string, string> = {};
+    const mediaSnaps: Record<string, string> = {};
     let bgmSnapshotPath = '';
     let manifest: TimelineJobManifest;
     let snapCounter = 0;
     try {
       for (const seg of spec.segments) {
-        const absImage = resolve(cwd, seg.image);
-        const ext = extname(absImage) || '.png';
-        const destPath = join(stagingDir, `${seg.id}${ext}`);
+        const source = timelineSourcePath(seg);
+        const absMedia = resolve(cwd, source);
+        const destPath = join(stagingDir, segmentSnapshotName(seg));
         let tmp = '';
         for (let i = 0; ; i++) {
           const candidate = `${destPath}.tmp-${process.pid}-${snapCounter++}-${i}`;
           try {
-            await copyFile(absImage, candidate, COPYFILE_EXCL);
+            await copyFile(absMedia, candidate, COPYFILE_EXCL);
             tmp = candidate;
             break;
           } catch (error) {
             if ((error as NodeJS.ErrnoException).code === 'EEXIST') continue;
             if (
               (error as NodeJS.ErrnoException).code === 'ENOENT' &&
-              (await pathIsMissing(absImage))
+              (await pathIsMissing(absMedia))
             ) {
               throw new VideoGenError(
-                `Segment "${seg.id}" image is not readable: ${safeBasename(seg.image)}.`,
-                'timeline: image unreadable',
+                `Segment "${seg.id}" media source is not readable: ${safeBasename(source)}.`,
+                'timeline: media unreadable',
               );
             }
             throw error;
           }
         }
         await rename(tmp, destPath);
-        imageSnaps[seg.id] = destPath;
-        imageHashes[seg.id] = sha256hex(await readFile(destPath));
+        mediaSnaps[seg.id] = destPath;
+        mediaHashes[seg.id] = await hashFileSha256(destPath, opts.signal);
       }
 
       // Freeze the BGM too (path alone doesn't pin content): snapshot + hash,
@@ -421,12 +440,12 @@ export async function runTimeline(opts: {
         }
         await rename(tmp, bgmDest);
         bgmSnapshotPath = bgmDest;
-        bgmHash = sha256hex(await readFile(bgmDest));
+        bgmHash = await hashFileSha256(bgmDest, opts.signal);
       }
 
       const fingerprint = specFingerprint({
         specRaw: specRaw.toString('utf-8'),
-        imageHashes,
+        imageHashes: mediaHashes,
         voice,
         resolution: `${width}x${height}`,
         fps,
@@ -436,7 +455,7 @@ export async function runTimeline(opts: {
       });
       if (existing && existing.fingerprint !== fingerprint) {
         throw new VideoGenError(
-          'timeline-input.json or a segment image changed since this job was created. Revisions require a NEW job directory.',
+          'timeline-input.json or a segment media source changed since this job was created. Revisions require a NEW job directory.',
           'timeline: input drift',
         );
       }
@@ -446,7 +465,7 @@ export async function runTimeline(opts: {
         kind: 'timeline',
         state: 'working',
         fingerprint,
-        imageHashes,
+        imageHashes: mediaHashes,
         artifactHashes: {},
         segments: {},
         updatedAt: new Date().toISOString(),
@@ -482,25 +501,22 @@ export async function runTimeline(opts: {
       }
       if (existing) {
         for (const seg of spec.segments) {
-          const frozenPath = join(
-            assetsDir,
-            `${seg.id}${extname(resolve(cwd, seg.image)) || '.png'}`,
-          );
+          const frozenPath = join(assetsDir, segmentSnapshotName(seg));
           const frozenStat = await lstat(frozenPath).catch(() => null);
           if (
             !frozenStat?.isFile() ||
-            sha256hex(await readFile(frozenPath)) !== imageHashes[seg.id]
+            (await hashFileSha256(frozenPath, opts.signal)) !== mediaHashes[seg.id]
           ) {
             throw new VideoGenError(
-              `Frozen image snapshot "${seg.id}" changed or is missing. Start a NEW job directory.`,
-              'timeline: frozen image invalid',
+              `Frozen media snapshot "${seg.id}" changed or is missing. Start a NEW job directory.`,
+              'timeline: frozen media invalid',
             );
           }
         }
         if (bgmSnapshotPath) {
           const frozenBgm = join(assetsDir, basename(bgmSnapshotPath));
           const frozenStat = await lstat(frozenBgm).catch(() => null);
-          if (!frozenStat?.isFile() || sha256hex(await readFile(frozenBgm)) !== bgmHash) {
+          if (!frozenStat?.isFile() || (await hashFileSha256(frozenBgm, opts.signal)) !== bgmHash) {
             throw new VideoGenError(
               'Frozen BGM snapshot changed or is missing. Start a NEW job directory.',
               'timeline: frozen bgm invalid',
@@ -521,11 +537,10 @@ export async function runTimeline(opts: {
       await rm(stagingDir, { recursive: true, force: true });
     }
 
-    // Repoint image references at the final assets/ paths (staging paths
+    // Repoint media references at the final assets/ paths (staging paths
     // were only for the pre-check fingerprint).
     for (const seg of spec.segments) {
-      const ext = extname(resolve(cwd, seg.image)) || '.png';
-      imageSnaps[seg.id] = join(assetsDir, `${seg.id}${ext}`);
+      mediaSnaps[seg.id] = join(assetsDir, segmentSnapshotName(seg));
     }
     if (bgmSnapshotPath) {
       bgmSnapshotPath = join(assetsDir, basename(bgmSnapshotPath));
@@ -569,17 +584,31 @@ export async function runTimeline(opts: {
     type ResolvedSegment = TimelineSegment & {
       resolvedDurationSec: number;
       overlayPath?: string;
+      burnedSubtitlePath?: string;
       narrationPath?: string;
       narrationDurationSec?: number;
+      sourceDurationSec?: number;
+      sourceHasAudio?: boolean;
     };
     const resolved: ResolvedSegment[] = [];
+    const mediaProbe = resolveFfprobe(settings.ffmpegPath);
 
     for (const seg of spec.segments) {
       const out: ResolvedSegment = { ...seg, resolvedDurationSec: 0 };
 
+      if (seg.video) {
+        const sourcePath = mediaSnaps[seg.id]!;
+        const [sourceDurationSec, streams] = await Promise.all([
+          probeVideoDuration(mediaProbe.path, sourcePath, opts.signal),
+          probeStreams(mediaProbe.path, sourcePath, opts.signal),
+        ]);
+        out.sourceDurationSec = sourceDurationSec;
+        out.sourceHasAudio = streams.audioLayout !== 'none';
+      }
+
       // text overlay
       if (seg.overlay && (seg.overlay.title || seg.overlay.subtitle)) {
-        const overlayPath = join(overlaysDir, `${seg.id}.png`);
+        const overlayPath = join(overlaysDir, `text-${seg.id}.png`);
         if (!(await canReuse(overlayPath))) {
           opts.onUpdate?.(`Rendering text overlay for ${seg.id}…`);
           await writeAtomic(overlayPath, async (tmp) => {
@@ -588,6 +617,25 @@ export async function runTimeline(opts: {
           await record(overlayPath);
         }
         out.overlayPath = overlayPath;
+      }
+
+      if (seg.narration && spec.subtitles?.mode === 'burn') {
+        const narration = seg.narration;
+        const burnedSubtitlePath = join(overlaysDir, `subtitle-${seg.id}.png`);
+        if (!(await canReuse(burnedSubtitlePath))) {
+          opts.onUpdate?.(`Rendering burned subtitle for ${seg.id}…`);
+          await writeAtomic(burnedSubtitlePath, async (tmp) => {
+            await renderBurnedSubtitle({
+              text: narration,
+              style: spec.subtitles!,
+              width,
+              height,
+              outPath: tmp,
+            });
+          });
+          await record(burnedSubtitlePath);
+        }
+        out.burnedSubtitlePath = burnedSubtitlePath;
       }
 
       // narration via TTS
@@ -634,8 +682,7 @@ export async function runTimeline(opts: {
           // The encoded file is authoritative; provider metadata may omit
           // trailing silence. Probe failures are infrastructure/media errors,
           // not an accepted TTS degradation.
-          const probe = resolveFfprobe(settings.ffmpegPath);
-          const durationSec = await probeDuration(probe.path, narrationPath, opts.signal);
+          const durationSec = await probeDuration(mediaProbe.path, narrationPath, opts.signal);
           out.narrationPath = narrationPath;
           out.narrationDurationSec = durationSec;
           manifest.segments[seg.id] = {
@@ -652,10 +699,28 @@ export async function runTimeline(opts: {
       const audioFloor = out.narrationDurationSec
         ? out.narrationDurationSec + AUTO_PAD_SEC + outgoingOverlap
         : 0;
+      const narrationWindow = (out.narrationDurationSec ?? 0) + outgoingOverlap;
+      if (seg.video && typeof seg.durationSec === 'number' && narrationWindow > seg.durationSec) {
+        throw new VideoGenError(
+          `Segment "${seg.id}" narration (${out.narrationDurationSec?.toFixed(2)}s) does not fit the fixed ${seg.durationSec.toFixed(2)}s video duration. Shorten the narration or increase durationSec.`,
+          'timeline: narration exceeds video duration',
+        );
+      }
       if (seg.durationSec === 'auto') {
         out.resolvedDurationSec = Math.max(1, audioFloor || 3);
+      } else if (seg.video) {
+        out.resolvedDurationSec = seg.durationSec;
       } else {
         out.resolvedDurationSec = Math.max(seg.durationSec, audioFloor);
+      }
+      if (
+        seg.video &&
+        (seg.trimStartSec ?? 0) + out.resolvedDurationSec > (out.sourceDurationSec ?? 0) + 0.05
+      ) {
+        throw new VideoGenError(
+          `Segment "${seg.id}" requests ${(seg.trimStartSec ?? 0).toFixed(2)}s + ${out.resolvedDurationSec.toFixed(2)}s, beyond the ${out.sourceDurationSec?.toFixed(2)}s source video.`,
+          'timeline: video trim exceeds source',
+        );
       }
       // Post-resolution revalidation: a transition longer than the resolved
       // duration would swallow the segment (and the LAST segment must not
@@ -709,24 +774,52 @@ export async function runTimeline(opts: {
       if (await canReuse(segPath)) continue;
       opts.onUpdate?.(`Rendering segment ${seg.id} (${seg.resolvedDurationSec.toFixed(1)}s)…`);
       const frames = Math.round(seg.resolvedDurationSec * fps);
-      const motion = motionFilter(seg.motion, frames, width, height, fps);
-
-      const inputs: string[] = [
-        '-loop',
-        '1',
-        '-framerate',
-        String(fps),
-        '-t',
-        seg.resolvedDurationSec.toFixed(2),
-        '-i',
-        imageSnaps[seg.id]!,
+      const motion = motionFilter(seg.motion, frames, width, height, fps, seg.fit);
+      const inputs: string[] = seg.video
+        ? [
+            '-ss',
+            (seg.trimStartSec ?? 0).toFixed(2),
+            '-t',
+            seg.resolvedDurationSec.toFixed(2),
+            '-i',
+            mediaSnaps[seg.id]!,
+          ]
+        : [
+            '-loop',
+            '1',
+            '-framerate',
+            String(fps),
+            '-t',
+            seg.resolvedDurationSec.toFixed(2),
+            '-i',
+            mediaSnaps[seg.id]!,
+          ];
+      const graphParts: string[] = [
+        `[0:v]${motion}${seg.video ? `,fps=${fps}` : ''},format=yuv420p[base]`,
       ];
-      const graphParts: string[] = [`[0:v]${motion},format=yuv420p[base]`];
-      if (seg.overlayPath) {
-        inputs.push('-i', seg.overlayPath);
-        graphParts.push(`[1:v]format=rgba[ovr]`, `[base][ovr]overlay=0:0:format=auto[vout]`);
-      } else {
+      let currentLayer = 'base';
+      for (const [index, overlayPath] of [seg.overlayPath, seg.burnedSubtitlePath]
+        .filter((path): path is string => Boolean(path))
+        .entries()) {
+        const inputIndex = inputs.filter((arg) => arg === '-i').length;
+        inputs.push('-i', overlayPath);
+        const enable =
+          overlayPath === seg.burnedSubtitlePath
+            ? `:enable='lt(t,${Math.min(
+                seg.resolvedDurationSec - transitionOverlap(seg),
+                seg.narrationDurationSec ?? Number.POSITIVE_INFINITY,
+              ).toFixed(3)})'`
+            : '';
+        graphParts.push(
+          `[${inputIndex}:v]format=rgba[ovr${index}]`,
+          `[${currentLayer}][ovr${index}]overlay=0:0:format=auto${enable}[layer${index}]`,
+        );
+        currentLayer = `layer${index}`;
+      }
+      if (currentLayer === 'base') {
         graphParts.push(`[base]copy[vout]`);
+      } else {
+        graphParts.push(`[${currentLayer}]copy[vout]`);
       }
 
       await writeAtomic(segPath, async (tmp) => {
@@ -816,9 +909,15 @@ export async function runTimeline(opts: {
     // ── 6. audio track: concat per-segment audio, optional BGM ducking ─────
     const audioTrackPath = join(jobDir, 'audio_track.mp4');
     for (const seg of resolved) {
-      await canReuse(
-        join(audioDir, seg.narrationPath ? `${seg.id}_padded.mp4` : `${seg.id}_silence.mp4`),
-      );
+      const sourceAudioEnabled = isSourceAudioEnabled(seg);
+      if (seg.narrationPath) await canReuse(join(audioDir, `${seg.id}_padded.mp4`));
+      if (sourceAudioEnabled) await canReuse(join(audioDir, `${seg.id}_source.mp4`));
+      if (seg.narrationPath && sourceAudioEnabled) {
+        await canReuse(join(audioDir, `${seg.id}_mixed.mp4`));
+      }
+      if (!seg.narrationPath && !sourceAudioEnabled) {
+        await canReuse(join(audioDir, `${seg.id}_silence.mp4`));
+      }
     }
     if (!(await canReuse(audioTrackPath))) {
       opts.onUpdate?.('Mixing audio track…');
@@ -831,6 +930,7 @@ export async function runTimeline(opts: {
         const seg = resolved[i]!;
         const overlap = transitionOverlap(seg);
         const audioSpan = Math.max(0.2, seg.resolvedDurationSec - overlap);
+        let narrationAudioPath: string | undefined;
         if (seg.narrationPath) {
           // Narration length IS its own audio; the segment spans it. No
           // trimming (long transitions must never cut narration) and no fake
@@ -868,8 +968,84 @@ export async function runTimeline(opts: {
             });
             await record(paddedPath);
           }
-          lines.push(`file '${paddedPath.replace(/'/g, `'\\''`)}'`);
-        } else {
+          narrationAudioPath = paddedPath;
+        }
+
+        const sourceAudioEnabled = isSourceAudioEnabled(seg);
+        let sourceAudioPath: string | undefined;
+        if (sourceAudioEnabled) {
+          sourceAudioPath = join(audioDir, `${seg.id}_source.mp4`);
+          if (!(await canReuse(sourceAudioPath))) {
+            await writeAtomic(sourceAudioPath, async (tmp) => {
+              await runFfmpegCommand(
+                ffmpeg.path,
+                [
+                  '-ss',
+                  (seg.trimStartSec ?? 0).toFixed(2),
+                  '-t',
+                  audioSpan.toFixed(2),
+                  '-i',
+                  mediaSnaps[seg.id]!,
+                  '-f',
+                  'lavfi',
+                  '-i',
+                  'anullsrc=r=48000:cl=stereo',
+                  '-filter_complex',
+                  `[0:a]volume=${(seg.sourceAudio?.volume ?? 1).toFixed(3)}[src];[src][1:a]amix=inputs=2:duration=longest:normalize=0,alimiter=limit=0.95:level=false[out]`,
+                  '-map',
+                  '[out]',
+                  '-t',
+                  audioSpan.toFixed(2),
+                  '-ar',
+                  '48000',
+                  '-ac',
+                  '2',
+                  '-c:a',
+                  'aac',
+                  '-b:a',
+                  '96k',
+                  '-y',
+                  tmp,
+                ],
+                opts.signal,
+              );
+            });
+            await record(sourceAudioPath);
+          }
+        }
+
+        let segmentAudioPath = narrationAudioPath ?? sourceAudioPath;
+        if (narrationAudioPath && sourceAudioPath) {
+          const mixedPath = join(audioDir, `${seg.id}_mixed.mp4`);
+          if (!(await canReuse(mixedPath))) {
+            await writeAtomic(mixedPath, async (tmp) => {
+              await runFfmpegCommand(
+                ffmpeg.path,
+                [
+                  '-i',
+                  narrationAudioPath!,
+                  '-i',
+                  sourceAudioPath!,
+                  '-filter_complex',
+                  '[0:a][1:a]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.95:level=false[out]',
+                  '-map',
+                  '[out]',
+                  '-c:a',
+                  'aac',
+                  '-b:a',
+                  '96k',
+                  '-y',
+                  tmp,
+                ],
+                opts.signal,
+              );
+            });
+            await record(mixedPath);
+          }
+          segmentAudioPath = mixedPath;
+        }
+
+        if (!segmentAudioPath) {
           // silence: reuse anullsrc through a named filter is not possible in
           // concat demuxer — record the silent gap via a generated silent file
           const silencePath = join(audioDir, `${seg.id}_silence.mp4`);
@@ -896,8 +1072,9 @@ export async function runTimeline(opts: {
             });
             await record(silencePath);
           }
-          lines.push(`file '${silencePath.replace(/'/g, `'\\''`)}'`);
+          segmentAudioPath = silencePath;
         }
+        lines.push(`file '${segmentAudioPath.replace(/'/g, `'\\''`)}'`);
       }
       await writeAtomic(listPath, async (tmp) => {
         await writeFile(tmp, lines.join('\n'), 'utf-8');
@@ -917,7 +1094,7 @@ export async function runTimeline(opts: {
               '-i',
               bgmSnapshotPath,
               '-filter_complex',
-              '[0:a]volume=1.0[a1];[1:a]volume=0.18[a2];[a1][a2]amix=inputs=2:duration=first[aout]',
+              '[0:a]volume=1.0[a1];[1:a]volume=0.18[a2];[a1][a2]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.95:level=false[aout]',
               '-map',
               '[aout]',
               '-c:a',
@@ -1003,6 +1180,7 @@ export async function runTimeline(opts: {
     }
     const narrated = resolved.filter((segment) => Boolean(segment.narration));
     const hasNarration = narrated.length > 0;
+    const hasSoftSubtitles = hasNarration && spec.subtitles?.mode !== 'burn';
     const subtitlePath = hasNarration ? join(jobDir, 'subtitles.srt') : undefined;
     let expectedSrt = '';
     if (subtitlePath) {
@@ -1035,10 +1213,9 @@ ${splitCueText(seg.narration)}
       }
     }
     if (!hasFinalVideo) {
-      const subArgs =
-        narrated.length > 0
-          ? ['-i', subtitlePath!, '-c:s', 'mov_text', '-metadata:s:s:0', 'language=chi']
-          : [];
+      const subArgs = hasSoftSubtitles
+        ? ['-i', subtitlePath!, '-c:s', 'mov_text', '-metadata:s:s:0', 'language=chi']
+        : [];
 
       opts.onUpdate?.('Muxing final video…');
       await writeAtomic(finalVideoPath, async (tmp) => {
@@ -1054,7 +1231,7 @@ ${splitCueText(seg.narration)}
             '0:v',
             '-map',
             '1:a',
-            ...(narrated.length > 0 ? ['-map', '2:s'] : []),
+            ...(hasSoftSubtitles ? ['-map', '2:s'] : []),
             '-c:v',
             'copy',
             '-c:a',
@@ -1101,10 +1278,16 @@ ${splitCueText(seg.narration)}
         'timeline: audio qc',
       );
     }
-    if (hasNarration && streams.subtitleCodec !== 'mov_text') {
+    if (hasSoftSubtitles && streams.subtitleCodec !== 'mov_text') {
       throw new VideoGenError(
         'QC: the final video is missing its mov_text subtitle track.',
         'timeline: subtitle qc',
+      );
+    }
+    if (hasNarration && !hasSoftSubtitles && streams.subtitleCodec !== 'none') {
+      throw new VideoGenError(
+        'QC: burned-subtitle output unexpectedly contains a soft subtitle track.',
+        'timeline: burned subtitle qc',
       );
     }
     if (subtitlePath && (await readFile(subtitlePath, 'utf-8')) !== expectedSrt) {

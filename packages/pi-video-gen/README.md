@@ -2,8 +2,8 @@
 
 Pi extension for agentic video generation. Ships the single-clip primitive
 (`video_generate`), the multi-shot render pipeline (`video_render`), local
-lossless clip composing and image-based promo timelines with overlays, TTS,
-subtitles, and BGM (`video_compose`), the read-only
+lossless clip composing and mixed-media promo timelines with overlays, TTS,
+soft or burned subtitles, source-video audio, and BGM (`video_compose`), the read-only
 `video_capabilities` query, a `/video-gen` command, and the `video-gen` skill
 that orchestrates the full shot-book workflow together with
 [pi-image-gen](../pi-image-gen) (all image work).
@@ -142,7 +142,7 @@ the binaries.
 
 | Tool | What it does |
 |---|---|
-| `video_compose` | **Local video assembly, no paid models.** C0 (`compose-input.json`): lossless concat of existing compatible mp4 clips with ordered, all-track ffprobe stream precheck. Timeline (`timeline-input.json`): promo from still images + text overlays + Edge TTS narration + kenburns motion + mov_text subtitles + optional BGM — local render, near-zero cost. Timeline TTS failures stop by default; set `ttsFailureMode: "silent-subtitles"` only for an explicit silent-audio degradation that preserves subtitles. An accepted degradation stays cached for that immutable job; the C0 final video and all reusable Timeline artifacts are regular job-local files bound to manifest hashes. |
+| `video_compose` | **Local video assembly, no paid models.** C0 (`compose-input.json`): lossless concat of existing compatible mp4 clips with ordered, all-track ffprobe stream precheck. Timeline (`timeline-input.json`): promo from mixed images/video clips + text overlays + Edge TTS narration + image motion + xfade transitions + soft or burned subtitles + source-video audio + optional BGM — local render, near-zero cost. Video segments use a fixed numeric `durationSec`, optional `trimStartSec`, `fit`, and `sourceAudio`; narration that does not fit the selected video window is rejected. Image segments also support `durationSec: "auto"` and kenburns/pan/zoom motion. Timeline TTS failures stop by default; set `ttsFailureMode: "silent-subtitles"` only for an explicit silent-audio degradation that preserves subtitles. An accepted degradation stays cached for that immutable job; the C0 final video and all reusable Timeline artifacts are regular job-local files bound to manifest hashes. |
 | `video_generate` | One short clip from a prompt (+ optional first/last frame images). Paid, minutes per clip. Interrupted after receiving a task id? Resume with the returned `jobId`; an ambiguous submit is parked and never resubmitted automatically. |
 | `video_render` | Multi-shot film from `<jobDir>/render-input.json`: snapshots + hashes all frames, submits one paid task per shot (resume-aware, finished shots never re-bill), downloads clips, ffmpeg-concats into `final_video.mp4`. |
 | `video_capabilities` | Read-only: active model's capability table + registered models. Call before composing prompts or shot books. |

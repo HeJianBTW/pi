@@ -12,6 +12,67 @@ describe('parseTimelineSpec', () => {
     expect(spec.segments).toHaveLength(1);
   });
 
+  it('accepts a trimmed video segment with fit and source-audio controls', () => {
+    const spec = parseTimelineSpec(
+      JSON.stringify({
+        segments: [
+          {
+            id: 'demo',
+            video: '/demo.mp4',
+            durationSec: 4,
+            trimStartSec: 1.5,
+            fit: 'cover',
+            sourceAudio: { volume: 0.25 },
+          },
+        ],
+      }),
+    );
+
+    expect(spec.segments[0]).toMatchObject({
+      video: '/demo.mp4',
+      trimStartSec: 1.5,
+      fit: 'cover',
+      sourceAudio: { volume: 0.25 },
+    });
+  });
+
+  it('requires exactly one media source and validates video-only options', () => {
+    const make = (segment: Record<string, unknown>) =>
+      JSON.stringify({ segments: [{ id: 's1', durationSec: 3, ...segment }] });
+
+    expect(() => parseTimelineSpec(make({}))).toThrow(/exactly one of image or video/);
+    expect(() => parseTimelineSpec(make({ image: '/a.png', video: '/a.mp4' }))).toThrow(
+      /exactly one of image or video/,
+    );
+    expect(() => parseTimelineSpec(make({ video: '/a.mp4', durationSec: 'auto' }))).toThrow(
+      /video segments require a numeric durationSec/,
+    );
+    expect(() => parseTimelineSpec(make({ image: '/a.png', trimStartSec: 1 }))).toThrow(
+      /trimStartSec is only valid for video/,
+    );
+    expect(() => parseTimelineSpec(make({ video: '/a.mp4', trimStartSec: -1 }))).toThrow(
+      /trimStartSec must be a non-negative number/,
+    );
+    expect(() => parseTimelineSpec(make({ video: '/a.mp4', fit: 'stretch' }))).toThrow(
+      /fit must be "contain" or "cover"/,
+    );
+    expect(() => parseTimelineSpec(make({ video: '/a.mp4', motion: 'zoom-in' }))).toThrow(
+      /motion is only valid for image segments/,
+    );
+    expect(() => parseTimelineSpec(make({ video: '/a.mp4', sourceAudio: { volume: 3 } }))).toThrow(
+      /sourceAudio.volume must be a number from 0 to 2/,
+    );
+    expect(() => parseTimelineSpec(make({ video: '/a.mp4', sourceAudio: null }))).toThrow(
+      /sourceAudio must be an object/,
+    );
+    expect(() =>
+      parseTimelineSpec(make({ video: '/a.mp4', sourceAudio: { muted: 'yes' } })),
+    ).toThrow(/sourceAudio.muted must be a boolean/);
+    expect(() => parseTimelineSpec(make({ image: '/a.png', sourceAudio: {} }))).toThrow(
+      /sourceAudio is only valid for video/,
+    );
+  });
+
   it('rejects invalid JSON and missing segments', () => {
     expect(() => parseTimelineSpec('{no')).toThrow(/not valid JSON/);
     expect(() => parseTimelineSpec('{}')).toThrow(/non-empty "segments" array/);
@@ -38,7 +99,7 @@ describe('parseTimelineSpec', () => {
     ).toThrow(/Invalid segment id/);
     expect(() =>
       parseTimelineSpec(JSON.stringify({ segments: [{ id: 's1', durationSec: 3 }] })),
-    ).toThrow(/image is required/);
+    ).toThrow(/exactly one of image or video/);
     expect(() =>
       parseTimelineSpec(
         JSON.stringify({ segments: [{ id: 's1', image: '/a.png', durationSec: 0.1 }] }),
@@ -182,6 +243,43 @@ describe('parseTimelineSpec', () => {
       }),
     );
     expect(spec.segments[0]!.motion).toBe('kenburns-in');
+  });
+
+  it('accepts and validates burned-subtitle styling', () => {
+    const make = (subtitles: unknown) =>
+      JSON.stringify({
+        subtitles,
+        segments: [{ id: 's1', image: '/a.png', durationSec: 3, narration: '你好' }],
+      });
+    const accepted = parseTimelineSpec(
+      make({
+        mode: 'burn',
+        fontSize: 32,
+        textColor: '#ffffff',
+        backgroundColor: '#000000',
+        backgroundOpacity: 0.6,
+      }),
+    );
+    expect(accepted.subtitles).toMatchObject({ mode: 'burn', fontSize: 32 });
+
+    for (const subtitles of [null, 'burn', []]) {
+      expect(() => parseTimelineSpec(make(subtitles))).toThrow(/subtitles must be an object/);
+    }
+    expect(() => parseTimelineSpec(make({ mode: 'both' }))).toThrow(
+      /subtitles.mode must be "soft" or "burn"/,
+    );
+    expect(() => parseTimelineSpec(make({ fontSize: 4 }))).toThrow(
+      /subtitles.fontSize must be a number from 12 to 256/,
+    );
+    expect(() => parseTimelineSpec(make({ textColor: 'white' }))).toThrow(
+      /subtitles.textColor must be a six-digit hex color/,
+    );
+    expect(() => parseTimelineSpec(make({ backgroundOpacity: 2 }))).toThrow(
+      /subtitles.backgroundOpacity must be a number from 0 to 1/,
+    );
+    expect(() => parseTimelineSpec(make({ mode: 'soft', fontSize: 32 }))).toThrow(
+      /subtitle styling requires subtitles.mode "burn"/,
+    );
   });
 
   it('validates the explicit TTS failure policy', () => {

@@ -1,7 +1,7 @@
 {
   "name": "@amaster.ai/pi-video-gen",
   "version": "0.1.0",
-  "description": "Pi extension for AI video generation plus local video composition: lossless clip concat and image-to-video timelines with overlays, TTS, subtitles, BGM, and bundled LGPL/GPL FFmpeg runtimes.",
+  "description": "Pi extension for AI video generation plus local video composition: lossless clip concat and mixed image/video timelines with overlays, TTS, soft or burned subtitles, source audio, BGM, and bundled LGPL/GPL FFmpeg runtimes.",
   "keywords": [
     "pi-package",
     "pi",

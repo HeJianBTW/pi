@@ -271,6 +271,52 @@ export async function probeDuration(
   return Number(match[1]);
 }
 
+/** Probe the first video stream's duration (container audio may be longer). */
+export async function probeVideoDuration(
+  ffprobePath: string,
+  filePath: string,
+  signal?: AbortSignal,
+): Promise<number> {
+  const output = await runFfprobe(
+    ffprobePath,
+    [
+      '-v',
+      'error',
+      '-select_streams',
+      'v:0',
+      '-show_entries',
+      'stream=duration:stream_tags=duration',
+      '-of',
+      'json',
+      filePath,
+    ],
+    filePath,
+    signal,
+  );
+  let duration = Number.NaN;
+  try {
+    const stream = (
+      JSON.parse(output) as {
+        streams?: Array<{ duration?: string; tags?: { DURATION?: string } }>;
+      }
+    ).streams?.[0];
+    duration = Number(stream?.duration);
+    if ((!Number.isFinite(duration) || duration <= 0) && stream?.tags?.DURATION) {
+      const [hours, minutes, seconds] = stream.tags.DURATION.split(':').map(Number);
+      duration = hours! * 3600 + minutes! * 60 + seconds!;
+    }
+  } catch {
+    // Report the same bounded media error below.
+  }
+  if (!Number.isFinite(duration) || duration <= 0) {
+    throw new VideoGenError(
+      `Could not determine the video stream duration of ${safeBasename(filePath)}.`,
+      'probe: bad video duration',
+    );
+  }
+  return duration;
+}
+
 /** Public ffmpeg runner used by the timeline pipeline (arbitrary arg lists). */
 export function runFfmpegCommand(
   ffmpegPath: string,
