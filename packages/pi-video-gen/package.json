@@ -1,7 +1,7 @@
 {
   "name": "@amaster.ai/pi-video-gen",
   "version": "0.1.0",
-  "description": "Pi extension for agentic video generation: single-clip and multi-shot render pipelines via Seedance (Volcengine Ark), HappyHorse (DashScope), Kling, and OpenRouter (Veo), with a bundled LGPL FFmpeg for concat.",
+  "description": "Pi extension for AI video generation plus local video composition: lossless clip concat and image-to-video timelines with overlays, TTS, subtitles, BGM, and bundled LGPL/GPL FFmpeg runtimes.",
   "keywords": [
     "pi-package",
     "pi",
@@ -56,7 +56,9 @@
     "test": "vitest run src"
   },
   "dependencies": {
-    "@amaster.ai/pi-shared": "workspace:*"
+    "@amaster.ai/pi-shared": "workspace:*",
+    "sharp": "^0.34.0",
+    "msedge-tts": "^2.0.7"
   },
   "optionalDependencies": {
     "@amaster.ai/pi-video-gen-ffmpeg-darwin-arm64": "workspace:*",

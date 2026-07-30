@@ -1,9 +1,11 @@
 # pi-video-gen
 
 Pi extension for agentic video generation. Ships the single-clip primitive
-(`video_generate`), the multi-shot render pipeline (`video_render`), the
-read-only `video_capabilities` query, a `/video-gen` command, and the
-`video-gen` skill that orchestrates the full shot-book workflow together with
+(`video_generate`), the multi-shot render pipeline (`video_render`), local
+lossless clip composing and image-based promo timelines with overlays, TTS,
+subtitles, and BGM (`video_compose`), the read-only
+`video_capabilities` query, a `/video-gen` command, and the `video-gen` skill
+that orchestrates the full shot-book workflow together with
 [pi-image-gen](../pi-image-gen) (all image work).
 
 ## Providers
@@ -122,7 +124,9 @@ cannot redirect your API key or swap binaries.
 **ffmpeg**: required for multi-shot concat and installed automatically with
 the plugin through a platform-specific optional npm package. The main plugin
 stays small, while `pi install npm:@amaster.ai/pi-video-gen` downloads only
-the LGPL FFmpeg build matching the current OS and CPU. Supported bundled
+the platform payload matching the current OS and CPU. That payload contains a
+default LGPL build plus separately named GPL `ffmpeg-gpl`/`ffprobe-gpl`
+binaries with libx264 for requested H.264 timeline output. Supported bundled
 targets are macOS 11+ arm64/x64, glibc Linux arm64/x64 (built on Ubuntu 22.04),
 and Windows x64; musl Linux uses a system FFmpeg through PATH. Resolution order:
 `ffmpegPath` setting → `FFMPEG_PATH` env → installed platform package →
@@ -130,13 +134,15 @@ ffmpeg-static (development only) → PATH. An automatic bundled candidate that
 is present but not runnable is skipped so it cannot mask a working PATH
 installation. Check with `/video-gen doctor`.
 Release CI builds every platform package from the pinned official FFmpeg
-source with external-library autodetection disabled; the exact source archive,
-build script, license, and provenance ship beside each binary.
+source with external-library autodetection disabled; the exact FFmpeg, zlib,
+and x264 source archives, build script, licenses, and provenance ship beside
+the binaries.
 
 ## Tools
 
 | Tool | What it does |
 |---|---|
+| `video_compose` | **Local video assembly, no paid models.** C0 (`compose-input.json`): lossless concat of existing compatible mp4 clips with ordered, all-track ffprobe stream precheck. Timeline (`timeline-input.json`): promo from still images + text overlays + Edge TTS narration + kenburns motion + mov_text subtitles + optional BGM — local render, near-zero cost. Timeline TTS failures stop by default; set `ttsFailureMode: "silent-subtitles"` only for an explicit silent-audio degradation that preserves subtitles. An accepted degradation stays cached for that immutable job; the C0 final video and all reusable Timeline artifacts are regular job-local files bound to manifest hashes. |
 | `video_generate` | One short clip from a prompt (+ optional first/last frame images). Paid, minutes per clip. Interrupted after receiving a task id? Resume with the returned `jobId`; an ambiguous submit is parked and never resubmitted automatically. |
 | `video_render` | Multi-shot film from `<jobDir>/render-input.json`: snapshots + hashes all frames, submits one paid task per shot (resume-aware, finished shots never re-bill), downloads clips, ffmpeg-concats into `final_video.mp4`. |
 | `video_capabilities` | Read-only: active model's capability table + registered models. Call before composing prompts or shot books. |
@@ -145,12 +151,13 @@ build script, license, and provenance ship beside each binary.
 
 | Command | What it does |
 |---|---|
+| `/video-gen compose <spec>` | Same as the `video_compose` tool |
 | `/video-gen generate <prompt>` | Same as the `video_generate` tool |
 | `/video-gen render <spec>` | Same as the `video_render` tool |
 | `/video-gen recover <jobId>` | List ambiguous render shots; explicitly `reset` a confirmed-absent task or `adopt <taskId>` found in the provider console |
 | `/video-gen models` | List registered models + key readiness |
 | `/video-gen reload` | Reload settings |
-| `/video-gen doctor` | Environment check (key, ffmpeg, `image_generate`, output dir, trust) |
+| `/video-gen doctor` | Environment check (key, ffmpeg+ffprobe, libx264, CJK fonts, `image_generate`, output dir, trust) |
 
 ## The shot-book workflow (multi-shot films)
 

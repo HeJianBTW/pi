@@ -1,8 +1,23 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { concatVideos, resolveFfmpeg } from '../ffmpeg.js';
+import {
+  concatVideos,
+  resolveFfmpeg,
+  resolveFfprobe,
+  resolveGplFfmpeg,
+  runFfmpegCommand,
+} from '../ffmpeg.js';
+import { CancelledError } from '../providers/task.js';
 
 const suiteDir = join(tmpdir(), 'pi-video-gen-ffmpeg');
 
@@ -33,6 +48,62 @@ describe('resolveFfmpeg', () => {
     expect(res.source).toBe('bundled');
     expect(res.path.includes('ffmpeg')).toBe(true);
     expect(res.runnable).toBe(true);
+  });
+
+  it('only reports a custom ffmpeg as H.264-capable when libx264 is available', () => {
+    mkdirSync(suiteDir, { recursive: true });
+    const ffmpeg = join(suiteDir, 'custom-ffmpeg');
+    writeFileSync(
+      ffmpeg,
+      [
+        '#!/bin/sh',
+        'if [ "$1" = "-version" ]; then exit 0; fi',
+        'echo " V..... mpeg4"',
+        'exit 0',
+      ].join('\n'),
+    );
+    chmodSync(ffmpeg, 0o755);
+
+    expect(resolveGplFfmpeg(ffmpeg)).toMatchObject({
+      path: ffmpeg,
+      source: 'settings',
+      runnable: false,
+    });
+
+    writeFileSync(
+      ffmpeg,
+      [
+        '#!/bin/sh',
+        'if [ "$1" = "-version" ]; then exit 0; fi',
+        'echo " V....D libx264"',
+        'exit 0',
+      ].join('\n'),
+    );
+    expect(resolveGplFfmpeg(ffmpeg)).toMatchObject({
+      path: ffmpeg,
+      source: 'settings',
+      runnable: true,
+    });
+  });
+
+  it('does not mix an explicitly configured ffmpeg with ffprobe from PATH', () => {
+    mkdirSync(suiteDir, { recursive: true });
+    const ffmpeg = join(suiteDir, 'ffmpeg');
+    writeFileSync(ffmpeg, '#!/bin/sh\nexit 0\n');
+    chmodSync(ffmpeg, 0o755);
+
+    expect(resolveFfprobe(ffmpeg)).toMatchObject({
+      path: join(suiteDir, 'ffprobe'),
+      source: 'settings',
+      runnable: false,
+    });
+
+    vi.stubEnv('FFMPEG_PATH', ffmpeg);
+    expect(resolveFfprobe()).toMatchObject({
+      path: join(suiteDir, 'ffprobe'),
+      source: 'env',
+      runnable: false,
+    });
   });
 });
 
@@ -112,18 +183,94 @@ describe('concatVideos', () => {
     expect(existsSync(`${out}.tmp`)).toBe(false);
   });
 
-  it('leaves no concat-list files behind', async () => {
+  it('does not follow a pre-placed concat temp-output symlink', async () => {
+    const ffmpeg = writeFakeFfmpeg(false);
+    const input = join(dir, 'a.mp4');
+    const out = join(dir, 'final.mp4');
+    const victim = join(dir, 'victim.bin');
+    writeFileSync(input, 'x');
+    writeFileSync(victim, 'precious');
+    const random = vi.spyOn(Math, 'random').mockReturnValue(0);
+    try {
+      for (let counter = 0; counter < 20; counter += 1) {
+        symlinkSync(victim, `${out}.tmp-${process.pid}-${counter}-.mp4`);
+      }
+      await concatVideos({ inputs: [input], outputPath: out, ffmpegPath: ffmpeg });
+    } finally {
+      random.mockRestore();
+    }
+
+    expect(readFileSync(victim, 'utf-8')).toBe('precious');
+    expect(readFileSync(out, 'utf-8')).toBe('FAKEMP4');
+  });
+
+  it('leaves no private concat work directory behind', async () => {
     const ffmpeg = writeFakeFfmpeg(false);
     const a = join(dir, 'a.mp4');
     writeFileSync(a, 'x');
     await concatVideos({ inputs: [a], outputPath: join(dir, 'final.mp4'), ffmpegPath: ffmpeg });
     const { readdirSync } = await import('node:fs');
-    expect(readdirSync(dir).filter((f) => f.includes('concat-list'))).toHaveLength(0);
+    expect(readdirSync(dir).filter((name) => name.startsWith('.concat-'))).toHaveLength(0);
+  });
+
+  it('cleans its private work directory when the concat list cannot be written', async () => {
+    if (process.platform === 'win32') return;
+    const previousUmask = process.umask(0o777);
+    try {
+      await expect(
+        concatVideos({
+          inputs: [join(dir, 'a.mp4')],
+          outputPath: join(dir, 'final.mp4'),
+          ffmpegPath: writeFakeFfmpeg(false),
+        }),
+      ).rejects.toThrow();
+    } finally {
+      process.umask(previousUmask);
+    }
+    const { readdirSync } = await import('node:fs');
+    expect(readdirSync(dir).filter((name) => name.startsWith('.concat-'))).toEqual([]);
   });
 
   it('rejects empty input', async () => {
     await expect(
       concatVideos({ inputs: [], outputPath: join(dir, 'x.mp4'), ffmpegPath: 'ffmpeg' }),
     ).rejects.toThrow(/No clips/);
+  });
+
+  it('does not expose ffmpeg stderr paths or URLs to the caller', async () => {
+    const ffmpeg = join(dir, 'failing-ffmpeg.sh');
+    writeFileSync(
+      ffmpeg,
+      [
+        '#!/bin/sh',
+        'echo "failed reading /Users/alice/private.mov from https://example.test/video?token=secret" >&2',
+        'exit 1',
+      ].join('\n'),
+    );
+    chmodSync(ffmpeg, 0o755);
+
+    let error: unknown;
+    try {
+      await runFfmpegCommand(ffmpeg, []);
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(Error);
+    if (!(error instanceof Error)) throw new Error('Expected ffmpeg to fail');
+    expect(error.message).not.toContain('/Users/alice');
+    expect(error.message).not.toContain('token=secret');
+    expect(error).toMatchObject({ logSummary: 'ffmpeg: exit 1' });
+  });
+
+  it('preserves cancellation instead of reporting ffmpeg as broken', async () => {
+    const controller = new AbortController();
+    const running = runFfmpegCommand(
+      process.execPath,
+      ['-e', 'setTimeout(() => {}, 10_000)'],
+      controller.signal,
+    );
+    setTimeout(() => controller.abort(), 20);
+
+    await expect(running).rejects.toBeInstanceOf(CancelledError);
   });
 });

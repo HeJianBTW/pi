@@ -45,53 +45,130 @@ jobs:
           - target: win32-x64
             runner: ubuntu-24.04
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
 
-      - name: Install cross compiler
-        if: matrix.target == 'linux-arm64' || matrix.target == 'win32-x64'
+      - name: Install build dependencies
         run: |
-          sudo apt-get update
-          if [ "${{ matrix.target }}" = "linux-arm64" ]; then
-            sudo apt-get install -y gcc-aarch64-linux-gnu qemu-user
-          else
-            sudo apt-get install -y gcc-mingw-w64-x86-64 wine64
-          fi
+          case "${{ matrix.target }}" in
+            darwin-*)
+              brew install nasm pkg-config
+              ;;
+            linux-x64)
+              sudo apt-get update
+              sudo apt-get install -y nasm pkg-config
+              ;;
+            linux-arm64)
+              sudo apt-get update
+              sudo apt-get install -y gcc-aarch64-linux-gnu pkg-config qemu-user
+              ;;
+            win32-x64)
+              sudo apt-get update
+              sudo apt-get install -y gcc-mingw-w64-x86-64 nasm pkg-config wine64
+              ;;
+          esac
 
       - name: Build minimal LGPL FFmpeg
         run: packages/pi-video-gen/scripts/build-ffmpeg.sh "${{ matrix.target }}"
+
+      - name: Build GPL FFmpeg variant (x264 for h264)
+        run: GPL_VARIANT=1 packages/pi-video-gen/scripts/build-ffmpeg.sh "${{ matrix.target }}"
 
       - name: Verify FFmpeg binary
         shell: bash
         run: |
           bin="packages/pi-video-gen/platforms/ffmpeg-${{ matrix.target }}/bin/ffmpeg"
+          gpl="packages/pi-video-gen/platforms/ffmpeg-${{ matrix.target }}/bin/ffmpeg-gpl"
+          probe="${bin%/*}/ffprobe"
+          gpl_probe="${gpl%/*}/ffprobe-gpl"
+          run_ffmpeg() {
+            executable="$1"
+            shift
+            case "${{ matrix.target }}" in
+              darwin-*|linux-x64) "$executable" "$@" ;;
+              linux-arm64) qemu-aarch64 -L /usr/aarch64-linux-gnu "$executable" "$@" ;;
+              win32-x64) WINEDEBUG=-all /usr/lib/wine/wine64 "${executable}.exe" "$@" ;;
+            esac
+          }
           case "${{ matrix.target }}" in
             darwin-*)
               "$bin" -version
+              "$probe" -version
+              "$gpl" -version
+              "$gpl_probe" -version
               xcrun vtool -show-build "$bin" | grep -q 'minos 11.0'
               ;;
             linux-x64)
               "$bin" -version
+              "$probe" -version
+              "$gpl" -version
+              "$gpl_probe" -version
               ldd "$bin"
               ;;
             linux-arm64)
               qemu-aarch64 -L /usr/aarch64-linux-gnu "$bin" -version
+              qemu-aarch64 -L /usr/aarch64-linux-gnu "$probe" -version
+              qemu-aarch64 -L /usr/aarch64-linux-gnu "$gpl" -version
+              qemu-aarch64 -L /usr/aarch64-linux-gnu "$gpl_probe" -version
               aarch64-linux-gnu-readelf -h "$bin" | grep -q 'AArch64'
               ;;
             win32-x64)
               WINEDEBUG=-all /usr/lib/wine/wine64 "${bin}.exe" -version
+              WINEDEBUG=-all /usr/lib/wine/wine64 "${probe}.exe" -version
+              WINEDEBUG=-all /usr/lib/wine/wine64 "${gpl}.exe" -version
+              WINEDEBUG=-all /usr/lib/wine/wine64 "${gpl_probe}.exe" -version
               x86_64-w64-mingw32-objdump -f "${bin}.exe" | grep -q 'pei-x86-64'
               ;;
           esac
+          python3 - <<'PY'
+          import base64
+          from pathlib import Path
+          Path("timeline-smoke.jpg").write_bytes(base64.b64decode(
+              "/9j/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAAIAAgDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAf/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAABAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCEALQD/9k="
+          ))
+          Path("timeline-smoke.srt").write_text(
+              "1\n00:00:00,000 --> 00:00:00,500\nTimeline smoke\n",
+              encoding="utf-8",
+          )
+          PY
+          smoke_args=(
+            -loop 1 -framerate 25 -t 0.5 -i timeline-smoke.jpg
+            -loop 1 -framerate 25 -t 0.5 -i timeline-smoke.jpg
+            -loop 1 -framerate 25 -t 0.5 -i packages/pi-video-gen/preview.png
+            -f lavfi -i anullsrc=r=48000:cl=stereo
+            -f lavfi -i anullsrc=r=48000:cl=stereo
+            -f lavfi -i sine=frequency=440:sample_rate=48000
+            -i timeline-smoke.srt
+            -filter_complex "
+              [0:v]scale=64:64,zoompan=z='min(zoom+0.001,1.1)':d=1:s=64x64:fps=25,settb=AVTB[v0];
+              [1:v]scale=64:64,settb=AVTB[v1];
+              [2:v]scale=16:16,format=rgba[ovr];
+              [v0][ovr]overlay=0:0:shortest=1[vo];
+              [vo][v1]xfade=transition=fade:duration=0.1:offset=0.4[v];
+              [3:a]atrim=0:0.25[a0];
+              [4:a]atrim=0:0.25[a1];
+              [a0][a1]concat=n=2:v=0:a=1[voice];
+              [5:a]atrim=0:0.5[bgm];
+              [voice][bgm]amix=inputs=2:duration=first[a]"
+            -map "[v]" -map "[a]" -map 6:s
+            -t 0.8 -c:a aac -c:s mov_text -y
+          )
+          run_ffmpeg "$bin" "${smoke_args[@]}" -c:v mpeg4 \
+            "timeline-smoke-${{ matrix.target }}.mp4"
+          run_ffmpeg "$gpl" "${smoke_args[@]}" -c:v libx264 \
+            "timeline-smoke-${{ matrix.target }}-h264.mp4"
+          run_ffmpeg "$bin" -ss 0.2 \
+            -i "timeline-smoke-${{ matrix.target }}.mp4" \
+            -frames:v 1 -y timeline-smoke-qc.png
 
       - name: Preserve executable permissions
         run: |
           tar -czf "pi-video-gen-ffmpeg-${{ matrix.target }}.tar.gz" \
             -C "packages/pi-video-gen/platforms/ffmpeg-${{ matrix.target }}" \
-            bin LICENSE SOURCE.md source
+            bin LICENSE GPLv2.txt ZLIB_LICENSE.txt SOURCE.md source
 
       - name: Upload platform package payload
         uses: actions/upload-artifact@v4

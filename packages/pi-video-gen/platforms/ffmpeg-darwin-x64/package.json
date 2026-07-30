@@ -1,11 +1,13 @@
 {
   "name": "@amaster.ai/pi-video-gen-ffmpeg-darwin-x64",
   "version": "0.1.0",
-  "description": "LGPL FFmpeg runtime for pi-video-gen on macOS x64",
-  "license": "LGPL-2.1-or-later",
+  "description": "LGPL FFmpeg + GPL FFmpeg (libx264) runtime for pi-video-gen on darwin x64",
+  "license": "SEE LICENSE IN SOURCE.md",
   "files": [
     "bin",
     "LICENSE",
+    "GPLv2.txt",
+    "ZLIB_LICENSE.txt",
     "SOURCE.md",
     "source"
   ],
@@ -16,12 +18,16 @@
     "x64"
   ],
   "exports": {
-    "./ffmpeg": "./bin/ffmpeg"
+    "./ffmpeg": "./bin/ffmpeg",
+    "./ffprobe": "./bin/ffprobe"
   },
   "publishConfig": {
     "access": "public",
     "executableFiles": [
-      "./bin/ffmpeg"
+      "./bin/ffmpeg",
+      "./bin/ffprobe",
+      "./bin/ffmpeg-gpl",
+      "./bin/ffprobe-gpl"
     ]
   },
   "repository": {

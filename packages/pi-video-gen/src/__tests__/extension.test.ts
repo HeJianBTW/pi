@@ -9,6 +9,7 @@ const suiteDir = join(tmpdir(), 'pi-video-gen-extension');
 type ToolDef = {
   name: string;
   parameters: { properties?: Record<string, unknown> };
+  promptGuidelines?: string[];
   execute: (...args: unknown[]) => Promise<{
     isError?: true;
     content: { type: string; text: string }[];
@@ -82,6 +83,7 @@ describe('pi-video-gen extension', () => {
   it('registers tools, command, and lifecycle handlers', () => {
     expect(tools.has('video_generate')).toBe(true);
     expect(tools.has('video_render')).toBe(true);
+    expect(tools.has('video_compose')).toBe(true);
     expect(tools.has('video_capabilities')).toBe(true);
     expect(commands.has('video-gen')).toBe(true);
     expect(handlers.has('session_start')).toBe(true);
@@ -92,6 +94,18 @@ describe('pi-video-gen extension', () => {
     expect(Object.keys(params)).toContain('lastFrame');
     expect(Object.keys(params)).toContain('prompt');
     expect(Object.keys(params)).toContain('jobId');
+  });
+
+  it('keeps compose identity entirely in the immutable spec path', () => {
+    const params = tools.get('video_compose')!.parameters.properties ?? {};
+    expect(Object.keys(params)).toEqual(['composeSpecPath']);
+  });
+
+  it('guides timeline compose to reuse existing images before generating missing sources', () => {
+    const guidance = tools.get('video_compose')!.promptGuidelines?.join('\n') ?? '';
+    expect(guidance).toMatch(/reuse existing images or screenshots first/i);
+    expect(guidance).toMatch(/generate only missing source material/i);
+    expect(guidance).not.toMatch(/generate images first/i);
   });
 
   it('video_capabilities lists the registry and active model', async () => {
@@ -201,7 +215,9 @@ describe('pi-video-gen extension', () => {
     expect(text).toContain('model: doubao-seedance-2-0-260128');
     expect(text).toMatch(/api key missing/i);
     expect(text).toMatch(/ffmpeg/);
+    expect(text).toMatch(/libx264/);
     expect(text).toMatch(/image_generate/);
+    expect(text).toMatch(/CJK font/);
     expect(text).toMatch(/not trusted/);
   });
 
@@ -546,6 +562,35 @@ describe('pi-video-gen extension', () => {
     const text = notifiedText(ctx);
     expect(text).toMatch(/ffmpeg found \(source: (bundled|path|env)\)|ffmpeg not runnable/);
     expect(text).not.toContain('/node_modules/');
+  });
+
+  it('does not expose a configured ffmpeg path in tool errors', async () => {
+    const privatePath = join(home, 'private', 'ffmpeg');
+    mkdirSync(join(home, '.pi', 'agent'), { recursive: true });
+    writeFileSync(
+      join(home, '.pi', 'agent', 'settings.json'),
+      JSON.stringify({
+        'pi-video-gen': {
+          ffmpegPath: privatePath,
+          providers: { ark: { apiKey: 'k' } },
+        },
+      }),
+    );
+    await startSession(cwd);
+
+    const result = await tools
+      .get('video_render')!
+      .execute(
+        'c1',
+        { renderSpecPath: join(cwd, '.video-gen', 'missing', 'render-input.json') },
+        undefined,
+        undefined,
+        fakeCtx(cwd),
+      );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toContain('source: settings');
+    expect(result.content[0]!.text).not.toContain(privatePath);
   });
 
   it('/video-gen models includes the active model capability table', async () => {
@@ -969,6 +1014,60 @@ describe('pi-video-gen extension', () => {
       stderr.mockRestore();
       vi.unstubAllGlobals();
     }
+  });
+
+  it('/video-gen compose runs C0 end-to-end with real clips', async () => {
+    const { execFileSync } = await import('node:child_process');
+    const { createRequire } = await import('node:module');
+    const { mkdirSync, writeFileSync } = await import('node:fs');
+    const ffmpegBin = createRequire(import.meta.url)('ffmpeg-static') as string;
+
+    const projectDir = join(cwd, 'Project With Spaces');
+    const clipsDir = join(projectDir, 'clips');
+    mkdirSync(clipsDir, { recursive: true });
+    const mk = (name: string) => {
+      const p = join(clipsDir, name);
+      execFileSync(ffmpegBin, [
+        '-y',
+        '-f',
+        'lavfi',
+        '-i',
+        'color=red:size=64x64',
+        '-t',
+        '1',
+        '-c:v',
+        'libx264',
+        '-pix_fmt',
+        'yuv420p',
+        p,
+      ]);
+      return p;
+    };
+    const a = mk('a.mp4');
+    const b = mk('b.mp4');
+
+    const jobDir = join(projectDir, '.video-gen', 'job-compose');
+    mkdirSync(jobDir, { recursive: true });
+    writeFileSync(
+      join(jobDir, 'compose-input.json'),
+      JSON.stringify({
+        clips: [
+          { id: 'c1', path: a },
+          { id: 'c2', path: b },
+        ],
+        output: { mode: 'copy' },
+      }),
+    );
+
+    const ctx = fakeCtx(projectDir);
+    await commands.get('video-gen')!.handler(`compose ${join(jobDir, 'compose-input.json')}`, ctx);
+    const text = notifiedText(ctx);
+    expect(text).toContain('Final video ready');
+    expect(text).toContain('2 clips');
+    expect(mockPi.appendEntry).toHaveBeenCalledWith(
+      'video-gen:last-job',
+      expect.objectContaining({ jobId: 'job-compose', kind: 'compose' }),
+    );
   });
 
   it('/video-gen recover lists, resets, and adopts ambiguous shots', async () => {

@@ -1,8 +1,9 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { rename, unlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, rename, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
-import { VideoGenError } from './errors.js';
+import { safeBasename, VideoGenError } from './errors.js';
+import { CancelledError } from './providers/task.js';
 
 /**
  * Lazily resolve an ffmpeg binary without crashing when node_modules is
@@ -47,6 +48,43 @@ export type FfmpegResolution = {
   runnable: boolean;
 };
 
+/**
+ * Resolve ffprobe as the SIBLING of the resolved ffmpeg (same directory),
+ * falling back to `ffprobe` on PATH. Platform packages ship both binaries.
+ */
+/**
+ * Resolve the GPL ffmpeg variant (with libx264) as the sibling of the
+ * resolved ffmpeg named `ffmpeg-gpl`. Required for h264 output — the LGPL
+ * build intentionally has no x264 encoder.
+ */
+export function resolveGplFfmpeg(settingsPath?: string | undefined): FfmpegResolution {
+  const ff = resolveFfmpeg(settingsPath);
+  const exe = process.platform === 'win32' ? 'ffmpeg-gpl.exe' : 'ffmpeg-gpl';
+  if (ff.source !== 'path') {
+    const sibling = join(dirname(ff.path), exe);
+    if (hasEncoder(sibling, 'libx264')) return { path: sibling, source: ff.source, runnable: true };
+  }
+  return {
+    path: ff.path,
+    source: ff.source,
+    runnable: ff.runnable && hasEncoder(ff.path, 'libx264'),
+  };
+}
+
+export function resolveFfprobe(settingsPath?: string | undefined): FfmpegResolution {
+  const ff = resolveFfmpeg(settingsPath);
+  const exe = process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe';
+  if (ff.source !== 'path') {
+    const sibling = join(dirname(ff.path), exe);
+    if (isRunnable(sibling)) return { path: sibling, source: ff.source, runnable: true };
+    if (ff.source === 'settings' || ff.source === 'env') {
+      return { path: sibling, source: ff.source, runnable: false };
+    }
+    // Bundled sibling missing/broken — keep looking on PATH rather than dying.
+  }
+  return { path: exe, source: 'path', runnable: isRunnable(exe) };
+}
+
 export function resolveFfmpeg(settingsPath?: string | undefined): FfmpegResolution {
   if (settingsPath)
     return { path: settingsPath, source: 'settings', runnable: isRunnable(settingsPath) };
@@ -73,20 +111,181 @@ function isRunnable(path: string): boolean {
   }
 }
 
-function runFfmpeg(ffmpegPath: string, args: string[], signal?: AbortSignal): Promise<void> {
+function hasEncoder(path: string, encoder: string): boolean {
+  try {
+    const res = spawnSync(path, ['-hide_banner', '-encoders'], {
+      encoding: 'utf-8',
+      maxBuffer: 1024 * 1024,
+      timeout: 5_000,
+    });
+    return res.status === 0 && new RegExp(`\\b${encoder}\\b`).test(res.stdout);
+  } catch {
+    return false;
+  }
+}
+
+export type StreamInfo = {
+  videoCodec: string;
+  width: number;
+  height: number;
+  fps: string;
+  timebase: string;
+  pixFmt: string;
+  audioLayout: string;
+  /** Extra incompatibility vectors beyond the first video track. */
+  streamCount: number;
+  audioSampleRate: string;
+  audioTimebase: string;
+  subtitleCodec: string;
+  streamSignatures: string[];
+};
+
+type FfprobeStream = {
+  codec_type?: string;
+  codec_name?: string;
+  width?: number;
+  height?: number;
+  r_frame_rate?: string;
+  time_base?: string;
+  pix_fmt?: string;
+  channel_layout?: string;
+  channels?: number;
+  sample_rate?: string;
+};
+
+function streamSignature(stream: FfprobeStream): string {
+  if (stream.codec_type === 'video') {
+    return `video:${stream.codec_name ?? 'unknown'}/${stream.width ?? '?'}x${stream.height ?? '?'}/${stream.r_frame_rate ?? 'unknown'}/${stream.time_base ?? 'unknown'}/${stream.pix_fmt ?? 'unknown'}`;
+  }
+  if (stream.codec_type === 'audio') {
+    return `audio:${stream.codec_name ?? 'unknown'}/${stream.channel_layout ?? stream.channels ?? '?'}/${stream.sample_rate ?? 'unknown'}/${stream.time_base ?? 'unknown'}`;
+  }
+  return `${stream.codec_type ?? 'unknown'}:${stream.codec_name ?? 'unknown'}/${stream.time_base ?? 'unknown'}`;
+}
+
+function runFfprobe(
+  ffprobePath: string,
+  args: string[],
+  filePath: string,
+  signal?: AbortSignal,
+): Promise<string> {
   return new Promise((resolvePromise, reject) => {
-    const child = spawn(ffmpegPath, args, { stdio: ['ignore', 'ignore', 'pipe'], signal });
-    let stderrTail = '';
-    child.stderr?.on('data', (chunk: Buffer) => {
-      // Keep only the tail for the (body-free) error summary.
-      stderrTail = (stderrTail + chunk.toString()).slice(-300);
+    const child = spawn(ffprobePath, args, { stdio: ['ignore', 'pipe', 'ignore'], signal });
+    let output = '';
+    child.stdout?.on('data', (chunk: Buffer) => {
+      output += chunk.toString();
     });
     child.on('error', () => {
       reject(
-        new VideoGenError(
-          `ffmpeg is not runnable at "${ffmpegPath}". Run /video-gen doctor.`,
-          'ffmpeg: spawn failed',
-        ),
+        signal?.aborted
+          ? new CancelledError()
+          : new VideoGenError(
+              'ffprobe is not runnable. Run /video-gen doctor.',
+              'probe: spawn failed',
+            ),
+      );
+    });
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolvePromise(output);
+      } else {
+        reject(
+          new VideoGenError(
+            `ffprobe failed (exit ${code}) reading ${safeBasename(filePath)}.`,
+            `probe: exit ${code}`,
+          ),
+        );
+      }
+    });
+  });
+}
+
+/** Probe a media file's stream signature for strict-copy compatibility checks. */
+export async function probeStreams(
+  ffprobePath: string,
+  filePath: string,
+  signal?: AbortSignal,
+): Promise<StreamInfo> {
+  const args = ['-v', 'error', '-show_streams', '-of', 'json', filePath];
+  const output = await runFfprobe(ffprobePath, args, filePath, signal);
+
+  let streams: FfprobeStream[];
+  try {
+    streams = (JSON.parse(output) as { streams?: FfprobeStream[] }).streams ?? [];
+  } catch {
+    throw new VideoGenError(
+      `ffprobe returned unparseable output for ${safeBasename(filePath)} — is it a media file?`,
+      'probe: bad output',
+    );
+  }
+  const video = streams.find((st) => st.codec_type === 'video');
+  if (!video?.codec_name || !video.width || !video.height) {
+    throw new VideoGenError(
+      `No video stream found in ${safeBasename(filePath)} — compose needs mp4 clips with a video track.`,
+      'probe: no video stream',
+    );
+  }
+  const audio = streams.find((st) => st.codec_type === 'audio');
+  const subtitle = streams.find((st) => st.codec_type === 'subtitle');
+  return {
+    videoCodec: video.codec_name,
+    width: video.width,
+    height: video.height,
+    fps: video.r_frame_rate ?? 'unknown',
+    timebase: video.time_base ?? 'unknown',
+    pixFmt: video.pix_fmt ?? 'unknown',
+    audioLayout: audio
+      ? `${audio.codec_name ?? 'unknown'}/${audio.channel_layout ?? audio.channels ?? '?'}`
+      : 'none',
+    streamCount: streams.length,
+    audioSampleRate: audio?.sample_rate ?? 'none',
+    audioTimebase: audio?.time_base ?? 'none',
+    subtitleCodec: subtitle?.codec_name ?? 'none',
+    streamSignatures: streams.map(streamSignature),
+  };
+}
+
+/** ffprobe the container duration of a media file, in seconds. */
+export async function probeDuration(
+  ffprobePath: string,
+  filePath: string,
+  signal?: AbortSignal,
+): Promise<number> {
+  const args = [
+    '-v',
+    'error',
+    '-show_entries',
+    'format=duration',
+    '-of',
+    'default=noprint_wrappers=1:nokey=0',
+    filePath,
+  ];
+  const output = await runFfprobe(ffprobePath, args, filePath, signal);
+  const match = output.match(/duration=([0-9.]+)/);
+  if (!match) {
+    throw new VideoGenError(
+      `ffprobe returned no duration for ${safeBasename(filePath)}.`,
+      'probe: no duration',
+    );
+  }
+  return Number(match[1]);
+}
+
+/** Public ffmpeg runner used by the timeline pipeline (arbitrary arg lists). */
+export function runFfmpegCommand(
+  ffmpegPath: string,
+  args: string[],
+  signal?: AbortSignal,
+): Promise<void> {
+  return new Promise((resolvePromise, reject) => {
+    const child = spawn(ffmpegPath, args, { stdio: 'ignore', signal });
+    child.on('error', () => {
+      if (signal?.aborted) {
+        reject(new CancelledError());
+        return;
+      }
+      reject(
+        new VideoGenError('ffmpeg is not runnable. Run /video-gen doctor.', 'ffmpeg: spawn failed'),
       );
     });
     child.on('close', (code) => {
@@ -95,7 +294,7 @@ function runFfmpeg(ffmpegPath: string, args: string[], signal?: AbortSignal): Pr
       } else {
         reject(
           new VideoGenError(
-            `ffmpeg failed (exit ${code}) while assembling the video. Retry once; if it persists, the shot clips may have mismatched encodings.`,
+            `ffmpeg failed (exit ${code}) while processing local media. Run /video-gen doctor and retry.`,
             `ffmpeg: exit ${code}`,
           ),
         );
@@ -110,47 +309,48 @@ function runFfmpeg(ffmpegPath: string, args: string[], signal?: AbortSignal): Pr
  * re-encoding; falls back to an mpeg4 re-encode when codecs/params differ
  * (mpeg4 is LGPL-clean — libx264 would REQUIRE a GPL build of ffmpeg).
  */
-let concatCounter = 0;
-
 export async function concatVideos(opts: {
   inputs: string[];
   outputPath: string;
   ffmpegPath: string;
   signal?: AbortSignal | undefined;
+  /** C0 compose: copy ONLY — report failure instead of re-encoding. */
+  strictCopy?: boolean | undefined;
 }): Promise<void> {
   if (opts.inputs.length === 0) {
     throw new VideoGenError('No clips to concatenate.', 'concat: empty inputs');
   }
   const dir = dirname(opts.outputPath);
-  const salt = `${process.pid}-${concatCounter++}-${Math.random().toString(36).slice(2, 8)}`;
-  // Exclusive-create the concat list: a pre-placed symlink at a predictable
-  // list path must fail, never be followed.
-  const listPath = join(dir, `.concat-list-${salt}.txt`);
-  // ffconcat single-quote escaping: an embedded ' would break the demuxer
-  // ("O'Brien/project") — close-quote, escaped quote, reopen.
-  await writeFile(
-    listPath,
-    opts.inputs.map((p) => `file '${p.replace(/'/g, `'\\''`)}'`).join('\n'),
-    {
-      encoding: 'utf-8',
-      flag: 'wx',
-    },
-  );
-  // ffmpeg writes to an UNPREDICTABLE temp name, then atomic rename replaces
-  // the final entry — a pre-placed final_video.mp4 symlink is replaced, never
-  // followed, so no bytes land outside the job.
-  const tmpOut = `${opts.outputPath}.tmp-${salt}.mp4`; // keep the .mp4 suffix — ffmpeg infers the muxer from it
+  const workDir = await mkdtemp(join(dir, '.concat-'));
+  const listPath = join(workDir, 'list.txt');
+  const tmpOut = join(workDir, 'output.mp4');
 
   try {
+    // ffconcat single-quote escaping: an embedded ' would break the demuxer
+    // ("O'Brien/project") — close-quote, escaped quote, reopen.
+    await writeFile(
+      listPath,
+      opts.inputs.map((p) => `file '${p.replace(/'/g, `'\\''`)}'`).join('\n'),
+      {
+        encoding: 'utf-8',
+        flag: 'wx',
+      },
+    );
     try {
-      await runFfmpeg(
+      await runFfmpegCommand(
         opts.ffmpegPath,
         ['-y', '-f', 'concat', '-safe', '0', '-i', listPath, '-c', 'copy', tmpOut],
         opts.signal,
       );
     } catch (error) {
       if (opts.signal?.aborted) throw error;
-      await runFfmpeg(
+      if (opts.strictCopy) {
+        throw new VideoGenError(
+          'Lossless concat failed even though streams probed as compatible. The clips may have container-level issues (timestamps, edit lists) that concat copy cannot handle. compose will not transcode — re-encode the clips first.',
+          'concat: strict copy failed',
+        );
+      }
+      await runFfmpegCommand(
         opts.ffmpegPath,
         [
           '-y',
@@ -173,7 +373,6 @@ export async function concatVideos(opts: {
     }
     await rename(tmpOut, opts.outputPath);
   } finally {
-    await unlink(listPath).catch(() => {});
-    await unlink(tmpOut).catch(() => {});
+    await rm(workDir, { recursive: true, force: true });
   }
 }

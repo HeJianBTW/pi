@@ -13,8 +13,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   ActiveJobs,
   assertSafeId,
+  loadComposeJob,
   loadRenderJob,
   loadSingleJob,
+  loadTimelineJob,
   newJobId,
   readJsonFile,
   saveSingleJob,
@@ -134,6 +136,59 @@ describe('manifest persistence', () => {
       }),
     );
     expect(loadRenderJob(jobDir)?.jobId).toBe('render-job');
+  });
+
+  it('refuses structurally broken compose and timeline manifests', () => {
+    const composeDir = join(suiteDir, 'compose-job');
+    const timelineDir = join(suiteDir, 'timeline-job');
+    mkdirSync(composeDir, { recursive: true });
+    mkdirSync(timelineDir, { recursive: true });
+
+    writeFileSync(
+      join(composeDir, 'manifest.json'),
+      JSON.stringify({
+        kind: 'compose',
+        jobId: 'compose-job',
+        state: 'done',
+        fingerprint: 'fp',
+        clipHashes: null,
+        updatedAt: 'x',
+      }),
+    );
+    writeFileSync(
+      join(timelineDir, 'manifest.json'),
+      JSON.stringify({
+        kind: 'timeline',
+        jobId: 'timeline-job',
+        state: 'done',
+        fingerprint: 'fp',
+        imageHashes: {},
+        segments: null,
+        updatedAt: 'x',
+      }),
+    );
+
+    expect(() => loadComposeJob(composeDir)).toThrow(/valid compose manifest/);
+    expect(() => loadTimelineJob(timelineDir)).toThrow(/valid timeline manifest/);
+  });
+
+  it('refuses a timeline manifest with no artifact hash map', () => {
+    const jobDir = join(suiteDir, 'timeline-job');
+    mkdirSync(jobDir, { recursive: true });
+    writeFileSync(
+      join(jobDir, 'manifest.json'),
+      JSON.stringify({
+        kind: 'timeline',
+        jobId: 'timeline-job',
+        state: 'working',
+        fingerprint: 'fp',
+        imageHashes: {},
+        segments: {},
+        updatedAt: 'x',
+      }),
+    );
+
+    expect(() => loadTimelineJob(jobDir)).toThrow(/valid timeline manifest/);
   });
 
   it('refuses truncated shot entries (submitted/done/polling_stopped without handle)', () => {

@@ -11,6 +11,7 @@ import {
   truncateHead,
 } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
+import { runCompose } from './compose.js';
 import {
   listModelRegistry,
   loadVideoGenSettings,
@@ -27,7 +28,7 @@ import {
   redactUrl,
   toLogSummary,
 } from './errors.js';
-import { resolveFfmpeg } from './ffmpeg.js';
+import { resolveFfmpeg, resolveFfprobe, resolveGplFfmpeg } from './ffmpeg.js';
 import {
   ActiveJobs,
   assertSafeId,
@@ -51,6 +52,8 @@ import { openrouterAdapter } from './providers/openrouter.js';
 import { requestFingerprint } from './providers/request.js';
 import { CancelledError, pollTask, RateLimiter } from './providers/task.js';
 import { runRender } from './render.js';
+import { hasCjkFont } from './text-layer.js';
+import { runTimeline } from './timeline-render.js';
 import type {
   GenerateVideoParams,
   RemoteTaskHandle,
@@ -589,6 +592,59 @@ export default function piVideoGenExtension(pi: ExtensionAPI): void {
     );
   };
 
+  /** Shared C0 compose flow for the tool's execute() and `/video-gen compose`. */
+  const runComposeTool = async (
+    p: { composeSpecPath: string },
+    ctx: ExtensionContext,
+    signal?: AbortSignal,
+    onUpdate?: (partial: TextResult) => void,
+  ): Promise<TextResult> => {
+    try {
+      const name = p.composeSpecPath.split(/[\\/]/).pop() ?? '';
+      if (name === 'timeline-input.json') {
+        // Timeline compose (C1–C3): images + overlays + TTS + motion, local render.
+        const result = await runTimeline({
+          timelineSpecPath: p.composeSpecPath,
+          cwd: ctx.cwd,
+          settings,
+          activeJobs,
+          signal,
+          onUpdate: (msg) => onUpdate?.(okResult(msg)),
+        });
+        pi.appendEntry('video-gen:last-job', {
+          jobId: result.jobId,
+          kind: 'timeline',
+          finalVideoPath: result.finalVideoPath,
+        });
+        return okResult(
+          `Promo video ready: ${result.finalVideoPath} (${result.segments} segments, ${result.durationSec.toFixed(1)}s). QC frames: ${result.qcFrames.join(', ')}. Job: ${result.jobId}.`,
+          result as unknown as Record<string, unknown>,
+        );
+      }
+      // C0: lossless concat of existing clips.
+      const result = await runCompose({
+        composeSpecPath: p.composeSpecPath,
+        cwd: ctx.cwd,
+        settings,
+        activeJobs,
+        signal,
+        onUpdate: (msg) => onUpdate?.(okResult(msg)),
+      });
+      pi.appendEntry('video-gen:last-job', {
+        jobId: result.jobId,
+        kind: 'compose',
+        finalVideoPath: result.finalVideoPath,
+      });
+      return okResult(
+        `Final video ready: ${result.finalVideoPath} (${result.clipCount} clips, lossless concat${result.resumed ? ', resumed' : ''}). Job: ${result.jobId}.`,
+        result as unknown as Record<string, unknown>,
+      );
+    } catch (error) {
+      console.error(`[pi-video-gen] video_compose failed: ${toLogSummary(error)}`);
+      return errResult(errorMessageForUser(error));
+    }
+  };
+
   /** Shared multi-shot render flow for the tool's execute() and `/video-gen render`. */
   const runRenderTool = async (
     p: { renderSpecPath: string; allowDegradations?: string[] | undefined },
@@ -621,7 +677,7 @@ export default function piVideoGenExtension(pi: ExtensionAPI): void {
       const ffmpeg = resolveFfmpeg(settings.ffmpegPath);
       if (!ffmpeg.runnable) {
         return errResult(
-          `ffmpeg is not runnable (tried source: ${ffmpeg.source}, path: ${ffmpeg.path}). Set pi-video-gen.ffmpegPath in GLOBAL settings or FFMPEG_PATH, then /video-gen doctor.`,
+          `ffmpeg is not runnable (tried source: ${ffmpeg.source}). Set pi-video-gen.ffmpegPath in GLOBAL settings or FFMPEG_PATH, then /video-gen doctor.`,
         );
       }
       const result = await runRender({
@@ -710,6 +766,32 @@ export default function piVideoGenExtension(pi: ExtensionAPI): void {
     });
 
     pi.registerTool({
+      name: 'video_compose',
+      label: 'Compose Video Clips',
+      description:
+        'Local video assembly, no paid models. Two specs: <jobDir>/compose-input.json (C0: lossless concat of 2+ existing mp4 clips, ffprobe stream precheck) or <jobDir>/timeline-input.json (C1+: promo from still images + text overlays + TTS narration + kenburns motion, rendered locally).',
+      parameters: Type.Object({
+        composeSpecPath: Type.String({
+          description:
+            'Path to <jobDir>/compose-input.json (C0) or <jobDir>/timeline-input.json (promo timeline). The parent directory must live under the video-gen output dir and acts as the job. Rerunning the same path resumes identical input; revisions require a NEW job directory.',
+        }),
+      }),
+      promptSnippet:
+        'Assemble video locally — lossless clip concat (C0) or a promo timeline (images + overlays + TTS narration + motion), no paid models',
+      promptGuidelines: [
+        'Two modes: <jobDir>/compose-input.json (C0: concat 2+ existing mp4 clips) or <jobDir>/timeline-input.json (promo: still images + text overlays + TTS narration + kenburns motion + xfade transitions, all local).',
+        'For C0: every ordered stream across all clips must match (codec/resolution/fps/timebase/pix_fmt/sample-rate/audio layout) — mismatches are reported via ffprobe, never silently transcoded. Do NOT use for AI video generation (use video_generate/video_render).',
+        'For timeline: reuse existing images or screenshots first and generate only missing source material with image_generate; write narration in each segment (Edge TTS is free — no paid confirmation needed), and put Chinese titles/subtitles in overlay (rendered locally, never from an image model).',
+        'Timeline TTS failures stop by default. Set ttsFailureMode "silent-subtitles" in timeline-input.json only after the user explicitly accepts silent audio with preserved subtitles.',
+        'Local compute — no paid-model confirmation needed, but tell the user the segment/clip count and planned duration before calling.',
+        'The spec is immutable per job directory: rerunning the same path resumes identical input; changing input means a NEW job directory.',
+      ],
+      async execute(_toolCallId, params, signal, onUpdate, ctx) {
+        return runComposeTool(params as { composeSpecPath: string }, ctx, signal, onUpdate);
+      },
+    });
+
+    pi.registerTool({
       name: 'video_render',
       label: 'Render Multi-Shot Video',
       description:
@@ -763,7 +845,7 @@ export default function piVideoGenExtension(pi: ExtensionAPI): void {
 
   pi.registerCommand('video-gen', {
     description:
-      'pi-video-gen: /video-gen [generate <prompt>|render <spec>|recover <jobId>|models|reload|doctor]',
+      'pi-video-gen: /video-gen [generate <prompt>|render <spec>|compose <spec>|recover <jobId>|models|reload|doctor]',
     handler: async (args: string | undefined, ctx: ExtensionContext) => {
       const tokens = (args ?? '').trim().split(/\s+/).filter(Boolean);
       const sub = tokens[0];
@@ -783,6 +865,20 @@ export default function piVideoGenExtension(pi: ExtensionAPI): void {
         reloadSettings(ctx);
         registerTools();
         ctx.ui.notify('pi-video-gen settings reloaded.', 'info');
+        return;
+      }
+
+      if (sub === 'compose') {
+        const specPath = (args ?? '').trim().slice('compose'.length).trim();
+        if (!specPath) {
+          ctx.ui.notify(
+            'Usage: /video-gen compose <jobDir/compose-input.json|timeline-input.json>',
+            'error',
+          );
+          return;
+        }
+        const result = await runComposeTool({ composeSpecPath: specPath }, ctx, ctx.signal);
+        ctx.ui.notify(result.content[0]!.text, result.isError ? 'error' : 'info');
         return;
       }
 
@@ -958,7 +1054,7 @@ export default function piVideoGenExtension(pi: ExtensionAPI): void {
       }
 
       ctx.ui.notify(
-        'pi-video-gen commands:\n  /video-gen generate <prompt>  Generate a single clip\n  /video-gen render <spec>      Render a multi-shot video\n  /video-gen recover <jobId>    Resolve ambiguous shots (reset/adopt)\n  /video-gen models             List registered models\n  /video-gen reload             Reload settings\n  /video-gen doctor             Check environment (ffmpeg, keys, image_generate, output dir)',
+        'pi-video-gen commands:\n  /video-gen generate <prompt>  Generate a single clip\n  /video-gen render <spec>      Render a multi-shot video\n  /video-gen compose <spec>     Concat clips or render an image/TTS timeline\n  /video-gen recover <jobId>    Resolve ambiguous shots (reset/adopt)\n  /video-gen models             List registered models\n  /video-gen reload             Reload settings\n  /video-gen doctor             Check environment (ffmpeg, CJK fonts, keys, image_generate, output dir)',
         'info',
       );
     },
@@ -990,8 +1086,27 @@ export default function piVideoGenExtension(pi: ExtensionAPI): void {
         ? `✅ ffmpeg found (source: ${ffmpeg.source})`
         : `❌ ffmpeg not runnable (source tried: ${ffmpeg.source}) — reinstall pi-video-gen to restore its platform package, or set pi-video-gen.ffmpegPath in global/agent-dir settings`,
     );
+    const ffprobe = resolveFfprobe(settings.ffmpegPath);
+    checks.push(
+      ffprobe.runnable
+        ? `✅ ffprobe found (source: ${ffprobe.source})`
+        : `⚠️ ffprobe not runnable (source tried: ${ffprobe.source}) — needed for video_compose stream prechecks`,
+    );
+    const h264Ffmpeg = resolveGplFfmpeg(settings.ffmpegPath);
+    checks.push(
+      h264Ffmpeg.runnable
+        ? `✅ libx264 encoder available (source: ${h264Ffmpeg.source})`
+        : '⚠️ libx264 encoder unavailable — timeline output.codec "h264" will not work; use "mpeg4" or configure a compatible ffmpeg',
+    );
 
-    // 3. image_generate presence (image stages live in pi-image-gen)
+    // 3. local CJK font (required by Sharp/SVG timeline overlays)
+    checks.push(
+      hasCjkFont()
+        ? '✅ CJK font available for local text overlays'
+        : '❌ CJK font missing — install PingFang, Microsoft YaHei, Noto Sans CJK, or WenQuanYi before rendering Chinese overlays',
+    );
+
+    // 4. image_generate presence (image stages live in pi-image-gen)
     try {
       const all = pi.getAllTools?.() ?? [];
       const active = pi.getActiveTools?.() ?? [];
@@ -1006,7 +1121,7 @@ export default function piVideoGenExtension(pi: ExtensionAPI): void {
       checks.push('⚠️ could not query registered tools on this runtime');
     }
 
-    // 4. output dir writable
+    // 5. output dir writable
     const outputDir = resolveOutputDir(settings, ctx.cwd);
     try {
       mkdirSync(outputDir, { recursive: true });
@@ -1021,7 +1136,7 @@ export default function piVideoGenExtension(pi: ExtensionAPI): void {
       checks.push(`❌ output dir not writable: ${outputDir}`);
     }
 
-    // 5. trust status
+    // 6. trust status
     checks.push(
       isProjectTrusted(ctx)
         ? '✅ project trusted (project-level pi-video-gen settings: whitelisted keys only)'

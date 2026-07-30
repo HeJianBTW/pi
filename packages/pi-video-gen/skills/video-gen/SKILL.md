@@ -1,53 +1,147 @@
 ---
 name: video-gen
-description: "Agentic video creation: single clips via video_generate, and multi-shot films via the shot-book workflow — you write the shot book in conversation, generate frames with image_generate (pi-image-gen), then video_render pays for and stitches the clips. Use when the deliverable is a video. Do NOT use for still images (use pi-image-gen directly)."
+description: "Video creation and local composition: join existing clips or render image timelines with video_compose, generate one AI clip with video_generate, or make a multi-shot AI film with video_render. Use when the deliverable is a video. Do NOT use for still images (use pi-image-gen directly)."
 ---
 
 # Video generation
 
-This skill orchestrates `@amaster.ai/pi-video-gen` (video providers + render) and
-`@amaster.ai/pi-image-gen` (all image work). The video model is fixed by
-`pi-video-gen.defaultModel`; images use pi-image-gen's active model.
+This skill orchestrates four published flows:
 
-Two flows:
+- **C0 local concat** — `video_compose` joins compatible existing MP4 clips.
+- **Timeline local render** — `video_compose` turns images/screenshots into a
+  video with overlays, TTS, motion, subtitles, and optional BGM.
+- **Single AI clip** — one paid `video_generate` call.
+- **Shot-book AI film** — author a shot book, generate frames with
+  `image_generate`, then ONE paid `video_render` call renders and stitches.
 
-- **Single clip** — one `video_generate` call. Product motion, logo sting, cinemagraph.
-- **Shot-book film** — you (the agent) author a shot book in conversation, generate
-  all frames with `image_generate`, then ONE `video_render` call renders and stitches.
+The AI video model is fixed by `pi-video-gen.defaultModel`; generated images use
+pi-image-gen's active model.
 
 ## A. Workflow rules
 
-1. **Pick the right flow.** A vague idea or a script that needs multiple shots →
-   shot-book flow. A single moving image → `video_generate`. A still → pi-image-gen.
-2. **Preflight.** Before composing anything, call `video_capabilities` and confirm
-   `image_generate` is available (`/video-gen doctor` checks; config health is
-   `/image-gen list`). Respect the active model's duration range and audio support.
-3. **Write the shot book in conversation** (schema in §B). If the user only has a
+0. **Route first.** Choose the right flow before anything:
+
+   | User goal | Flow |
+   |---|---|
+   | Existing local mp4 clips to join | `video_compose` (C0 — lossless, local, no paid models) |
+   | One AI-generated moving shot | `video_generate` |
+   | Multi-shot film with keyframes | `video_render` |
+   | Promo/explainer from images & screenshots | `video_compose` (TimelineSpec — images + text overlays + TTS narration + kenburns motion, local render, near-zero cost) |
+
+1. **Local flows stop here.** For C0 follow §A0; for Timeline follow §A1. Do not
+   run the AI preflight, shot-book steps, or paid confirmation gates below.
+   Timeline only needs `image_generate` when its source images do not already
+   exist.
+2. **AI preflight only.** For `video_generate` or `video_render`, call
+   `video_capabilities` and respect the active model's duration range and audio
+   support. Confirm `image_generate` is available only when source frames need
+   to be generated (`/video-gen doctor` checks; config health is
+   `/image-gen list`).
+3. **Pick the AI flow.** A vague idea or a script that needs multiple shots →
+   shot-book flow. One moving shot → `video_generate`. A still → pi-image-gen.
+4. **Write the shot book in conversation** (schema in §B). If the user only has a
    vague idea, first be the screenwriter: three-act structure, filmable actions
    ("show, don't tell"), concrete visual detail. Iterate with the user in chat.
-4. **Confirmation gate 1 (mandatory).** Show the shot-book summary — shot count,
+5. **Confirmation gate 1 (shot-book only).** Show the shot-book summary — shot count,
    character list, estimated image calls (~2N+3C) and video calls (N) — and get an
    explicit go-ahead. **Default small: 1 scene, 3–5 shots** unless the user asks
    for more.
-5. **Image stage (all via `image_generate`, per §C).** Character portraits →
+6. **Image stage (shot-book only, via `image_generate`, per §C).** Character portraits →
    per-shot first frame (and last frame when needed). Show each batch to the user.
-6. **Confirmation gate 2 (mandatory).** Frames ready → state "about to make N paid
+7. **Paid confirmation.** Before `video_generate`, confirm its one paid call.
+   For a shot book, once frames are ready, state "about to make N paid
    video calls" and get an explicit render order. Then assemble the render spec
    and call `video_render` ONCE.
-7. **Cost honesty.** Video calls are paid and take minutes each. Never state
+8. **Cost honesty.** AI video calls are paid and take minutes each. Never state
    amounts (prices change); state call counts and durations.
-8. **Revisions.** The render spec is immutable per job directory. Text-stage
+9. **Revisions.** The render spec is immutable per job directory. Text-stage
    revisions happen in chat (regenerate frames as needed); a revised film goes in
    a NEW job directory. NEVER suggest "delete shots/<id>/ and rerender" — that
    breaks downstream dependencies. Rerunning the SAME spec path resumes an
    interrupted job (finished shots don't re-bill).
-9. **Degradation negotiation.** If `video_render` preflight fails (e.g. last
+10. **Degradation negotiation.** If `video_render` preflight fails (e.g. last
    frame unsupported), present the options (switch model / edit spec /
    `allowDegradations`) and let the user choose. Never degrade silently. When the
    model's `nativeAudio` is false, don't write audio cues into video prompts
    unless the user accepted silence.
-10. **Cancellation honesty.** Interrupting stops local polling only — remote
+11. **Cancellation honesty.** Interrupting stops local polling only — remote
     tasks may keep running and billable (Ark cancellation is unverified). Say so.
+
+## A0. C0 — composing existing clips (`video_compose`)
+
+1. **Tell the user first**: clip count, order, output location
+   (`<jobDir>/final_video.mp4`), `mode: "copy"`. This is LOCAL compute — do
+   not use the paid-model confirmation script for it.
+2. Write `<jobDir>/compose-input.json`
+   (`{"clips":[{"id":"c1","path":"/abs/a.mp4"},…],"output":{"mode":"copy"}}`)
+   under the video-gen output dir, then call `video_compose` ONCE. Keep source
+   clips outside `<jobDir>/clips/`; that directory and `final_video.mp4` are
+   reserved pipeline outputs, and a fresh job refuses either conflict.
+3. **Only promise** lossless concat of compatible MP4s (C0). **Never promise**
+   trimming, transitions, overlays, subtitles, TTS, BGM, or re-encoding **for
+   the C0 path** — those live in the Timeline path (A1 below), not here; do
+   not hint at them for `compose-input.json`.
+4. On any ordered stream incompatibility across all tracks
+   (codec/resolution/fps/timebase/pix_fmt/sample-rate/audio layout), hand the
+   exact ffprobe differences back to the user/agent:
+   re-encode the odd clips first. NEVER silently transcode, and NEVER fall
+   back to `video_generate`/`video_render` as a workaround.
+5. Interrupted? Rerun the SAME path (fingerprint-verified resume / cached).
+   Changed clips or order? NEW job directory. A completed final video is
+   hash-bound; if it is missing or changed, restore the exact artifact or start
+   a NEW job.
+
+## A1. Timeline compose (`video_compose` with `timeline-input.json`)
+
+Use for promos/explainers from still images. Costs ~0 (Edge TTS is free,
+render is local) — prefer it over AI video for this job type.
+
+1. **Collect existing images/screenshots first**, and use `image_generate` only
+   for missing source material. Keep all source images outside the job
+   directory, then author `<jobDir>/timeline-input.json`.
+   `assets/`, `overlays/`, `audio/`, `segments/`, `qc/`, generated tracks,
+   subtitles, and `final_video.mp4` are reserved pipeline outputs; a fresh job
+   refuses any conflicts rather than deleting them.
+   ```jsonc
+   {
+     "title": "产品宣传片",
+     "output": { "resolution": "1920x1080", "fps": 25, "codec": "h264" },
+     "voice": "edge-tts:zh-CN-YunyangNeural",   // default; free, no key
+     "ttsFailureMode": "fail",                  // or "silent-subtitles" only after the user accepts that degradation
+     "segments": [{
+       "id": "s1",
+       "image": "/abs/frame-1.png",
+       "durationSec": 5,                        // or "auto" (narration + 0.6s pad + outgoing xfade; overlap is deducted from the timeline)
+       "motion": "kenburns-in",                 // static | kenburns-in | kenburns-out | pan-left | pan-right | zoom-in | zoom-out
+       "transitionTo": { "type": "xfade", "style": "fade", "durationSec": 0.8 },
+       "overlay": { "title": "标题", "subtitle": "副标题", "position": "bottom-left" },
+       "narration": "这一段的中文旁白文本"
+     }]
+   }
+   ```
+2. **Chinese text NEVER comes from an image model** — titles/subtitles go in
+   `overlay` and are rendered locally via SVG (no garbled CJK).
+3. **Cost confirmation is unnecessary** (local compute), but still show the
+   segment count and total planned duration before calling `video_compose`.
+4. Narration uses Edge TTS (free). Measured audio duration drives
+   `durationSec: "auto"`; soft subtitles use each segment's actual video timing.
+   TTS failures stop the job by default. Use `ttsFailureMode:
+   "silent-subtitles"` only as an explicit degradation choice; it keeps the
+   subtitle track and fills that segment with silence. Once accepted, that
+   degradation is cached for the immutable job; create a NEW job to retry
+   real narration.
+5. On completion, review the QC frames in `<jobDir>/qc/` yourself (Read the
+   PNGs) before showing the result — flipped/overlapping text only shows up
+   visually. Soft `mov_text` subtitles are not burned into those PNGs; the
+   pipeline separately verifies that the subtitle stream exists and that the
+   SRT cues match the resolved segment timeline.
+6. The spec is immutable per job: rerunning the same path resumes only
+   regular job-local artifacts whose manifest hashes still match; changes
+   require a NEW job directory. A committed artifact that is missing or
+   changed is rejected rather than regenerated underneath cached downstream
+   outputs. A completed manifest with any missing artifact hash is rejected;
+   an interrupted manifest invalidates unverified downstream hashes before
+   rebuilding an uncommitted upstream artifact.
 
 ## B. Shot book (VideoProject) — authoring reference
 

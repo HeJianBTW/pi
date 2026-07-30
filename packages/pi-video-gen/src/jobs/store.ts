@@ -1,6 +1,16 @@
-import { mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import {
+  createReadStream,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  writeFileSync,
+} from 'node:fs';
+import { lstat } from 'node:fs/promises';
 import { join, sep } from 'node:path';
 import { safeBasename, VideoGenError } from '../errors.js';
+import { CancelledError } from '../providers/task.js';
 import type { RemoteTaskHandle } from '../types.js';
 
 /**
@@ -130,6 +140,27 @@ export function readJsonFile<T>(path: string): T | undefined {
       `${safeBasename(path)} is corrupted (not valid JSON). Refusing to resume — move it aside and start a new job, or restore it from backup. Rerunning as-is would re-bill all shots.`,
       'store: manifest corrupted',
     );
+  }
+}
+
+/** Stream a potentially large artifact into SHA-256 without loading it into memory. */
+export async function hashFileSha256(path: string, signal?: AbortSignal): Promise<string> {
+  const hash = createHash('sha256');
+  for await (const chunk of createReadStream(path)) {
+    if (signal?.aborted) throw new CancelledError();
+    hash.update(chunk as Buffer);
+  }
+  return hash.digest('hex');
+}
+
+/** True only when the path is confirmed absent; other lookup failures remain unexpected. */
+export async function pathIsMissing(path: string): Promise<boolean> {
+  try {
+    await lstat(path);
+    return false;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return true;
+    throw error;
   }
 }
 
@@ -324,6 +355,169 @@ function validateRenderManifest(raw: unknown, path: string): RenderJobManifest {
     }
   }
   return m as RenderJobManifest;
+}
+
+export type ComposeJobManifest = {
+  jobId: string;
+  kind: 'compose';
+  state: 'concatenating' | 'done' | 'failed' | 'cancelled';
+  /** Fingerprint over spec content + per-clip SHA-256. */
+  fingerprint: string;
+  clipHashes: Record<string, string>;
+  finalVideoPath?: string | undefined;
+  finalVideoHash?: string | undefined;
+  error?: string | undefined;
+  updatedAt: string;
+};
+
+export type TimelineSegmentState = {
+  narrationDurationSec?: number | undefined;
+  narrationDegraded?: boolean | undefined;
+  resolvedDurationSec?: number | undefined;
+};
+
+export type TimelineJobManifest = {
+  jobId: string;
+  kind: 'timeline';
+  state: 'working' | 'done' | 'failed' | 'cancelled';
+  /** Fingerprint over spec + per-image SHA-256 + voice/output params. */
+  fingerprint: string;
+  imageHashes: Record<string, string>;
+  artifactHashes: Record<string, string>;
+  segments: Record<string, TimelineSegmentState>;
+  finalVideoPath?: string | undefined;
+  finalVideoHash?: string | undefined;
+  error?: string | undefined;
+  updatedAt: string;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function hasSha256Values(value: unknown): value is Record<string, string> {
+  return (
+    isRecord(value) &&
+    Object.values(value).every((hash) => typeof hash === 'string' && /^[0-9a-f]{64}$/.test(hash))
+  );
+}
+
+export function loadTimelineJob(jobDir: string): TimelineJobManifest | undefined {
+  const path = join(jobDir, 'manifest.json');
+  const raw = readJsonFile<unknown>(path);
+  if (raw === undefined) return undefined;
+  if (!isRecord(raw) || raw.kind !== 'timeline') {
+    throw new VideoGenError(
+      `This directory already holds a "${isRecord(raw) ? (raw.kind ?? 'unknown') : 'unknown'}" job manifest. Choose a different job directory.`,
+      'store: foreign manifest',
+    );
+  }
+  const manifest = raw as Partial<TimelineJobManifest>;
+  const validStates = new Set(['working', 'done', 'failed', 'cancelled']);
+  const segmentsValid =
+    isRecord(manifest.segments) &&
+    Object.values(manifest.segments).every(
+      (segment) =>
+        isRecord(segment) &&
+        (segment.narrationDurationSec === undefined ||
+          (typeof segment.narrationDurationSec === 'number' &&
+            Number.isFinite(segment.narrationDurationSec) &&
+            segment.narrationDurationSec >= 0)) &&
+        (segment.resolvedDurationSec === undefined ||
+          (typeof segment.resolvedDurationSec === 'number' &&
+            Number.isFinite(segment.resolvedDurationSec) &&
+            segment.resolvedDurationSec >= 0)) &&
+        (segment.narrationDegraded === undefined || typeof segment.narrationDegraded === 'boolean'),
+    );
+  if (
+    typeof manifest.jobId !== 'string' ||
+    typeof manifest.state !== 'string' ||
+    !validStates.has(manifest.state) ||
+    typeof manifest.fingerprint !== 'string' ||
+    manifest.fingerprint === '' ||
+    !hasSha256Values(manifest.imageHashes) ||
+    !hasSha256Values(manifest.artifactHashes) ||
+    !segmentsValid ||
+    (manifest.finalVideoHash !== undefined &&
+      (typeof manifest.finalVideoHash !== 'string' ||
+        !/^[0-9a-f]{64}$/.test(manifest.finalVideoHash))) ||
+    (manifest.state === 'done' &&
+      (typeof manifest.finalVideoPath !== 'string' ||
+        typeof manifest.finalVideoHash !== 'string')) ||
+    typeof manifest.updatedAt !== 'string'
+  ) {
+    throw new VideoGenError(
+      'manifest.json is not a valid timeline manifest (wrong shape). Refusing to resume.',
+      'store: timeline manifest shape invalid',
+    );
+  }
+  if (manifest.jobId !== jobDir.split(/[\\/]/).pop()) {
+    throw new VideoGenError(
+      `manifest.json declares jobId "${manifest.jobId}" but lives in "${jobDir.split(/[\\/]/).pop()}" — refusing to resume.`,
+      'store: timeline jobId mismatch',
+    );
+  }
+  return manifest as TimelineJobManifest;
+}
+
+export function saveTimelineJob(jobDir: string, manifest: TimelineJobManifest): void {
+  mkdirSync(jobDir, { recursive: true });
+  writeJsonAtomic(join(jobDir, 'manifest.json'), {
+    ...manifest,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+export function loadComposeJob(jobDir: string): ComposeJobManifest | undefined {
+  const path = join(jobDir, 'manifest.json');
+  const raw = readJsonFile<unknown>(path);
+  if (raw === undefined) return undefined;
+  // FAIL CLOSED: a directory that already holds a render/single manifest (or
+  // any non-compose kind) is NOT a fresh compose job — treating it as one
+  // would overwrite and destroy paid task recovery state.
+  if (!isRecord(raw) || raw.kind !== 'compose') {
+    throw new VideoGenError(
+      `This directory already holds a "${isRecord(raw) ? (raw.kind ?? 'unknown') : 'unknown'}" job manifest. Choose a different job directory for compose — refusing to overwrite another job's state.`,
+      'store: foreign manifest',
+    );
+  }
+  const manifest = raw as Partial<ComposeJobManifest>;
+  const validStates = new Set(['concatenating', 'done', 'failed', 'cancelled']);
+  if (
+    typeof manifest.jobId !== 'string' ||
+    typeof manifest.state !== 'string' ||
+    !validStates.has(manifest.state) ||
+    typeof manifest.fingerprint !== 'string' ||
+    manifest.fingerprint === '' ||
+    !hasSha256Values(manifest.clipHashes) ||
+    (manifest.finalVideoHash !== undefined &&
+      (typeof manifest.finalVideoHash !== 'string' ||
+        !/^[0-9a-f]{64}$/.test(manifest.finalVideoHash))) ||
+    (manifest.state === 'done' &&
+      (typeof manifest.finalVideoPath !== 'string' ||
+        typeof manifest.finalVideoHash !== 'string')) ||
+    typeof manifest.updatedAt !== 'string'
+  ) {
+    throw new VideoGenError(
+      'manifest.json is not a valid compose manifest (wrong shape). Refusing to resume.',
+      'store: compose manifest shape invalid',
+    );
+  }
+  if (manifest.jobId !== jobDir.split(/[\\/]/).pop()) {
+    throw new VideoGenError(
+      `manifest.json declares jobId "${manifest.jobId}" but lives in "${jobDir.split(/[\\/]/).pop()}" — refusing to resume.`,
+      'store: compose jobId mismatch',
+    );
+  }
+  return manifest as ComposeJobManifest;
+}
+
+export function saveComposeJob(jobDir: string, manifest: ComposeJobManifest): void {
+  mkdirSync(jobDir, { recursive: true });
+  writeJsonAtomic(join(jobDir, 'manifest.json'), {
+    ...manifest,
+    updatedAt: new Date().toISOString(),
+  });
 }
 
 export function loadRenderJob(jobDir: string): RenderJobManifest | undefined {
