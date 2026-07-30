@@ -6,6 +6,49 @@ const mockFetch = vi.fn();
 
 vi.stubGlobal('fetch', mockFetch);
 
+const KIMI_FORMULA_TOOLS = [
+  {
+    type: 'function',
+    function: {
+      name: 'web_search',
+      description: 'Search the web for information',
+      parameters: {
+        type: 'object',
+        properties: { query: { type: 'string' } },
+        required: ['query'],
+      },
+    },
+  },
+];
+
+function okJson(body: unknown) {
+  return { ok: true, json: async () => body };
+}
+
+function kimiToolCalls(
+  toolCalls: Array<{
+    id: string;
+    type: 'function';
+    function: { name: string; arguments: string };
+  }>,
+  message: Record<string, unknown> = {},
+) {
+  return okJson({
+    choices: [
+      {
+        finish_reason: 'tool_calls',
+        message: { role: 'assistant', ...message, tool_calls: toolCalls },
+      },
+    ],
+  });
+}
+
+function kimiAnswer(content: string) {
+  return okJson({
+    choices: [{ finish_reason: 'stop', message: { role: 'assistant', content } }],
+  });
+}
+
 describe('search', () => {
   let originalEnv: NodeJS.ProcessEnv;
 
@@ -46,49 +89,192 @@ describe('search', () => {
     expect(opts.headers.Authorization).toBe('Bearer tavily-key');
   });
 
-  it('uses search.provider kimi with two-round flow', async () => {
+  it('uses search.provider kimi through the Formula web search tool', async () => {
     const settings: WebToolSettings = {
       search: { provider: 'kimi' },
       providers: { kimi: { apiKey: 'kimi-key' } },
     };
     mockFetch
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          choices: [
-            {
-              finish_reason: 'tool_calls',
-              message: {
-                role: 'assistant',
-                tool_calls: [
-                  {
-                    id: 'call_1',
-                    type: 'function',
-                    function: { name: '$web_search', arguments: '{"query":"test"}' },
-                  },
-                ],
-              },
-            },
-          ],
+      .mockResolvedValueOnce(okJson({ tools: KIMI_FORMULA_TOOLS }))
+      .mockResolvedValueOnce(
+        kimiToolCalls([
+          {
+            id: 'call_1',
+            type: 'function',
+            function: { name: 'web_search', arguments: '{"query":"test"}' },
+          },
+        ]),
+      )
+      .mockResolvedValueOnce(
+        okJson({
+          status: 'succeeded',
+          context: { output: '', encrypted_output: 'encrypted search result' },
         }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          choices: [
-            {
-              finish_reason: 'stop',
-              message: { role: 'assistant', content: 'Kimi answer' },
-            },
-          ],
-        }),
-      });
+      )
+      .mockResolvedValueOnce(kimiAnswer('Kimi answer'));
 
     const result = await search({ query: 'test' }, settings);
 
     expect(result.provider).toBe('kimi');
     expect(result.answer).toBe('Kimi answer');
-    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(mockFetch.mock.calls.map(([url]) => url)).toEqual([
+      'https://api.moonshot.cn/v1/formulas/moonshot/web-search:latest/tools',
+      'https://api.moonshot.cn/v1/chat/completions',
+      'https://api.moonshot.cn/v1/formulas/moonshot/web-search:latest/fibers',
+      'https://api.moonshot.cn/v1/chat/completions',
+    ]);
+
+    const firstChatBody = JSON.parse(mockFetch.mock.calls[1]![1].body);
+    expect(firstChatBody.model).toBe('kimi-k3');
+    expect(firstChatBody.tools).toEqual(KIMI_FORMULA_TOOLS);
+    expect(firstChatBody).not.toHaveProperty('thinking');
+
+    const fiberBody = JSON.parse(mockFetch.mock.calls[2]![1].body);
+    expect(fiberBody).toEqual({ name: 'web_search', arguments: '{"query":"test"}' });
+
+    const finalChatBody = JSON.parse(mockFetch.mock.calls[3]![1].body);
+    expect(finalChatBody.messages.at(-1)).toEqual({
+      role: 'tool',
+      tool_call_id: 'call_1',
+      content: 'encrypted search result',
+    });
+  });
+
+  it('handles every Formula tool call across multiple rounds', async () => {
+    const settings: WebToolSettings = {
+      search: { provider: 'kimi' },
+      providers: { kimi: { apiKey: 'kimi-key' } },
+    };
+    mockFetch
+      .mockResolvedValueOnce(okJson({ tools: KIMI_FORMULA_TOOLS }))
+      .mockResolvedValueOnce(
+        kimiToolCalls(
+          [
+            {
+              id: 'call_1',
+              type: 'function',
+              function: { name: 'web_search', arguments: '{"query":"one"}' },
+            },
+            {
+              id: 'call_2',
+              type: 'function',
+              function: { name: 'web_search', arguments: '{"query":"two"}' },
+            },
+          ],
+          { content: '', reasoning_content: 'search twice' },
+        ),
+      )
+      .mockResolvedValueOnce(okJson({ status: 'succeeded', context: { output: 'result one' } }))
+      .mockResolvedValueOnce(
+        okJson({
+          status: 'succeeded',
+          context: { encrypted_output: 'result two' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        kimiToolCalls([
+          {
+            id: 'call_3',
+            type: 'function',
+            function: { name: 'web_search', arguments: '{"query":"three"}' },
+          },
+        ]),
+      )
+      .mockResolvedValueOnce(okJson({ status: 'succeeded', context: { output: 'result three' } }))
+      .mockResolvedValueOnce(kimiAnswer('Combined answer'));
+
+    const result = await search({ query: 'test' }, settings);
+
+    expect(result.answer).toBe('Combined answer');
+    const secondChatBody = JSON.parse(mockFetch.mock.calls[4]![1].body);
+    expect(secondChatBody.messages.slice(-3)).toEqual([
+      expect.objectContaining({ role: 'assistant', reasoning_content: 'search twice' }),
+      { role: 'tool', tool_call_id: 'call_1', content: 'result one' },
+      { role: 'tool', tool_call_id: 'call_2', content: 'result two' },
+    ]);
+  });
+
+  it('rejects an unsuccessful Formula web search', async () => {
+    const settings: WebToolSettings = {
+      search: { provider: 'kimi' },
+      providers: { kimi: { apiKey: 'kimi-key' } },
+    };
+    mockFetch
+      .mockResolvedValueOnce(okJson({ tools: KIMI_FORMULA_TOOLS }))
+      .mockResolvedValueOnce(
+        kimiToolCalls([
+          {
+            id: 'call_1',
+            type: 'function',
+            function: { name: 'web_search', arguments: '{"query":"test"}' },
+          },
+        ]),
+      )
+      .mockResolvedValueOnce(okJson({ status: 'failed', context: { error: 'internal details' } }));
+
+    await expect(search({ query: 'test' }, settings)).rejects.toThrow(
+      'Kimi Formula web search failed',
+    );
+  });
+
+  it('rejects an empty Formula tool declaration', async () => {
+    const settings: WebToolSettings = {
+      search: { provider: 'kimi' },
+      providers: { kimi: { apiKey: 'kimi-key' } },
+    };
+    mockFetch.mockResolvedValueOnce(okJson({ tools: [] }));
+
+    await expect(search({ query: 'test' }, settings)).rejects.toThrow(
+      'Kimi Formula web search returned no tools',
+    );
+  });
+
+  it('rejects a successful Formula web search without output', async () => {
+    const settings: WebToolSettings = {
+      search: { provider: 'kimi' },
+      providers: { kimi: { apiKey: 'kimi-key' } },
+    };
+    mockFetch
+      .mockResolvedValueOnce(okJson({ tools: KIMI_FORMULA_TOOLS }))
+      .mockResolvedValueOnce(
+        kimiToolCalls([
+          {
+            id: 'call_1',
+            type: 'function',
+            function: { name: 'web_search', arguments: '{"query":"test"}' },
+          },
+        ]),
+      )
+      .mockResolvedValueOnce(okJson({ status: 'succeeded', context: {} }));
+
+    await expect(search({ query: 'test' }, settings)).rejects.toThrow(
+      'Kimi Formula web search returned no output',
+    );
+  });
+
+  it('stops after eight Formula tool rounds', async () => {
+    const settings: WebToolSettings = {
+      search: { provider: 'kimi' },
+      providers: { kimi: { apiKey: 'kimi-key' } },
+    };
+    mockFetch.mockResolvedValueOnce(okJson({ tools: KIMI_FORMULA_TOOLS }));
+    for (let round = 0; round < 8; round++) {
+      mockFetch
+        .mockResolvedValueOnce(
+          kimiToolCalls([
+            {
+              id: `call_${round}`,
+              type: 'function',
+              function: { name: 'web_search', arguments: '{"query":"test"}' },
+            },
+          ]),
+        )
+        .mockResolvedValueOnce(okJson({ status: 'succeeded', context: { output: 'result' } }));
+    }
+
+    await expect(search({ query: 'test' }, settings)).rejects.toThrow(
+      'Kimi Formula web search exceeded 8 tool rounds',
+    );
   });
 
   it('uses search.provider mimo and extracts annotations', async () => {
@@ -154,17 +340,9 @@ describe('search', () => {
     const settings: WebToolSettings = {
       providers: { kimi: { apiKey: 'kimi-key' } },
     };
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        choices: [
-          {
-            finish_reason: 'stop',
-            message: { role: 'assistant', content: 'auto kimi' },
-          },
-        ],
-      }),
-    });
+    mockFetch
+      .mockResolvedValueOnce(okJson({ tools: KIMI_FORMULA_TOOLS }))
+      .mockResolvedValueOnce(kimiAnswer('auto kimi'));
 
     const result = await search({ query: 'test' }, settings);
     expect(result.provider).toBe('kimi');
