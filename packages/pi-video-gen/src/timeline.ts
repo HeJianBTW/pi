@@ -4,7 +4,8 @@ import { assertSafeId } from './jobs/store.js';
 
 /**
  * TimelineSpec (C1+): agent-authored promo/explainer video from images/video
- * clips, text overlays, TTS narration, and motion — rendered LOCALLY.
+ * clips, text overlays, optional TTS narration, and motion. Media rendering is
+ * local; Edge TTS narration is an explicit network operation.
  *
  * File: `<jobDir>/timeline-input.json`; parent dir is the job (same identity
  * rules as compose/render jobs).

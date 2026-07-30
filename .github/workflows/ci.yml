@@ -18,6 +18,9 @@ env:
 jobs:
   lint:
     name: Lint
+    if: >
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on:
       - instance-hnpsq9go
       - linux
@@ -29,6 +32,9 @@ jobs:
 
   typecheck:
     name: Typecheck
+    if: >
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on:
       - instance-hnpsq9go
       - linux
@@ -42,6 +48,9 @@ jobs:
 
   test:
     name: Test
+    if: >
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on:
       - instance-hnpsq9go
       - linux
@@ -58,6 +67,9 @@ jobs:
 
   build:
     name: Build
+    if: >
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on:
       - instance-hnpsq9go
       - linux

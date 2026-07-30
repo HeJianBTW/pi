@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { generateImage } from '../generate.js';
+import { MAX_BASE64_IMAGE_CHARS } from '../image-input.js';
 import type { ImageGenSettings } from '../types.js';
 
 const PNG_BYTES = Buffer.from(
@@ -68,6 +69,21 @@ describe('generateImage', () => {
     expect(result.images[0]?.path).toMatch(/cat-test\.png$/);
     expect(result.images[0]?.revisedPrompt).toBe('a cat, but cuter');
     expect(readFileSync(result.images[0]!.path)).toEqual(PNG_BYTES);
+  });
+
+  it('rejects an oversized provider base64 result before materialization', async () => {
+    const cwd = makeTmpDir();
+    vi.stubEnv('OPENAI_API_KEY', 'sk-test');
+    const oversized = `${PNG_BYTES.toString('base64')}${'A'.repeat(MAX_BASE64_IMAGE_CHARS + 1)}`;
+    const fetchImpl: typeof fetch = (async () =>
+      fakeJsonResponse({ data: [{ b64_json: oversized }] })) as typeof fetch;
+
+    await expect(
+      generateImage(
+        { prompt: 'a cat' },
+        { cwd, settings: { defaultModel: 'gpt-image-2' }, fetchImpl },
+      ),
+    ).rejects.toThrow(/size ceiling/i);
   });
 
   it('downloads url-style results and writes them to disk', async () => {
@@ -368,7 +384,9 @@ describe('generateImage', () => {
     const cwd = makeTmpDir();
     vi.stubEnv('OPENAI_API_KEY', 'sk-test');
     const ctrl = new AbortController();
-    const largeImage = Buffer.alloc(8 * 1024 * 1024, 0x61).toString('base64');
+    const largeBytes = Buffer.alloc(8 * 1024 * 1024, 0x61);
+    PNG_BYTES.copy(largeBytes);
+    const largeImage = largeBytes.toString('base64');
 
     const fetchImpl: typeof fetch = (async () =>
       fakeJsonResponse({

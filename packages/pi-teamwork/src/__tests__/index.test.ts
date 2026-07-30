@@ -2018,9 +2018,8 @@ describe('initMulticaProvider', () => {
       return { stdout: '', stderr: '', code: 0 };
     };
     await initMulticaProvider({ token: 'my-token' }, exec);
-    expect(calls[0]).toEqual(['--version']);
-    expect(calls[1]).toEqual(['daemon', 'start']);
-    expect(calls[2]).toEqual(['login', '--token', 'my-token']);
+    expect(calls[0]).toEqual(['daemon', 'start']);
+    expect(calls[1]).toEqual(['login', '--token', 'my-token']);
   });
 
   it('skips login when no token', async () => {
@@ -2030,9 +2029,7 @@ describe('initMulticaProvider', () => {
       return { stdout: '', stderr: '', code: 0 };
     };
     await initMulticaProvider({}, exec);
-    expect(calls).toHaveLength(2);
-    expect(calls[0]).toEqual(['--version']);
-    expect(calls[1]).toEqual(['daemon', 'start']);
+    expect(calls).toEqual([['daemon', 'start']]);
   });
 
   it('continues even if login fails', async () => {
@@ -2070,6 +2067,18 @@ describe('initMulticaProvider', () => {
     };
     await initMulticaProvider({ autoInstall: false }, exec);
     expect(calls[0]).toEqual(['daemon', 'start']);
+  });
+
+  it('does not install Multica unless autoInstall is explicitly enabled', async () => {
+    const calls: { cmd: string; args: string[] }[] = [];
+    const exec: ExecFn = async (cmd, args) => {
+      calls.push({ cmd, args });
+      return { stdout: '', stderr: '', code: 0 };
+    };
+
+    await initMulticaProvider({}, exec);
+
+    expect(calls).toEqual([{ cmd: 'multica', args: ['daemon', 'start'] }]);
   });
 
   it('sets server_url and app_url via config when serverUrl and appUrl are configured', async () => {
@@ -2137,7 +2146,7 @@ describe('initMulticaProvider', () => {
       if (cmd === 'bash') return { stdout: '', stderr: 'fail', code: 1 };
       return { stdout: '', stderr: '', code: 0 };
     };
-    const { adapter, installResult } = await initMulticaProvider({}, exec);
+    const { adapter, installResult } = await initMulticaProvider({ autoInstall: true }, exec);
     expect(adapter).toBeInstanceOf(MulticaAdapter);
     expect(installResult.installed).toBe(false);
 
@@ -2157,7 +2166,10 @@ describe('initMulticaProvider', () => {
       if (cmd === 'bash') return { stdout: '', stderr: 'fail', code: 1 };
       return { stdout: '', stderr: '', code: 0 };
     };
-    await initMulticaProvider({ serverUrl: 'https://api.example.com', token: 'tk' }, exec);
+    await initMulticaProvider(
+      { serverUrl: 'https://api.example.com', token: 'tk', autoInstall: true },
+      exec,
+    );
     expect(calls.some((c) => c.args[0] === 'setup')).toBe(false);
     expect(calls.some((c) => c.args[0] === 'login')).toBe(false);
     expect(calls.some((c) => c.args.includes('start'))).toBe(false);
@@ -2184,190 +2196,20 @@ describe('ensureMulticaBinary', () => {
     expect(result).toEqual({ installed: true, alreadyPresent: true });
   });
 
-  it('attempts brew install on macOS/Linux when brew is available', async () => {
-    const originalPlatform = process.platform;
-    vi.stubGlobal('process', { ...process, platform: 'darwin' });
-
+  it('does not execute a mutable installer when the binary is missing', async () => {
     const calls: { cmd: string; args: string[] }[] = [];
-    let versionCallCount = 0;
     const exec: ExecFn = async (cmd, args) => {
       calls.push({ cmd, args });
-      if (args[0] === '--version') {
-        versionCallCount++;
-        if (versionCallCount === 1) return { stdout: '', stderr: '', code: 127 };
-        return { stdout: 'multica 1.0.0', stderr: '', code: 0 };
-      }
-      if (cmd === 'which' && args[0] === 'brew')
-        return { stdout: '/opt/homebrew/bin/brew', stderr: '', code: 0 };
-      if (cmd === 'brew') return { stdout: '', stderr: '', code: 0 };
-      return { stdout: '', stderr: '', code: 0 };
+      return { stdout: '', stderr: '', code: 127 };
     };
 
     const result = await ensureMulticaBinary('multica', exec);
-    expect(result).toEqual({ installed: true, alreadyPresent: false });
-    expect(calls.some((c) => c.cmd === 'brew' && c.args.includes('multica-ai/tap/multica'))).toBe(
-      true,
-    );
-
-    vi.stubGlobal('process', { ...process, platform: originalPlatform });
-    vi.unstubAllGlobals();
-  });
-
-  it('falls back to curl when brew is not available', async () => {
-    const originalPlatform = process.platform;
-    vi.stubGlobal('process', { ...process, platform: 'linux' });
-
-    const calls: { cmd: string; args: string[] }[] = [];
-    let versionCallCount = 0;
-    const exec: ExecFn = async (cmd, args) => {
-      calls.push({ cmd, args });
-      if (args[0] === '--version') {
-        versionCallCount++;
-        if (versionCallCount === 1) return { stdout: '', stderr: '', code: 127 };
-        return { stdout: 'multica 1.0.0', stderr: '', code: 0 };
-      }
-      if (cmd === 'which' && args[0] === 'brew') return { stdout: '', stderr: '', code: 1 };
-      if (cmd === 'bash') return { stdout: '', stderr: '', code: 0 };
-      return { stdout: '', stderr: '', code: 0 };
-    };
-
-    const result = await ensureMulticaBinary('multica', exec);
-    expect(result).toEqual({ installed: true, alreadyPresent: false });
-    expect(calls.some((c) => c.cmd === 'bash' && c.args[0] === '-c')).toBe(true);
-    expect(calls.some((c) => c.cmd === 'brew')).toBe(false);
-
-    vi.stubGlobal('process', { ...process, platform: originalPlatform });
-    vi.unstubAllGlobals();
-  });
-
-  it('passes MULTICA_BIN_DIR=$HOME/.local/bin to install.sh to bypass sudo fallback', async () => {
-    const originalPlatform = process.platform;
-    const originalHome = process.env.HOME;
-    const originalPath = process.env.PATH;
-    vi.stubGlobal('process', { ...process, platform: 'linux' });
-    process.env.HOME = '/tmp/fake-home';
-    process.env.PATH = '/usr/bin';
-
-    const calls: { cmd: string; args: string[] }[] = [];
-    let versionCallCount = 0;
-    const exec: ExecFn = async (cmd, args) => {
-      calls.push({ cmd, args });
-      if (args[0] === '--version') {
-        versionCallCount++;
-        if (versionCallCount === 1) return { stdout: '', stderr: '', code: 127 };
-        return { stdout: 'multica 1.0.0', stderr: '', code: 0 };
-      }
-      if (cmd === 'which' && args[0] === 'brew') return { stdout: '', stderr: '', code: 1 };
-      if (cmd === 'bash') return { stdout: '', stderr: '', code: 0 };
-      return { stdout: '', stderr: '', code: 0 };
-    };
-
-    await ensureMulticaBinary('multica', exec);
-    const bashCall = calls.find((c) => c.cmd === 'bash' && c.args[0] === '-c');
-    expect(bashCall).toBeDefined();
-    expect(bashCall!.args[1]).toContain('MULTICA_BIN_DIR=');
-    expect(bashCall!.args[1]).toContain('/tmp/fake-home/.local/bin');
-    // Installer should also prepend ~/.local/bin to PATH so subsequent
-    // spawn(multica) calls find the freshly-installed binary.
-    expect(process.env.PATH).toContain('/tmp/fake-home/.local/bin');
-
-    process.env.HOME = originalHome;
-    process.env.PATH = originalPath;
-    vi.stubGlobal('process', { ...process, platform: originalPlatform });
-    vi.unstubAllGlobals();
-  });
-
-  it('falls back to curl when brew install fails', async () => {
-    const originalPlatform = process.platform;
-    vi.stubGlobal('process', { ...process, platform: 'darwin' });
-
-    const calls: { cmd: string; args: string[] }[] = [];
-    let versionCallCount = 0;
-    const exec: ExecFn = async (cmd, args) => {
-      calls.push({ cmd, args });
-      if (args[0] === '--version') {
-        versionCallCount++;
-        if (versionCallCount === 1) return { stdout: '', stderr: '', code: 127 };
-        return { stdout: 'multica 1.0.0', stderr: '', code: 0 };
-      }
-      if (cmd === 'which' && args[0] === 'brew')
-        return { stdout: '/opt/homebrew/bin/brew', stderr: '', code: 0 };
-      if (cmd === 'brew') return { stdout: '', stderr: 'brew error', code: 1 };
-      if (cmd === 'bash') return { stdout: '', stderr: '', code: 0 };
-      return { stdout: '', stderr: '', code: 0 };
-    };
-
-    const result = await ensureMulticaBinary('multica', exec);
-    expect(result).toEqual({ installed: true, alreadyPresent: false });
-    expect(calls.some((c) => c.cmd === 'bash' && c.args[0] === '-c')).toBe(true);
-
-    vi.stubGlobal('process', { ...process, platform: originalPlatform });
-    vi.unstubAllGlobals();
-  });
-
-  it('uses powershell on Windows', async () => {
-    const originalPlatform = process.platform;
-    vi.stubGlobal('process', { ...process, platform: 'win32' });
-
-    const calls: { cmd: string; args: string[] }[] = [];
-    let versionCallCount = 0;
-    const exec: ExecFn = async (cmd, args) => {
-      calls.push({ cmd, args });
-      if (args[0] === '--version') {
-        versionCallCount++;
-        if (versionCallCount === 1) return { stdout: '', stderr: '', code: 127 };
-        return { stdout: 'multica 1.0.0', stderr: '', code: 0 };
-      }
-      if (cmd === 'powershell') return { stdout: '', stderr: '', code: 0 };
-      return { stdout: '', stderr: '', code: 0 };
-    };
-
-    const result = await ensureMulticaBinary('multica', exec);
-    expect(result).toEqual({ installed: true, alreadyPresent: false });
-    expect(calls.some((c) => c.cmd === 'powershell' && c.args[0] === '-Command')).toBe(true);
-
-    vi.stubGlobal('process', { ...process, platform: originalPlatform });
-    vi.unstubAllGlobals();
-  });
-
-  it('returns error when install fails and binary still not found', async () => {
-    const originalPlatform = process.platform;
-    vi.stubGlobal('process', { ...process, platform: 'darwin' });
-
-    const exec: ExecFn = async (cmd, args) => {
-      if (args[0] === '--version') return { stdout: '', stderr: '', code: 127 };
-      if (cmd === 'which' && args[0] === 'brew') return { stdout: '', stderr: '', code: 1 };
-      if (cmd === 'bash') return { stdout: '', stderr: 'network error', code: 1 };
-      return { stdout: '', stderr: '', code: 0 };
-    };
-
-    const result = await ensureMulticaBinary('multica', exec);
-    expect(result.installed).toBe(false);
-    expect(result.alreadyPresent).toBe(false);
-    expect(result.error).toBeDefined();
-
-    vi.stubGlobal('process', { ...process, platform: originalPlatform });
-    vi.unstubAllGlobals();
-  });
-
-  it('returns error when binary not on PATH after successful install', async () => {
-    const originalPlatform = process.platform;
-    vi.stubGlobal('process', { ...process, platform: 'linux' });
-
-    const exec: ExecFn = async (cmd, args) => {
-      if (args[0] === '--version') return { stdout: '', stderr: '', code: 127 };
-      if (cmd === 'which' && args[0] === 'brew')
-        return { stdout: '/usr/bin/brew', stderr: '', code: 0 };
-      if (cmd === 'brew') return { stdout: '', stderr: '', code: 0 };
-      return { stdout: '', stderr: '', code: 0 };
-    };
-
-    const result = await ensureMulticaBinary('multica', exec);
-    expect(result.installed).toBe(false);
-    expect(result.error).toBe('multica binary not found on PATH after installation');
-
-    vi.stubGlobal('process', { ...process, platform: originalPlatform });
-    vi.unstubAllGlobals();
+    expect(result).toEqual({
+      installed: false,
+      alreadyPresent: false,
+      error: 'automatic installation is disabled; install a pinned multica release manually',
+    });
+    expect(calls).toEqual([{ cmd: 'multica', args: ['--version'] }]);
   });
 
   it('handles exec throwing an exception', async () => {
@@ -2402,88 +2244,5 @@ describe('ensureMulticaBinary', () => {
     await ensureMulticaBinary('multica', exec);
     expect(calls).toHaveLength(1);
     expect(calls[0]!.args).toEqual(['--version']);
-  });
-
-  it('handles brew exec throwing exception and falls back to curl', async () => {
-    const originalPlatform = process.platform;
-    vi.stubGlobal('process', { ...process, platform: 'darwin' });
-
-    const calls: { cmd: string; args: string[] }[] = [];
-    let versionCallCount = 0;
-    const exec: ExecFn = async (cmd, args) => {
-      calls.push({ cmd, args });
-      if (args[0] === '--version') {
-        versionCallCount++;
-        if (versionCallCount === 1) return { stdout: '', stderr: '', code: 127 };
-        return { stdout: 'multica 1.0.0', stderr: '', code: 0 };
-      }
-      if (cmd === 'which' && args[0] === 'brew')
-        return { stdout: '/opt/homebrew/bin/brew', stderr: '', code: 0 };
-      if (cmd === 'brew') throw new Error('brew crashed');
-      if (cmd === 'bash') return { stdout: '', stderr: '', code: 0 };
-      return { stdout: '', stderr: '', code: 0 };
-    };
-
-    const result = await ensureMulticaBinary('multica', exec);
-    expect(result).toEqual({ installed: true, alreadyPresent: false });
-    expect(calls.some((c) => c.cmd === 'bash' && c.args[0] === '-c')).toBe(true);
-
-    vi.stubGlobal('process', { ...process, platform: originalPlatform });
-    vi.unstubAllGlobals();
-  });
-
-  it('returns error when curl fallback exec throws', async () => {
-    const originalPlatform = process.platform;
-    vi.stubGlobal('process', { ...process, platform: 'linux' });
-
-    const exec: ExecFn = async (cmd, args) => {
-      if (args[0] === '--version') return { stdout: '', stderr: '', code: 127 };
-      if (cmd === 'which' && args[0] === 'brew') return { stdout: '', stderr: '', code: 1 };
-      if (cmd === 'bash') throw new Error('network timeout');
-      return { stdout: '', stderr: '', code: 0 };
-    };
-
-    const result = await ensureMulticaBinary('multica', exec);
-    expect(result.installed).toBe(false);
-    expect(result.error).toContain('network timeout');
-
-    vi.stubGlobal('process', { ...process, platform: originalPlatform });
-    vi.unstubAllGlobals();
-  });
-
-  it('returns error when Windows powershell install fails', async () => {
-    const originalPlatform = process.platform;
-    vi.stubGlobal('process', { ...process, platform: 'win32' });
-
-    const exec: ExecFn = async (cmd, args) => {
-      if (args[0] === '--version') return { stdout: '', stderr: '', code: 127 };
-      if (cmd === 'powershell') return { stdout: '', stderr: 'access denied', code: 1 };
-      return { stdout: '', stderr: '', code: 0 };
-    };
-
-    const result = await ensureMulticaBinary('multica', exec);
-    expect(result.installed).toBe(false);
-    expect(result.error).toBe('access denied');
-
-    vi.stubGlobal('process', { ...process, platform: originalPlatform });
-    vi.unstubAllGlobals();
-  });
-
-  it('returns error when Windows powershell exec throws', async () => {
-    const originalPlatform = process.platform;
-    vi.stubGlobal('process', { ...process, platform: 'win32' });
-
-    const exec: ExecFn = async (cmd, args) => {
-      if (args[0] === '--version') return { stdout: '', stderr: '', code: 127 };
-      if (cmd === 'powershell') throw new Error('powershell not found');
-      return { stdout: '', stderr: '', code: 0 };
-    };
-
-    const result = await ensureMulticaBinary('multica', exec);
-    expect(result.installed).toBe(false);
-    expect(result.error).toContain('powershell not found');
-
-    vi.stubGlobal('process', { ...process, platform: originalPlatform });
-    vi.unstubAllGlobals();
   });
 });

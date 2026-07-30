@@ -73,10 +73,18 @@ export default function taskSchedulerExtension(
           config.lock ?? new FileSchedulerLock(path.join(config.dataDir, 'scheduler.lock'));
 
         const runner: ScheduledTaskRunner = async (task) => {
+          if (ctx.sessionManager.getSessionId() !== task.sessionId) {
+            throw new Error('Scheduled task belongs to a different session.');
+          }
           pi.sendUserMessage(task.prompt);
         };
 
-        const instance = new PersistentTaskScheduler({ store, lock, runner });
+        const instance = new PersistentTaskScheduler({
+          store,
+          lock,
+          runner,
+          scope: { sessionId: ctx.sessionManager.getSessionId() },
+        });
         await instance.start();
         scheduler = instance;
         ownsScheduler = true;
@@ -119,6 +127,7 @@ export default function taskSchedulerExtension(
       const parts = args.trim().split(/\s+/).filter(Boolean);
       const subcommand = parts[0]?.toLowerCase() ?? 'status';
       const rest = parts.slice(1).join(' ').trim();
+      const scope = { sessionId: ctx.sessionManager.getSessionId() };
 
       switch (subcommand) {
         case 'status': {
@@ -128,7 +137,7 @@ export default function taskSchedulerExtension(
         }
 
         case 'list': {
-          const tasks = await scheduler.list();
+          const tasks = await scheduler.list(scope);
           ctx.ui.notify(formatTaskList(tasks), 'info');
           break;
         }
@@ -138,7 +147,7 @@ export default function taskSchedulerExtension(
             ctx.ui.notify('Usage: /cron get <task-id>', 'warning');
             break;
           }
-          const task = await scheduler.get(rest);
+          const task = await scheduler.get(rest, scope);
           if (!task) {
             ctx.ui.notify(`Task not found: ${rest}`, 'error');
             break;
@@ -152,7 +161,7 @@ export default function taskSchedulerExtension(
             ctx.ui.notify('Usage: /cron run <task-id>', 'warning');
             break;
           }
-          const task = await scheduler.runNow(rest);
+          const task = await scheduler.runNow(rest, scope);
           if (!task) {
             ctx.ui.notify(`Task not found: ${rest}`, 'error');
             break;
@@ -166,7 +175,7 @@ export default function taskSchedulerExtension(
             ctx.ui.notify('Usage: /cron enable <task-id>', 'warning');
             break;
           }
-          const task = await scheduler.update(rest, { enabled: true });
+          const task = await scheduler.update(rest, { enabled: true }, scope);
           if (!task) {
             ctx.ui.notify(`Task not found: ${rest}`, 'error');
             break;
@@ -180,7 +189,7 @@ export default function taskSchedulerExtension(
             ctx.ui.notify('Usage: /cron disable <task-id>', 'warning');
             break;
           }
-          const task = await scheduler.update(rest, { enabled: false });
+          const task = await scheduler.update(rest, { enabled: false }, scope);
           if (!task) {
             ctx.ui.notify(`Task not found: ${rest}`, 'error');
             break;
@@ -194,7 +203,7 @@ export default function taskSchedulerExtension(
             ctx.ui.notify('Usage: /cron delete <task-id>', 'warning');
             break;
           }
-          const deleted = await scheduler.delete(rest);
+          const deleted = await scheduler.delete(rest, scope);
           ctx.ui.notify(
             deleted ? `Deleted: ${rest}` : `Task not found: ${rest}`,
             deleted ? 'info' : 'error',

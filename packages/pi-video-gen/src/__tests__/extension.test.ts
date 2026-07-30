@@ -280,7 +280,7 @@ describe('pi-video-gen extension', () => {
     await startSession(cwd);
 
     const framePath = join(cwd, 'frame.png');
-    writeFileSync(framePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    writeFileSync(framePath, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
 
     const seen: { url: string; body?: Record<string, unknown> }[] = [];
     vi.stubGlobal(
@@ -295,7 +295,7 @@ describe('pi-video-gen extension', () => {
           return new Response(
             JSON.stringify({
               status: 'succeeded',
-              content: { video_url: 'https://cdn.example/v.mp4' },
+              content: { video_url: 'https://93.184.216.34/v.mp4' },
             }),
             { status: 200 },
           );
@@ -337,7 +337,10 @@ describe('pi-video-gen extension', () => {
     );
     await startSession(cwd);
     // frame lives at <ctx.cwd>/frame.png; passed as a RELATIVE path
-    writeFileSync(join(cwd, 'frame.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    writeFileSync(
+      join(cwd, 'frame.png'),
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    );
 
     let submitted: Record<string, unknown> | undefined;
     vi.stubGlobal(
@@ -352,7 +355,7 @@ describe('pi-video-gen extension', () => {
           return new Response(
             JSON.stringify({
               status: 'succeeded',
-              content: { video_url: 'https://cdn.example/v.mp4' },
+              content: { video_url: 'https://93.184.216.34/v.mp4' },
             }),
             { status: 200 },
           );
@@ -495,7 +498,7 @@ describe('pi-video-gen extension', () => {
 
     // prepare a job with one frame + a REAL mp4 for the concat step
     const frame = join(cwd, 'f.png');
-    writeFileSync(frame, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    writeFileSync(frame, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
     const { createRequire } = await import('node:module');
     const { execFileSync } = await import('node:child_process');
     const ffmpegBin = createRequire(import.meta.url)('ffmpeg-static') as string;
@@ -529,7 +532,7 @@ describe('pi-video-gen extension', () => {
           return new Response(
             JSON.stringify({
               status: 'succeeded',
-              content: { video_url: 'https://cdn.example/v.mp4' },
+              content: { video_url: 'https://93.184.216.34/v.mp4' },
             }),
             { status: 200 },
           );
@@ -641,7 +644,11 @@ describe('pi-video-gen extension', () => {
     );
     await startSession(cwd);
     const frame = join(cwd, 'frame.png');
-    writeFileSync(frame, 'frame-bytes-v1');
+    const frameBytes = Buffer.concat([
+      Buffer.from('89504e470d0a1a0a', 'hex'),
+      Buffer.from('frame-bytes-v1'),
+    ]);
+    writeFileSync(frame, frameBytes);
 
     vi.stubGlobal(
       'fetch',
@@ -654,7 +661,7 @@ describe('pi-video-gen extension', () => {
           return new Response(
             JSON.stringify({
               status: 'succeeded',
-              content: { video_url: 'https://cdn.example/v.mp4' },
+              content: { video_url: 'https://93.184.216.34/v.mp4' },
             }),
             { status: 200 },
           );
@@ -676,7 +683,7 @@ describe('pi-video-gen extension', () => {
       expect(jobId).toBeDefined();
       // snapshot exists inside the job and the SUBMIT used it, not the source
       const snap = join(singleRoot, jobId!, 'assets', 'first_frame.png');
-      expect(readFileSync(snap, 'utf-8')).toBe('frame-bytes-v1');
+      expect(readFileSync(snap)).toEqual(frameBytes);
       expect(
         JSON.parse(readFileSync(join(singleRoot, jobId!, 'input.json'), 'utf-8')).firstFramePath,
       ).toBe(realpathSync(snap));
@@ -735,7 +742,7 @@ describe('pi-video-gen extension', () => {
         url.includes('/tasks/')
           ? Response.json({
               status: 'succeeded',
-              content: { video_url: 'https://cdn.example/video.mp4' },
+              content: { video_url: 'https://93.184.216.34/video.mp4' },
             })
           : new Response(Buffer.from([0, 0, 0, 24, 0x66, 0x74, 0x79, 0x70])),
       ),
@@ -835,7 +842,7 @@ describe('pi-video-gen extension', () => {
         if (url.includes('/tasks/')) {
           return Response.json({
             status: 'succeeded',
-            content: { video_url: 'https://cdn.example/video.mp4' },
+            content: { video_url: 'https://93.184.216.34/video.mp4' },
           });
         }
         downloads++;
@@ -916,7 +923,7 @@ describe('pi-video-gen extension', () => {
         if (url.includes('/tasks/')) {
           return Response.json({
             status: 'succeeded',
-            content: { video_url: 'https://cdn.example/video.mp4' },
+            content: { video_url: 'https://93.184.216.34/video.mp4' },
           });
         }
         return new Response(Buffer.from([0, 0, 0, 24, 0x66, 0x74, 0x79, 0x70]), {
@@ -1161,8 +1168,8 @@ describe('pi-video-gen extension', () => {
     await startSession(cwd);
     const f1 = join(cwd, 'f1.png');
     const f2 = join(cwd, 'f2.png');
-    writeFileSync(f1, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
-    writeFileSync(f2, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    writeFileSync(f1, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+    writeFileSync(f2, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
     const jobDir = join(cwd, '.video-gen', 'job-lock');
     const specPath = join(jobDir, 'render-input.json');
     mkdirSync(jobDir, { recursive: true });
@@ -1189,7 +1196,7 @@ describe('pi-video-gen extension', () => {
       new Response(
         JSON.stringify({
           status: 'succeeded',
-          content: { video_url: 'https://cdn.example/v.mp4' },
+          content: { video_url: 'https://93.184.216.34/v.mp4' },
         }),
         { status: 200 },
       );

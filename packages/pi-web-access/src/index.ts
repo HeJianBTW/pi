@@ -139,12 +139,12 @@ export default function piWebToolExtension(pi: ExtensionAPI): void {
           '- Use this tool when you need to retrieve and analyze web content',
           '',
           'Usage notes:',
-          '  - The URL must be a fully-formed valid URL',
+          '  - The URL must be a public HTTP(S) URL; loopback, private, link-local, metadata, credentialed, and unsafe redirect destinations are rejected',
           '  - The prompt should describe what information you want to extract from the page',
           '  - Results may be summarized if the content is very large',
         ].join('\n'),
         parameters: Type.Object({
-          url: Type.String({ description: 'The URL to fetch content from.' }),
+          url: Type.String({ description: 'The public HTTP(S) URL to fetch content from.' }),
           prompt: Type.String({
             description:
               'The prompt describing what information to extract or summarize from the page.',

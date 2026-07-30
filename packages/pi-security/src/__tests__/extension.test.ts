@@ -1,3 +1,6 @@
+import { mkdtemp, rm, symlink, unlink } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -41,6 +44,59 @@ describe('pi security extension', () => {
     await expect(handlers.tool_call?.[0]?.(writeEvent('tool-2'), ctx)).resolves.toBeUndefined();
 
     expect(select).toHaveBeenCalledOnce();
+  });
+
+  it('does not reuse a session grant when security-relevant arguments change', async () => {
+    const { handlers } = registerExtension();
+    const select = vi
+      .fn()
+      .mockResolvedValueOnce('Allow similar for this session')
+      .mockResolvedValueOnce('Deny');
+    const ctx = createContext({ select });
+
+    await expect(
+      handlers.tool_call?.[0]?.(writeEvent('tool-1', 'approval.txt'), ctx),
+    ).resolves.toBeUndefined();
+    const changed = (await handlers.tool_call?.[0]?.(
+      writeEvent('tool-2', 'different.txt'),
+      ctx,
+    )) as ToolCallEventResult;
+
+    expect(changed.block).toBe(true);
+    expect(select).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not reuse a session grant when an approved path symlink is retargeted', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'pi-security-grant-'));
+    const firstTarget = await mkdtemp(join(tmpdir(), 'pi-security-target-a-'));
+    const secondTarget = await mkdtemp(join(tmpdir(), 'pi-security-target-b-'));
+    const link = join(cwd, 'linked');
+    try {
+      await symlink(firstTarget, link, 'dir');
+      const { handlers } = registerExtension();
+      const select = vi
+        .fn()
+        .mockResolvedValueOnce('Allow similar for this session')
+        .mockResolvedValueOnce('Deny');
+      const ctx = createContext({ cwd, select });
+
+      await expect(
+        handlers.tool_call?.[0]?.(writeEvent('tool-1', 'linked/file.txt'), ctx),
+      ).resolves.toBeUndefined();
+      await unlink(link);
+      await symlink(secondTarget, link, 'dir');
+      const changed = (await handlers.tool_call?.[0]?.(
+        writeEvent('tool-2', 'linked/file.txt'),
+        ctx,
+      )) as ToolCallEventResult;
+
+      expect(changed.block).toBe(true);
+      expect(select).toHaveBeenCalledTimes(2);
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+      await rm(firstTarget, { recursive: true, force: true });
+      await rm(secondTarget, { recursive: true, force: true });
+    }
   });
 
   it('fails closed for non-interactive approvals', async () => {
@@ -92,12 +148,13 @@ function registerExtension(): {
 function createContext(
   options: {
     hasUI?: boolean;
+    cwd?: string;
     select?: ReturnType<typeof vi.fn>;
     confirm?: ReturnType<typeof vi.fn>;
   } = {},
 ): ExtensionContext {
   return {
-    cwd: '/repo',
+    cwd: options.cwd ?? '/repo',
     hasUI: options.hasUI ?? true,
     sessionManager: {
       getSessionId: () => 'session-1',
@@ -115,11 +172,11 @@ function createContext(
   } as unknown as ExtensionContext;
 }
 
-function writeEvent(toolCallId: string): ToolCallEvent {
+function writeEvent(toolCallId: string, path = 'approval.txt'): ToolCallEvent {
   return {
     type: 'tool_call',
     toolCallId,
     toolName: 'write',
-    input: { path: 'approval.txt', content: 'hello' },
+    input: { path, content: 'hello' },
   } as ToolCallEvent;
 }

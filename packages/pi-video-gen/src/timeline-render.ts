@@ -1,17 +1,18 @@
-import { COPYFILE_EXCL } from 'node:constants';
 import { createHash } from 'node:crypto';
+import { constants, createWriteStream } from 'node:fs';
 import {
-  copyFile,
   lstat,
   mkdir,
   mkdtemp,
+  open,
   readFile,
   realpath,
   rename,
   rm,
   writeFile,
 } from 'node:fs/promises';
-import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path';
+import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { pipeline } from 'node:stream/promises';
 import { resolveOutputDir } from './config.js';
 import { safeBasename, VideoGenError } from './errors.js';
 import {
@@ -28,13 +29,11 @@ import {
   assertSafeId,
   hashFileSha256,
   loadTimelineJob,
-  pathIsMissing,
   saveTimelineJob,
   type TimelineJobManifest,
 } from './jobs/store.js';
 import { renderBurnedSubtitle, renderTextOverlay } from './text-layer.js';
 import {
-  assertMediaReadable,
   type Motion,
   parseTimelineSpec,
   type TimelineSegment,
@@ -66,6 +65,55 @@ export type TimelineRunResult = {
 };
 
 const AUTO_PAD_SEC = 0.6;
+
+function isInside(path: string): boolean {
+  return path === '' || (path !== '..' && !path.startsWith(`..${sep}`) && !isAbsolute(path));
+}
+
+async function copyApprovedMedia(
+  sourcePath: string,
+  cwd: string,
+  destPath: string,
+  label: string,
+): Promise<void> {
+  const absolute = resolve(cwd, sourcePath);
+  if (!isInside(relative(resolve(cwd), absolute))) {
+    throw new VideoGenError(
+      `${label} must be inside the approved project directory.`,
+      'timeline: media outside cwd',
+    );
+  }
+  const info = await lstat(absolute).catch(() => null);
+  if (!info?.isFile() || info.isSymbolicLink()) {
+    throw new VideoGenError(`${label} is not readable.`, 'timeline: media unreadable');
+  }
+  const root = await realpath(cwd);
+  const canonical = await realpath(absolute);
+  if (!isInside(relative(root, canonical))) {
+    throw new VideoGenError(
+      `${label} must be inside the approved project directory.`,
+      'timeline: media outside cwd',
+    );
+  }
+
+  const source = await open(absolute, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+  try {
+    const [openedInfo, canonicalInfo] = await Promise.all([source.stat(), lstat(canonical)]);
+    if (
+      !openedInfo.isFile() ||
+      openedInfo.dev !== canonicalInfo.dev ||
+      openedInfo.ino !== canonicalInfo.ino
+    ) {
+      throw new VideoGenError(
+        `${label} changed while it was being validated.`,
+        'timeline: media changed during validation',
+      );
+    }
+    await pipeline(source.createReadStream(), createWriteStream(destPath, { flags: 'wx' }));
+  } finally {
+    await source.close().catch(() => {});
+  }
+}
 
 /**
  * Write ffmpeg output to a TEMP path first, then atomic rename into place.
@@ -318,6 +366,16 @@ export async function runTimeline(opts: {
 
   const specRaw = await readFile(realSpecPath);
   const spec = parseTimelineSpec(specRaw.toString('utf-8'));
+  if (
+    spec.segments.some((segment) => Boolean(segment.narration)) &&
+    !opts.tts &&
+    !spec.voice?.startsWith('edge-tts:')
+  ) {
+    throw new VideoGenError(
+      'Narration requires explicit Edge TTS opt-in. Set voice to "edge-tts:<voice-name>"; narration text will be sent to Microsoft.',
+      'timeline: edge tts not opted in',
+    );
+  }
   const width = Number((spec.output?.resolution ?? '1920x1080').split('x')[0]);
   const height = Number((spec.output?.resolution ?? '1920x1080').split('x')[1]);
   const fps = spec.output?.fps ?? 25;
@@ -370,7 +428,6 @@ export async function runTimeline(opts: {
     //    against the manifest, then swap in as the job's frozen assets. The old
     //    job's assets/ is NEVER modified before the fingerprint check passes.
     opts.onUpdate?.('Freezing segment media…');
-    await assertMediaReadable(spec, (p) => resolve(cwd, p));
     const assetsDir = join(jobDir, 'assets');
     const stagingDir = await mkdtemp(join(jobDir, '.assets-staging-'));
     // Directory-realpath guard on the JOB dir itself (staging sits inside it).
@@ -379,34 +436,11 @@ export async function runTimeline(opts: {
     const mediaSnaps: Record<string, string> = {};
     let bgmSnapshotPath = '';
     let manifest: TimelineJobManifest;
-    let snapCounter = 0;
     try {
       for (const seg of spec.segments) {
         const source = timelineSourcePath(seg);
-        const absMedia = resolve(cwd, source);
         const destPath = join(stagingDir, segmentSnapshotName(seg));
-        let tmp = '';
-        for (let i = 0; ; i++) {
-          const candidate = `${destPath}.tmp-${process.pid}-${snapCounter++}-${i}`;
-          try {
-            await copyFile(absMedia, candidate, COPYFILE_EXCL);
-            tmp = candidate;
-            break;
-          } catch (error) {
-            if ((error as NodeJS.ErrnoException).code === 'EEXIST') continue;
-            if (
-              (error as NodeJS.ErrnoException).code === 'ENOENT' &&
-              (await pathIsMissing(absMedia))
-            ) {
-              throw new VideoGenError(
-                `Segment "${seg.id}" media source is not readable: ${safeBasename(source)}.`,
-                'timeline: media unreadable',
-              );
-            }
-            throw error;
-          }
-        }
-        await rename(tmp, destPath);
+        await copyApprovedMedia(source, cwd, destPath, `Segment "${seg.id}" media source`);
         mediaSnaps[seg.id] = destPath;
         mediaHashes[seg.id] = await hashFileSha256(destPath, opts.signal);
       }
@@ -416,36 +450,8 @@ export async function runTimeline(opts: {
       let bgmHash = '';
       if (bgmSource) {
         const absBgm = resolve(cwd, bgmSource);
-        const st = await lstat(absBgm).catch(() => null);
-        if (!st?.isFile()) {
-          throw new VideoGenError(
-            `BGM is not readable: ${safeBasename(bgmSource)}.`,
-            'timeline: bgm unreadable',
-          );
-        }
         const bgmDest = join(stagingDir, `bgm${extname(absBgm) || '.mp3'}`);
-        let tmp = '';
-        for (let i = 0; ; i++) {
-          const candidate = `${bgmDest}.tmp-${process.pid}-${i}`;
-          try {
-            await copyFile(absBgm, candidate, COPYFILE_EXCL);
-            tmp = candidate;
-            break;
-          } catch (error) {
-            if ((error as NodeJS.ErrnoException).code === 'EEXIST') continue;
-            if (
-              (error as NodeJS.ErrnoException).code === 'ENOENT' &&
-              (await pathIsMissing(absBgm))
-            ) {
-              throw new VideoGenError(
-                `BGM is not readable: ${safeBasename(bgmSource)}.`,
-                'timeline: bgm unreadable',
-              );
-            }
-            throw error;
-          }
-        }
-        await rename(tmp, bgmDest);
+        await copyApprovedMedia(bgmSource, cwd, bgmDest, 'BGM');
         bgmSnapshotPath = bgmDest;
         bgmHash = await hashFileSha256(bgmDest, opts.signal);
       }

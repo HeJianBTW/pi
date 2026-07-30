@@ -150,11 +150,32 @@ describe('telemetry', () => {
       args: { command: 'cat private.txt' },
       details: { args: { command: 'cat private.txt' }, kept: true },
     });
+    await exporter.publish({
+      id: 'tool-event-2',
+      traceId,
+      sessionId: 'session-1',
+      conversationId: 'conversation-1',
+      toolCallId: 'call-2',
+      toolName: 'run_shell',
+      status: 'failed',
+      createdAt: '2026-05-02T00:00:00.200Z',
+      error: 'complete failed result with secret',
+      details: {
+        kept: true,
+        apiKey: 'sdk-secret',
+        nested: { content: 'secret output', token: 'nested-secret', safe: 'metadata' },
+      },
+    });
 
     const trace = client.traces[0];
     expect(trace?.body.input).toBeUndefined();
     const toolSpan = trace?.spans[0]?.spans[0];
     expect(toolSpan?.body.input).toBeUndefined();
+    const serialized = JSON.stringify(client.traces);
+    expect(serialized).not.toContain('complete failed result');
+    expect(serialized).not.toContain('secret output');
+    expect(serialized).not.toContain('sdk-secret');
+    expect(serialized).not.toContain('nested-secret');
   });
 
   it('allows redaction hooks to drop telemetry events in SDK transport', async () => {

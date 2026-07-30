@@ -3,6 +3,7 @@ import { webFetch } from '../fetch.js';
 import type { WebToolSettings } from '../types.js';
 
 const mockFetch = vi.fn();
+const publicLookup = async () => [{ address: '93.184.216.34', family: 4 }];
 
 vi.stubGlobal('fetch', mockFetch);
 
@@ -35,7 +36,7 @@ describe('webFetch', () => {
       }),
     });
 
-    const result = await webFetch({ url: 'https://example.com' }, settings);
+    const result = await webFetch({ url: 'https://example.com' }, settings, publicLookup);
 
     expect(result.title).toBe('Test Page');
     expect(result.content).toBe('# Hello\nWorld');
@@ -58,7 +59,7 @@ describe('webFetch', () => {
       }),
     });
 
-    const result = await webFetch({ url: 'https://example.com' }, settings);
+    const result = await webFetch({ url: 'https://example.com' }, settings, publicLookup);
 
     expect(result.content).toBe('# Extracted content');
 
@@ -86,7 +87,7 @@ describe('webFetch', () => {
       }),
     });
 
-    const result = await webFetch({ url: 'https://example.com' }, settings);
+    const result = await webFetch({ url: 'https://example.com' }, settings, publicLookup);
     expect(result.content).toBe('zai wins');
   });
 
@@ -103,7 +104,7 @@ describe('webFetch', () => {
       }),
     });
 
-    const result = await webFetch({ url: 'https://example.com' }, settings);
+    const result = await webFetch({ url: 'https://example.com' }, settings, publicLookup);
     expect(result.content).toBe('tavily content');
   });
 
@@ -113,7 +114,7 @@ describe('webFetch', () => {
       text: async () => '# Jina Title\n\nRendered content from Jina',
     });
 
-    const result = await webFetch({ url: 'https://example.com' }, {});
+    const result = await webFetch({ url: 'https://example.com' }, {}, publicLookup);
 
     expect(result.title).toBe('Jina Title');
     expect(result.content).toContain('Rendered content from Jina');
@@ -132,13 +133,18 @@ describe('webFetch', () => {
         '<html><head><title>Local Page</title></head><body><h1>Hello</h1><p>World</p></body></html>',
     });
 
-    const result = await webFetch({ url: 'https://example.com' }, {});
+    const result = await webFetch({ url: 'https://example.com' }, {}, publicLookup);
 
     expect(result.title).toBe('Local Page');
     expect(result.content).toContain('Hello');
     expect(mockFetch).toHaveBeenCalledTimes(2);
     expect(mockFetch.mock.calls[0]![0]).toBe('https://r.jina.ai/https://example.com');
-    expect(mockFetch.mock.calls[1]![0]).toBe('https://example.com');
+    expect(mockFetch.mock.calls[1]![0]).toBe('https://example.com/');
+  });
+
+  it('blocks loopback URLs before either fetch path runs', async () => {
+    await expect(webFetch({ url: 'http://127.0.0.1/private' }, {})).rejects.toThrow(/public HTTP/i);
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it('throws on HTTP error from zai', async () => {
@@ -152,7 +158,7 @@ describe('webFetch', () => {
       text: async () => 'Internal error',
     });
 
-    await expect(webFetch({ url: 'https://example.com' }, settings)).rejects.toThrow(
+    await expect(webFetch({ url: 'https://example.com' }, settings, publicLookup)).rejects.toThrow(
       'Z.AI Reader API error 500',
     );
   });
@@ -170,7 +176,7 @@ describe('webFetch', () => {
       }),
     });
 
-    await expect(webFetch({ url: 'https://example.com' }, settings)).rejects.toThrow(
+    await expect(webFetch({ url: 'https://example.com' }, settings, publicLookup)).rejects.toThrow(
       'Tavily failed to extract',
     );
   });
@@ -187,7 +193,7 @@ describe('webFetch', () => {
       }),
     });
 
-    await webFetch({ url: 'https://example.com' }, settings);
+    await webFetch({ url: 'https://example.com' }, settings, publicLookup);
 
     const [url] = mockFetch.mock.calls[0]!;
     expect(url).toBe('https://my-proxy.com/api/paas/v4/reader');

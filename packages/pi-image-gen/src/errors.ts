@@ -1,3 +1,4 @@
+import { readResponseBytes } from '@amaster.ai/pi-shared';
 import type { ResolvedProvider } from './types.js';
 
 /**
@@ -170,8 +171,15 @@ export function describeNetworkError(error: unknown, provider: ResolvedProvider)
 /** Read a successful provider body, converting mid-stream failures without echoing raw text. */
 export async function readBodyText(res: Response, provider: ResolvedProvider): Promise<string> {
   try {
-    return await res.text();
+    if (!res.body) return await res.text();
+    return new TextDecoder().decode(await readResponseBytes(res, 128 * 1024 * 1024));
   } catch (error) {
+    if (error instanceof Error && /size ceiling/i.test(error.message)) {
+      throw new ImageGenError(
+        `${provider.name} returned a response that exceeds the size ceiling.`,
+        `${providerLogLabel(provider)} response too large`,
+      );
+    }
     throw describeNetworkError(error, provider);
   }
 }

@@ -2,13 +2,13 @@
 
 ![pi-memory-mem0 preview](https://raw.githubusercontent.com/TGYD-helige/pi/master/packages/pi-memory-mem0/preview.png)
 
-Passive semantic memory extension powered by [Mem0](https://mem0.ai) — supports both Platform (cloud) and Open-Source (local) modes.
+Explicit semantic memory tools powered by [Mem0](https://mem0.ai), with support for both Platform (cloud) and Open-Source (local) modes.
 
 ## How It Works
 
-After each conversation turn, user + assistant messages are automatically sent to Mem0 for fact extraction and vector storage. Before the next turn, relevant memories are recalled via semantic search and injected into the system prompt.
+Memories are saved and recalled through explicit tools. They are project-namespaced, and stored text is not injected into the system prompt.
 
-**Zero effort required** — memory storage and recall are fully automatic.
+Use `mem0_save` and the search/profile tools when memory should be stored or retrieved.
 
 ## Two Modes
 
@@ -216,9 +216,11 @@ If `better-sqlite3` fails to load (for example, because of a Node ABI mismatch),
 `pi-memory-mem0` and `pi-memory` run **independently in parallel** as separate extensions:
 
 - `pi-memory`: Active memory — agent explicitly manages via tools, local `.md` files, hard char limits
-- `pi-memory-mem0`: Passive memory — automatic extraction and storage, semantic retrieval, no capacity limits
+- `pi-memory-mem0`: Explicit semantic memory tools backed by Mem0
 
-They do not interfere with each other and each injects into the system prompt separately.
+They do not interfere with each other. `pi-memory-mem0` does not inject recalled
+text into the system prompt; the agent retrieves it through the search and
+profile tools.
 
 ## Dedup API
 

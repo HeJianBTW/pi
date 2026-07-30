@@ -256,7 +256,7 @@ describe('image_generate execute error surfaces are sanitized', () => {
   // A provider CDN URL whose credential lives in the query — the thing a raw
   // fetch rejection would reproduce into stderr / the tool result if we trusted
   // plain Error messages. It must reach NEITHER surface.
-  const SIGNED_URL = 'https://cdn.example.com/gen/out.png?X-Amz-Signature=SECRET&token=USERTOKEN';
+  const SIGNED_URL = 'https://93.184.216.34/gen/out.png?X-Amz-Signature=SECRET&token=USERTOKEN';
   // A 1x1 PNG (magic bytes + minimal IDAT) so materialize() accepts the result
   // and the run reaches the write step, where the output-dir failure fires.
   const PNG_B64 = Buffer.from(
@@ -342,14 +342,17 @@ describe('image_generate execute error surfaces are sanitized', () => {
     // arrive OK (200) but the body read (arrayBuffer) rejects mid-stream. Before
     // the fix this escaped as `unexpected AbortError` with a generic user message;
     // now it is a body-free download category, and the signed URL never leaks.
-    const brokenBodyResponse = {
-      ok: true,
-      status: 200,
-      headers: new Headers({ 'content-type': 'image/png' }),
-      async arrayBuffer() {
-        throw new DOMException('aborted', 'AbortError');
+    const brokenBodyResponse = new Response(
+      new ReadableStream({
+        pull(controller) {
+          controller.error(new DOMException('aborted', 'AbortError'));
+        },
+      }),
+      {
+        status: 200,
+        headers: { 'content-type': 'image/png' },
       },
-    } as unknown as Response;
+    );
     const fetchImpl: typeof fetch = (async (input) => {
       const url = typeof input === 'string' ? input : (input as URL).toString();
       if (url.endsWith('/images/generations')) {

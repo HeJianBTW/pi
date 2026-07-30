@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { httpStatusError, networkError, safeBasename, VideoGenError } from '../errors.js';
 import { arkAdapter } from '../providers/ark.js';
 import { pollTask, sanitizeProviderMessage } from '../providers/task.js';
@@ -209,6 +209,15 @@ describe('arkAdapter.downloadTo', () => {
     expect(existsSync(dest)).toBe(true);
     expect(existsSync(`${dest}.tmp`)).toBe(false);
     expect(readFileSync(dest).subarray(4, 8).toString('ascii')).toBe('ftyp');
+  });
+
+  it('blocks a provider-returned loopback URL before download', async () => {
+    const dest = join(suiteDir, 'private.mp4');
+    const fetchImpl = vi.fn<typeof fetch>();
+    await expect(
+      arkAdapter.downloadTo(provider, handle, 'http://127.0.0.1/private.mp4', dest, fetchImpl),
+    ).rejects.toThrow(/public HTTP/i);
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it('refuses a pre-placed destination symlink (and never follows it)', async () => {

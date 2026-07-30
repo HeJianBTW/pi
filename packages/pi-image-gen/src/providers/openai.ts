@@ -7,7 +7,12 @@ import {
   redactUrl,
   throwHttpError,
 } from '../errors.js';
-import { classifyImageOutput, sniffMime } from '../image-input.js';
+import {
+  classifyImageOutput,
+  MAX_BASE64_IMAGE_CHARS,
+  MAX_GENERATED_IMAGES,
+  sniffMime,
+} from '../image-input.js';
 import type {
   GenerateImageParams,
   ImageProviderAdapter,
@@ -157,6 +162,12 @@ export async function parseImagesResponse(
     throw new ImageGenError(detail, `${providerLogLabel(provider)} returned invalid JSON`);
   }
   const data = json.data ?? [];
+  if (data.length > MAX_GENERATED_IMAGES) {
+    throw new ImageGenError(
+      `Provider returned too many images (maximum ${MAX_GENERATED_IMAGES}).`,
+      `${providerLogLabel(provider)} returned too many images`,
+    );
+  }
   const out: RawImageResult[] = [];
   for (const entry of data) {
     // Prefer explicit b64_json field (OpenAI shape). If absent, classify the
@@ -164,8 +175,14 @@ export async function parseImagesResponse(
     // there instead of a real URL.
     let payload: RawImageResult['data'] | null = null;
     if (entry.b64_json) {
-      const decoded = Buffer.from(entry.b64_json, 'base64');
-      const mimeType = sniffMime(decoded) ?? entry.media_type ?? 'image/png';
+      if (entry.b64_json.length > MAX_BASE64_IMAGE_CHARS) {
+        throw new ImageGenError(
+          'Provider returned an image that exceeds the size ceiling.',
+          `${providerLogLabel(provider)} returned an oversized image`,
+        );
+      }
+      const prefix = Buffer.from(entry.b64_json.slice(0, 24), 'base64');
+      const mimeType = sniffMime(prefix) ?? entry.media_type ?? 'image/png';
       payload = { kind: 'base64', bytes: entry.b64_json, mimeType };
     } else {
       const classified = classifyImageOutput(entry.url);

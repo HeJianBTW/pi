@@ -22,7 +22,7 @@ export async function initMulticaProvider(
   exec: ExecFn,
 ): Promise<InitMulticaResult> {
   const binary = config.binary?.trim() || 'multica';
-  const autoInstall = config.autoInstall !== false;
+  const autoInstall = config.autoInstall === true;
 
   let installResult: InstallResult = { installed: true, alreadyPresent: true };
 

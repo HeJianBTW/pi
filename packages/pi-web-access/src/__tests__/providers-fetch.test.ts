@@ -3,6 +3,7 @@ import { webFetch } from '../fetch.js';
 import type { WebToolSettings } from '../types.js';
 
 const mockFetch = vi.fn();
+const publicLookup = async () => [{ address: '93.184.216.34', family: 4 }];
 vi.stubGlobal('fetch', mockFetch);
 
 describe('webFetch - all providers', () => {
@@ -35,7 +36,7 @@ describe('webFetch - all providers', () => {
       }),
     });
 
-    const result = await webFetch({ url: 'https://example.com' }, settings);
+    const result = await webFetch({ url: 'https://example.com' }, settings, publicLookup);
 
     expect(result.content).toBe('Summarized content');
     const [url] = mockFetch.mock.calls[0]!;
@@ -58,7 +59,7 @@ describe('webFetch - all providers', () => {
       }),
     });
 
-    const result = await webFetch({ url: 'https://example.com' }, settings);
+    const result = await webFetch({ url: 'https://example.com' }, settings, publicLookup);
 
     expect(result.content).toBe('Fetched page content from OpenRouter');
     const [url] = mockFetch.mock.calls[0]!;
@@ -77,7 +78,7 @@ describe('webFetch - all providers', () => {
       }),
     });
 
-    const result = await webFetch({ url: 'https://example.com' }, settings);
+    const result = await webFetch({ url: 'https://example.com' }, settings, publicLookup);
 
     expect(result.content).toBe('Full article content from Anthropic');
     const [url, opts] = mockFetch.mock.calls[0]!;
@@ -92,7 +93,7 @@ describe('webFetch - all providers', () => {
       text: async () => '# Page Title\n\nContent from Jina Reader',
     });
 
-    const result = await webFetch({ url: 'https://example.com' }, settings);
+    const result = await webFetch({ url: 'https://example.com' }, settings, publicLookup);
 
     expect(result.title).toBe('Page Title');
     expect(result.content).toContain('Content from Jina Reader');
@@ -112,7 +113,7 @@ describe('webFetch - all providers', () => {
         '<html><head><title>Fallback</title></head><body><p>Local content</p></body></html>',
     });
 
-    const result = await webFetch({ url: 'https://example.com' }, settings);
+    const result = await webFetch({ url: 'https://example.com' }, settings, publicLookup);
 
     expect(result.title).toBe('Fallback');
     expect(result.content).toContain('Local content');
@@ -130,7 +131,7 @@ describe('webFetch - all providers', () => {
       text: async () => 'Rate limited',
     });
 
-    await expect(webFetch({ url: 'https://example.com' }, settings)).rejects.toThrow(
+    await expect(webFetch({ url: 'https://example.com' }, settings, publicLookup)).rejects.toThrow(
       'OpenRouter API error 429',
     );
   });
@@ -146,7 +147,7 @@ describe('webFetch - all providers', () => {
       text: async () => 'Unauthorized',
     });
 
-    await expect(webFetch({ url: 'https://example.com' }, settings)).rejects.toThrow(
+    await expect(webFetch({ url: 'https://example.com' }, settings, publicLookup)).rejects.toThrow(
       'Anthropic API error 401',
     );
   });
@@ -162,7 +163,7 @@ describe('webFetch - all providers', () => {
       text: async () => 'Server error',
     });
 
-    await expect(webFetch({ url: 'https://example.com' }, settings)).rejects.toThrow(
+    await expect(webFetch({ url: 'https://example.com' }, settings, publicLookup)).rejects.toThrow(
       'Perplexity API error 500',
     );
   });
@@ -183,7 +184,7 @@ describe('webFetch - all providers', () => {
       }),
     });
 
-    const result = await webFetch({ url: 'https://firecrawl.dev' }, settings);
+    const result = await webFetch({ url: 'https://firecrawl.dev' }, settings, publicLookup);
 
     expect(result.title).toBe('Firecrawl Home');
     expect(result.url).toBe('https://firecrawl.dev/');
@@ -209,9 +210,25 @@ describe('webFetch - all providers', () => {
       text: async () => 'Server error',
     });
 
-    await expect(webFetch({ url: 'https://example.com' }, settings)).rejects.toThrow(
+    await expect(webFetch({ url: 'https://example.com' }, settings, publicLookup)).rejects.toThrow(
       'Firecrawl Scrape API error 500',
     );
+  });
+
+  it('rejects private URLs before invoking a configured provider', async () => {
+    const settings: WebToolSettings = {
+      fetch: { provider: 'firecrawl' },
+      providers: { firecrawl: { apiKey: 'key' } },
+    };
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ success: true, data: { markdown: 'private' } }),
+    });
+
+    await expect(
+      webFetch({ url: 'http://169.254.169.254/latest/meta-data' }, settings, publicLookup),
+    ).rejects.toThrow('public HTTP(S)');
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it('uses custom baseUrl for fetch provider', async () => {
@@ -224,7 +241,7 @@ describe('webFetch - all providers', () => {
       json: async () => ({ choices: [{ message: { content: 'ok' } }] }),
     });
 
-    await webFetch({ url: 'https://example.com' }, settings);
+    await webFetch({ url: 'https://example.com' }, settings, publicLookup);
 
     const [url] = mockFetch.mock.calls[0]!;
     expect(url).toBe('https://my-proxy.com/v1/chat/completions');
@@ -236,7 +253,7 @@ describe('webFetch - all providers', () => {
       providers: { kimi: { apiKey: 'key' } },
     };
 
-    await expect(webFetch({ url: 'https://example.com' }, settings)).rejects.toThrow(
+    await expect(webFetch({ url: 'https://example.com' }, settings, publicLookup)).rejects.toThrow(
       'does not support web_fetch',
     );
   });

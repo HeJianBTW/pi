@@ -221,6 +221,9 @@ importers:
 
   packages/pi-memory-mem0:
     dependencies:
+      '@amaster.ai/pi-memory':
+        specifier: workspace:*
+        version: link:../pi-memory
       '@amaster.ai/pi-shared':
         specifier: workspace:*
         version: link:../shared

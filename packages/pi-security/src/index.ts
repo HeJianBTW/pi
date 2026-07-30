@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { realpathSync } from 'node:fs';
 import path from 'node:path';
 import type {
   JsonObject,
@@ -198,7 +199,7 @@ function builtinRulesForApproval(approval: ApprovalMode): SecurityRule[] {
     case 'on-failure':
       return [...BASELINE_SECURITY_RULES, ...ASK_HIGH_RISK_RULES];
     case 'on-request':
-      return [...BASELINE_SECURITY_RULES, ASK_WORKSPACE_WRITE_RULE];
+      return [...BASELINE_SECURITY_RULES, ...ASK_HIGH_RISK_RULES, ASK_WORKSPACE_WRITE_RULE];
     case 'untrusted':
       return [...BASELINE_SECURITY_RULES, ...ASK_HIGH_RISK_RULES, ASK_WORKSPACE_WRITE_RULE];
   }
@@ -376,7 +377,7 @@ export function createSecurityPolicyEngineForProfile(
   const denyCapabilityRules: SecurityRule[] =
     resolvedProfile.capabilities.deny?.map((toolName) => ({
       id: `deny-capability-${profile}-${toolName}`,
-      priority: 110,
+      priority: 550,
       tools: [toolName],
       decision: {
         kind: 'deny',
@@ -661,12 +662,13 @@ function fileResource(
   value: string | undefined,
   workspaceDir: string | undefined,
 ): SecurityResource {
+  const canonical = value ? canonicalizeSecurityPath(workspaceDir, value) : undefined;
   return {
     kind: 'file',
     operation,
     ...(value ? { target: value } : {}),
     scope: fileScope(value, workspaceDir),
-    sensitivity: classifyPathSensitivity(value),
+    sensitivity: classifyPathSensitivity(canonical),
   };
 }
 
@@ -674,23 +676,39 @@ function fileScope(value: string | undefined, workspaceDir: string | undefined):
   if (!value) {
     return 'unknown';
   }
-  if (!path.isAbsolute(value)) {
-    return 'workspace';
-  }
-  const normalized = path.resolve(value);
-  if (workspaceDir && pathInside(normalized, path.resolve(workspaceDir))) {
+  const normalized = canonicalizeSecurityPath(workspaceDir, value);
+  if (workspaceDir && pathInside(normalized, canonicalizeSecurityPath(undefined, workspaceDir))) {
     return 'workspace';
   }
   const home = process.env.HOME;
-  if (home && pathInside(normalized, path.resolve(home))) {
+  if (home && pathInside(normalized, canonicalizeSecurityPath(undefined, home))) {
     return 'home';
   }
   return 'system';
 }
 
+export function canonicalizeSecurityPath(cwd: string | undefined, value: string): string {
+  const absolute = path.resolve(cwd ?? process.cwd(), value);
+  let existing = absolute;
+  const suffix: string[] = [];
+  for (;;) {
+    try {
+      return path.resolve(realpathSync.native(existing), ...suffix);
+    } catch {
+      const parent = path.dirname(existing);
+      if (parent === existing) return absolute;
+      suffix.unshift(path.basename(existing));
+      existing = parent;
+    }
+  }
+}
+
 function pathInside(value: string, parent: string): boolean {
   const relative = path.relative(parent, value);
-  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+  return (
+    relative === '' ||
+    (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative))
+  );
 }
 
 function classifyPathSensitivity(value: string | undefined): SecuritySensitivity {

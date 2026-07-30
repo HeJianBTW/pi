@@ -106,6 +106,7 @@ export type TaskSchedulerStatus = {
 export type TaskSchedulerScope = {
   tenantId?: string;
   userId?: string;
+  sessionId?: string;
 };
 
 export interface TaskScheduler {
@@ -178,6 +179,7 @@ export type PersistentTaskSchedulerOptions = {
   store: ScheduledTaskStore;
   lock: SchedulerLock;
   runner: ScheduledTaskRunner;
+  scope?: TaskSchedulerScope;
   hooks?: TaskSchedulerHooks;
   lockHeartbeatMs?: number;
 };
@@ -188,19 +190,22 @@ export class PersistentTaskScheduler implements TaskScheduler {
   private readonly runningTaskIds = new Set<string>();
   private active = false;
   private lockHeartbeat: NodeJS.Timeout | undefined;
+  private readonly scope: TaskSchedulerScope;
 
-  constructor(private readonly options: PersistentTaskSchedulerOptions) {}
+  constructor(private readonly options: PersistentTaskSchedulerOptions) {
+    this.scope = { ...options.scope };
+  }
 
   async list(scope: TaskSchedulerScope = {}): Promise<ScheduledTask[]> {
-    return await this.options.store.list(scope);
+    return await this.options.store.list(this.applyScope(scope));
   }
 
   async get(taskId: string, scope: TaskSchedulerScope = {}): Promise<ScheduledTask | undefined> {
-    return await this.options.store.get(taskId, scope);
+    return await this.options.store.get(taskId, this.applyScope(scope));
   }
 
   async status(): Promise<TaskSchedulerStatus> {
-    const tasks = await this.options.store.list();
+    const tasks = await this.options.store.list(this.scope);
     const holderPid = await this.options.lock.holderPid();
     const lock: TaskSchedulerStatus['lock'] = {
       path: this.options.lock.path,
@@ -225,6 +230,9 @@ export class PersistentTaskScheduler implements TaskScheduler {
   }
 
   async create(input: ScheduledTaskCreateInput): Promise<ScheduledTask> {
+    if (!matchesScope(input, this.scope)) {
+      throw new Error('Scheduled task is outside this scheduler scope.');
+    }
     const now = new Date().toISOString();
     const task = withNextRun({
       id: randomUUID(),
@@ -247,7 +255,8 @@ export class PersistentTaskScheduler implements TaskScheduler {
     input: ScheduledTaskUpdate,
     scope: TaskSchedulerScope = {},
   ): Promise<ScheduledTask | undefined> {
-    const existing = await this.options.store.get(taskId, scope);
+    const effectiveScope = this.applyScope(scope);
+    const existing = await this.options.store.get(taskId, effectiveScope);
     if (!existing) {
       return undefined;
     }
@@ -289,7 +298,7 @@ export class PersistentTaskScheduler implements TaskScheduler {
     if (input.enabled !== false && existing.lastStatus === 'error' && existing.lastError) {
       delete task.lastError;
     }
-    const updated = await this.options.store.update(taskId, task, scope);
+    const updated = await this.options.store.update(taskId, task, effectiveScope);
     if (this.active && updated) {
       this.schedule(updated);
     }
@@ -297,12 +306,15 @@ export class PersistentTaskScheduler implements TaskScheduler {
   }
 
   async delete(taskId: string, scope: TaskSchedulerScope = {}): Promise<boolean> {
-    this.unschedule(taskId);
-    return await this.options.store.delete(taskId, scope);
+    const deleted = await this.options.store.delete(taskId, this.applyScope(scope));
+    if (deleted) {
+      this.unschedule(taskId);
+    }
+    return deleted;
   }
 
   async runNow(taskId: string, scope: TaskSchedulerScope = {}): Promise<ScheduledTask | undefined> {
-    const task = await this.options.store.get(taskId, scope);
+    const task = await this.options.store.get(taskId, this.applyScope(scope));
     if (!task) {
       return undefined;
     }
@@ -319,7 +331,7 @@ export class PersistentTaskScheduler implements TaskScheduler {
     }
     this.active = true;
     this.startLockHeartbeat();
-    const tasks = await this.options.store.list();
+    const tasks = await this.options.store.list(this.scope);
     for (const task of tasks) {
       if (task.lastStatus === 'running') {
         const fixedAt = new Date().toISOString();
@@ -337,12 +349,12 @@ export class PersistentTaskScheduler implements TaskScheduler {
           ),
           updatedAt: fixedAt,
         });
-        await this.options.store.update(task.id, fixedTask).catch(() => undefined);
+        await this.options.store.update(task.id, fixedTask, this.scope).catch(() => undefined);
         this.schedule(fixedTask);
       } else {
         const refreshed = withNextRun(task);
         if (refreshed.nextRunAt !== task.nextRunAt) {
-          await this.options.store.update(task.id, refreshed).catch(() => undefined);
+          await this.options.store.update(task.id, refreshed, this.scope).catch(() => undefined);
           this.schedule(refreshed);
         } else {
           this.schedule(task);
@@ -421,7 +433,7 @@ export class PersistentTaskScheduler implements TaskScheduler {
     if (!this.active || this.runningTaskIds.has(taskId)) {
       return;
     }
-    const task = await this.options.store.get(taskId);
+    const task = await this.options.store.get(taskId, this.scope);
     if (!task?.enabled) {
       return;
     }
@@ -437,7 +449,7 @@ export class PersistentTaskScheduler implements TaskScheduler {
       runHistory: appendTaskHistory(task.runHistory, runningEntry),
       updatedAt: startedAt,
     };
-    await this.options.store.update(taskId, runningTask);
+    await this.options.store.update(taskId, runningTask, this.scope);
     const run: ScheduledTaskRunContext = {
       historyEntryId: runningEntry.id,
       sessionId: runningEntry.sessionId ?? task.sessionId,
@@ -448,7 +460,7 @@ export class PersistentTaskScheduler implements TaskScheduler {
     );
     try {
       await this.options.runner(task, run);
-      const latest = (await this.options.store.get(taskId)) ?? runningTask;
+      const latest = (await this.options.store.get(taskId, this.scope)) ?? runningTask;
       const completedAt = new Date().toISOString();
       const updated = withNextRun({
         ...latest,
@@ -463,7 +475,7 @@ export class PersistentTaskScheduler implements TaskScheduler {
         updatedAt: completedAt,
       });
       delete updated.lastError;
-      const stored = (await this.options.store.update(taskId, updated)) ?? updated;
+      const stored = (await this.options.store.update(taskId, updated, this.scope)) ?? updated;
       if (updated.type === 'once') {
         this.unschedule(taskId);
       }
@@ -471,7 +483,7 @@ export class PersistentTaskScheduler implements TaskScheduler {
         this.options.hooks?.onTaskCompleted?.({ task: stored, run, timestamp: completedAt }),
       );
     } catch (error) {
-      const latest = (await this.options.store.get(taskId)) ?? runningTask;
+      const latest = (await this.options.store.get(taskId, this.scope)) ?? runningTask;
       const failedAt = new Date().toISOString();
       const message = error instanceof Error ? error.message : String(error);
       const updated = withNextRun({
@@ -484,7 +496,7 @@ export class PersistentTaskScheduler implements TaskScheduler {
         }),
         updatedAt: failedAt,
       });
-      const stored = (await this.options.store.update(taskId, updated)) ?? updated;
+      const stored = (await this.options.store.update(taskId, updated, this.scope)) ?? updated;
       await this.emitHook(() =>
         this.options.hooks?.onTaskFailed?.({
           task: stored,
@@ -516,7 +528,7 @@ export class PersistentTaskScheduler implements TaskScheduler {
     nextRunAt: string | undefined,
     knownTask?: ScheduledTask,
   ): Promise<void> {
-    const task = knownTask ?? (await this.options.store.get(taskId));
+    const task = knownTask ?? (await this.options.store.get(taskId, this.scope));
     if (!task || nextRunAt === task.nextRunAt) {
       return;
     }
@@ -526,11 +538,11 @@ export class PersistentTaskScheduler implements TaskScheduler {
     } else {
       delete updated.nextRunAt;
     }
-    await this.options.store.update(taskId, updated);
+    await this.options.store.update(taskId, updated, this.scope);
   }
 
   private async markScheduleError(taskId: string, error: string): Promise<void> {
-    const task = await this.options.store.get(taskId);
+    const task = await this.options.store.get(taskId, this.scope);
     if (!task) {
       return;
     }
@@ -543,7 +555,7 @@ export class PersistentTaskScheduler implements TaskScheduler {
       updatedAt: new Date().toISOString(),
     };
     delete updated.nextRunAt;
-    const stored = (await this.options.store.update(taskId, updated)) ?? updated;
+    const stored = (await this.options.store.update(taskId, updated, this.scope)) ?? updated;
     await this.emitHook(() =>
       this.options.hooks?.onTaskFailed?.({
         task: stored,
@@ -600,6 +612,21 @@ export class PersistentTaskScheduler implements TaskScheduler {
       // Hooks are observability side effects; scheduler state must not depend on them.
     }
   }
+
+  private applyScope(scope: TaskSchedulerScope): TaskSchedulerScope {
+    return { ...scope, ...this.scope };
+  }
+}
+
+function matchesScope(
+  task: Pick<ScheduledTask, 'tenantId' | 'userId' | 'sessionId'>,
+  scope: TaskSchedulerScope,
+): boolean {
+  return (
+    (scope.tenantId === undefined || task.tenantId === scope.tenantId) &&
+    (scope.userId === undefined || task.userId === scope.userId) &&
+    (scope.sessionId === undefined || task.sessionId === scope.sessionId)
+  );
 }
 
 export function resolveScheduledTaskDefinition(input: {

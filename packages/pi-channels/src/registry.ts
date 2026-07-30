@@ -35,6 +35,7 @@ export class ChannelRegistry {
   private adapters = new Map<string, ChannelAdapter>();
   private adapterFingerprints = new Map<string, string>();
   private routes = new Map<string, ChannelRouteConfig>();
+  private credentialedWebhookRecipients = new Map<string, Set<string>>();
   private errors: Array<{ adapter: string; error: string }> = [];
   private onIncoming: OnIncomingMessage = () => undefined;
   private log?: (event: string, data?: Record<string, unknown>, level?: string) => void;
@@ -52,6 +53,7 @@ export class ChannelRegistry {
     this.adapters.clear();
     this.adapterFingerprints.clear();
     this.routes.clear();
+    this.credentialedWebhookRecipients.clear();
     this.errors = [];
 
     this.loadRoutes(config);
@@ -69,6 +71,7 @@ export class ChannelRegistry {
   }
 
   async loadAdapter(name: string, config: AdapterConfig, cwd: string): Promise<void> {
+    this.setCredentialedWebhookPolicy(name, config);
     const fingerprint = JSON.stringify(config);
     if (this.adapters.has(name) && this.adapterFingerprints.get(name) === fingerprint) return;
     this.errors = this.errors.filter((error) => error.adapter !== name);
@@ -164,48 +167,42 @@ export class ChannelRegistry {
 
   async send(message: ChannelMessage): Promise<SendResult> {
     const resolved = this.resolve(message.adapter, message.recipient);
+    const allowedWebhookRecipients = this.credentialedWebhookRecipients.get(resolved.adapter);
+    if (allowedWebhookRecipients && !allowedWebhookRecipients.has(resolved.recipient)) {
+      const error = 'Credentialed webhook destinations must use a configured route.';
+      this.log?.(
+        'message_send_failed',
+        { adapter: resolved.adapter, source: message.source },
+        'ERROR',
+      );
+      return { ok: false, error };
+    }
     const adapter = this.adapters.get(resolved.adapter);
     if (!adapter) {
       const error = `No adapter "${resolved.adapter}"`;
-      this.log?.(
-        'message_send_failed',
-        { adapter: resolved.adapter, recipient: resolved.recipient, error },
-        'ERROR',
-      );
+      this.log?.('message_send_failed', { adapter: resolved.adapter, error }, 'ERROR');
       return { ok: false, error };
     }
     if (adapter.direction === 'incoming') {
       const error = `Adapter "${resolved.adapter}" is incoming-only`;
-      this.log?.(
-        'message_send_failed',
-        { adapter: resolved.adapter, recipient: resolved.recipient, error },
-        'ERROR',
-      );
+      this.log?.('message_send_failed', { adapter: resolved.adapter, error }, 'ERROR');
       return { ok: false, error };
     }
     if (!adapter.send) {
       const error = `Adapter "${resolved.adapter}" cannot send`;
-      this.log?.(
-        'message_send_failed',
-        { adapter: resolved.adapter, recipient: resolved.recipient, error },
-        'ERROR',
-      );
+      this.log?.('message_send_failed', { adapter: resolved.adapter, error }, 'ERROR');
       return { ok: false, error };
     }
 
     try {
       this.log?.('message_send_start', {
         adapter: resolved.adapter,
-        recipient: resolved.recipient,
         source: message.source,
-        text: message.text,
       });
       await adapter.send({ ...message, adapter: resolved.adapter, recipient: resolved.recipient });
       this.log?.('message_send_ok', {
         adapter: resolved.adapter,
-        recipient: resolved.recipient,
         source: message.source,
-        text: message.text,
       });
       return { ok: true };
     } catch (error) {
@@ -214,10 +211,7 @@ export class ChannelRegistry {
         'message_send_failed',
         {
           adapter: resolved.adapter,
-          recipient: resolved.recipient,
           source: message.source,
-          text: message.text,
-          error: messageError,
         },
         'ERROR',
       );
@@ -272,6 +266,25 @@ export class ChannelRegistry {
 
   private resolve(adapterName: string, recipient: string): { adapter: string; recipient: string } {
     return this.resolveTarget(adapterName, recipient);
+  }
+
+  private setCredentialedWebhookPolicy(name: string, config: AdapterConfig): void {
+    const headers =
+      config.headers && typeof config.headers === 'object' && !Array.isArray(config.headers)
+        ? Object.keys(config.headers)
+        : [];
+    if (config.type !== 'webhook' || (!config.secret && headers.length === 0)) {
+      this.credentialedWebhookRecipients.delete(name);
+      return;
+    }
+    this.credentialedWebhookRecipients.set(
+      name,
+      new Set(
+        [...this.routes.values()]
+          .filter((route) => route.adapter === name && route.recipient)
+          .map((route) => route.recipient),
+      ),
+    );
   }
 }
 

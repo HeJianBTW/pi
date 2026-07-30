@@ -32,6 +32,16 @@ function makeTask(overrides: Partial<ScheduledTask> = {}): ScheduledTask {
 }
 
 describe('JsonScheduledTaskStore', () => {
+  it('scopes reads and mutations to the owning session', async () => {
+    const store = new JsonScheduledTaskStore(path.join(TEST_DIR, 'scoped.json'));
+    const first = await store.create(makeTask({ id: 'first', sessionId: 'session-a' }));
+    await store.create(makeTask({ id: 'second', sessionId: 'session-b' }));
+
+    await expect(store.list({ sessionId: 'session-a' })).resolves.toEqual([first]);
+    await expect(store.get('second', { sessionId: 'session-a' })).resolves.toBeUndefined();
+    await expect(store.delete('second', { sessionId: 'session-a' })).resolves.toBe(false);
+    await expect(store.get('second')).resolves.toBeDefined();
+  });
   const filePath = path.join(TEST_DIR, 'tasks.json');
 
   beforeEach(() => {

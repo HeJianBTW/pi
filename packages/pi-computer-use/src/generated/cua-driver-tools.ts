@@ -1860,7 +1860,7 @@ export default {
         "type": "object",
         "properties": {
           "output_dir": {
-            "description": "Absolute or ~-rooted directory where turn folders and (when enabled) the video file are written.",
+            "description": "Directory inside the session cwd where turn folders and (when enabled) the video file are written. Absolute paths are accepted only when they remain inside cwd; outside and symlink-escaped paths are rejected.",
             "type": "string"
           },
           "record_video": {

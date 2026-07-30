@@ -66,7 +66,7 @@ export default function piImageGenExtension(pi: ExtensionAPI): void {
       name: 'image_generate',
       label: 'ImageGen',
       description:
-        'Generate or edit images. The image model is fixed by pi-image-gen.defaultModel in settings (this tool does not accept a model parameter). Pass `image` to do image-to-image / edit / style transfer / character preservation: a file path (absolute or relative to cwd) or an http(s) URL. To iterate on a previous result, pass its file path back. Do NOT pass base64 or data: URIs — write bytes to a file first. Saves the output to disk and returns the absolute path(s). When reporting the result to the user, render each generated image as inline markdown `![alt](absolute_path)` (the tool result already includes a copy-pasteable line) so the UI can display it; do not just paste the bare path. Run /image-gen list to see the active model.',
+        'Generate or edit images. The image model is fixed by pi-image-gen.defaultModel in settings (this tool does not accept a model parameter). Pass `image` to do image-to-image / edit / style transfer / character preservation: a regular image file inside the session cwd (absolute or relative) or a public http(s) URL. To iterate on a previous result, pass its file path back when it is inside cwd. Do NOT pass base64 or data: URIs — write bytes to a file under cwd first. Saves the output to disk and returns the absolute path(s). When reporting the result to the user, render each generated image as inline markdown `![alt](absolute_path)` (the tool result already includes a copy-pasteable line) so the UI can display it; do not just paste the bare path. Run /image-gen list to see the active model.',
       promptSnippet:
         'Generate or edit raster images (photos, illustrations, textures, mockups). Not for icons/logos/diagrams that should be repo-native SVG/CSS/canvas.',
       promptGuidelines: buildImageGuidelines(caps),
@@ -247,7 +247,7 @@ export function buildImageToolParameters(caps: ImageToolCapabilities) {
     image: Type.Optional(
       Type.Array(Type.String(), {
         description:
-          'Optional reference image(s) for image-to-image / edit / style transfer / character preservation. Each entry MUST be either (a) a file path — absolute or relative to the session cwd — or (b) an http(s) URL. Base64 strings and data: URIs are rejected; write the bytes to a file first if you have raw image data. For a single image pass ["path"]. Multi-image conditioning is supported by OpenAI gpt-image-2, Gemini, and Qwen sync models. To iterate on a previous output, pass that file path here.',
+          'Optional reference image(s) for image-to-image / edit / style transfer / character preservation. Each entry MUST be either (a) a regular image file inside the session cwd — absolute or relative — or (b) a public http(s) URL. Symlinks, Base64 strings, and data: URIs are rejected; write raw image bytes to a file under cwd first. For a single image pass ["path"]. Multi-image conditioning is supported by OpenAI gpt-image-2, Gemini, and Qwen sync models. To iterate on a previous output inside cwd, pass that file path here.',
       }),
     ),
     n: Type.Optional(

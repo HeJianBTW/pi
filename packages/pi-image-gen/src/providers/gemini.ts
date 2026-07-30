@@ -6,6 +6,7 @@ import {
   readBodyText,
   throwHttpError,
 } from '../errors.js';
+import { MAX_GENERATED_IMAGES } from '../image-input.js';
 import type {
   GenerateImageParams,
   ImageProviderAdapter,
@@ -113,6 +114,12 @@ export const geminiAdapter: ImageProviderAdapter = {
           (inline as { mimeType?: string; mime_type?: string } | undefined)?.mime_type ??
           'image/png';
         if (data) {
+          if (out.length >= MAX_GENERATED_IMAGES) {
+            throw new ImageGenError(
+              `Provider returned too many images (maximum ${MAX_GENERATED_IMAGES}).`,
+              `${providerLogLabel(provider)} returned too many images`,
+            );
+          }
           out.push({
             data: {
               kind: 'base64',

@@ -1,14 +1,32 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
-import { classifyImageOutput, resolveImageInputs, toDataUri } from '../image-input.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  classifyImageOutput,
+  MAX_IMAGE_BYTES,
+  resolveImageInputs,
+  toDataUri,
+} from '../image-input.js';
 
 const PNG_BYTES = Buffer.from(
   '89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d49444154789c63000100000005000115c46f250000000049454e44ae426082',
   'hex',
 );
 const JPEG_BYTES = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(20)]);
+const tempDirs: string[] = [];
+
+function makeTempDir(prefix = 'pi-image-input-'): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  tempDirs.push(dir);
+  return dir;
+}
+
+afterEach(() => {
+  for (const dir of tempDirs.splice(0)) {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 describe('resolveImageInputs', () => {
   it('returns empty when no image given', async () => {
@@ -17,7 +35,7 @@ describe('resolveImageInputs', () => {
   });
 
   it('reads a local PNG file by absolute path and detects mime', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'pi-image-input-'));
+    const dir = makeTempDir();
     const file = join(dir, 'a.png');
     writeFileSync(file, PNG_BYTES);
     const out = await resolveImageInputs([file], dir, fetch);
@@ -27,10 +45,36 @@ describe('resolveImageInputs', () => {
   });
 
   it('resolves relative paths against cwd', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'pi-image-input-'));
+    const dir = makeTempDir();
     writeFileSync(join(dir, 'b.jpg'), JPEG_BYTES);
     const out = await resolveImageInputs(['./b.jpg'], dir, fetch);
     expect(out[0]?.mimeType).toBe('image/jpeg');
+  });
+
+  it('rejects a local path that escapes cwd', async () => {
+    const cwd = makeTempDir();
+    const outside = makeTempDir('pi-image-input-outside-');
+    writeFileSync(join(outside, 'secret.png'), PNG_BYTES);
+
+    await expect(resolveImageInputs([join(outside, 'secret.png')], cwd, fetch)).rejects.toThrow(
+      /approved project directory/i,
+    );
+  });
+
+  it('rejects a symlink even when the link itself is inside cwd', async () => {
+    const cwd = makeTempDir();
+    const outside = makeTempDir('pi-image-input-outside-');
+    const target = join(outside, 'secret.png');
+    writeFileSync(target, PNG_BYTES);
+    symlinkSync(target, join(cwd, 'linked.png'));
+
+    await expect(resolveImageInputs(['linked.png'], cwd, fetch)).rejects.toThrow(/symlink/i);
+  });
+
+  it('rejects a file whose extension claims image but whose bytes do not', async () => {
+    const cwd = makeTempDir();
+    writeFileSync(join(cwd, 'fake.png'), 'not really an image');
+    await expect(resolveImageInputs(['fake.png'], cwd, fetch)).rejects.toThrow(/valid.*image/i);
   });
 
   it('rejects a data: URI with a clear error', async () => {
@@ -58,6 +102,35 @@ describe('resolveImageInputs', () => {
     );
     expect(out[0]?.mimeType).toBe('image/png');
     expect(receivedSignal).toBe(ctrl.signal);
+  });
+
+  it('blocks loopback image URLs before fetch', async () => {
+    const fetchImpl = vi.fn<typeof fetch>();
+    await expect(
+      resolveImageInputs(['http://127.0.0.1/private.png'], '/tmp', fetchImpl),
+    ).rejects.toThrow(/public HTTP/i);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('rejects and cancels a remote image that exceeds the byte ceiling', async () => {
+    let cancelled = false;
+    const fetchImpl: typeof fetch = (async () =>
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new Uint8Array(21 * 1024 * 1024));
+          },
+          cancel() {
+            cancelled = true;
+          },
+        }),
+        { headers: { 'content-type': 'image/png' } },
+      )) as typeof fetch;
+
+    await expect(
+      resolveImageInputs(['https://example.com/huge.png'], '/tmp', fetchImpl),
+    ).rejects.toThrow(/size ceiling/i);
+    expect(cancelled).toBe(true);
   });
 
   it('cancels an unread image-input HTTP error body', async () => {
@@ -96,7 +169,7 @@ describe('resolveImageInputs', () => {
       await resolveImageInputs([secretPath], '/tmp', fetch);
       throw new Error('expected resolveImageInputs to reject');
     } catch (error) {
-      expect((error as Error).message).toMatch(/not a readable file path/);
+      expect((error as Error).message).toMatch(/approved project directory/);
       expect((error as Error).message).not.toContain(secretPath);
     }
   });
@@ -119,7 +192,7 @@ describe('resolveImageInputs', () => {
   });
 
   it('accepts arrays of file paths', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'pi-image-input-'));
+    const dir = makeTempDir();
     const a = join(dir, 'a.png');
     const b = join(dir, 'b.jpg');
     writeFileSync(a, PNG_BYTES);
@@ -175,6 +248,13 @@ describe('classifyImageOutput', () => {
       bytes: PNG_BYTES.toString('base64'),
       mimeType: 'image/png',
     });
+  });
+
+  it('rejects oversized base64 before returning it for decoding', () => {
+    const oversized = `${PNG_BYTES.toString('base64')}${'A'.repeat(
+      Math.ceil((MAX_IMAGE_BYTES * 4) / 3) + 5,
+    )}`;
+    expect(classifyImageOutput(oversized)).toBeNull();
   });
 
   it('returns null for short or non-image base64', () => {

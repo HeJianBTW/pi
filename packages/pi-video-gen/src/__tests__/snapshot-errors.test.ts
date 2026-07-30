@@ -32,6 +32,21 @@ vi.mock('node:fs/promises', async (importOriginal) => {
   };
 });
 
+vi.mock('node:stream/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:stream/promises')>();
+  const pipeline = actual.pipeline as unknown as (...streams: unknown[]) => Promise<void>;
+  return {
+    ...actual,
+    pipeline: vi.fn(async (...streams: unknown[]) => {
+      const destination = streams.at(-1) as { path?: string };
+      if (destination.path?.includes(copyFailure.destinationMarker)) {
+        throw Object.assign(new Error('destination copy failed'), { code: copyFailure.code });
+      }
+      return pipeline(...streams);
+    }),
+  };
+});
+
 import { runCompose } from '../compose.js';
 import { ActiveJobs } from '../jobs/store.js';
 import { runTimeline } from '../timeline-render.js';
@@ -195,7 +210,7 @@ describe('snapshot destination errors', () => {
       specPath,
       JSON.stringify({ bgm, segments: [{ id: 'first', image, durationSec: 1 }] }),
     );
-    copyFailure.destinationMarker = 'bgm.mp3.tmp-';
+    copyFailure.destinationMarker = 'bgm.mp3';
 
     await expect(
       runTimeline({
@@ -219,7 +234,7 @@ describe('snapshot destination errors', () => {
       specPath,
       JSON.stringify({ bgm, segments: [{ id: 'first', image, durationSec: 1 }] }),
     );
-    copyFailure.destinationMarker = 'bgm.mp3.tmp-';
+    copyFailure.destinationMarker = 'bgm.mp3';
     copyFailure.code = 'ENOENT';
 
     await expect(

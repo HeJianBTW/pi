@@ -81,7 +81,7 @@ function makeFrame(cwd: string, name: string, content = 'frame-bytes'): string {
   const dir = join(cwd, 'frames');
   mkdirSync(dir, { recursive: true });
   const p = join(dir, name);
-  writeFileSync(p, content);
+  writeFileSync(p, Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), Buffer.from(content)]));
   return p;
 }
 

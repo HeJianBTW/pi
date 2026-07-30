@@ -186,6 +186,64 @@ describe('task scheduler', () => {
     expect(completed?.lastError).toBeUndefined();
     await scheduler.stop();
   });
+
+  it('does not unschedule a task when scoped deletion is denied', async () => {
+    const scheduler = new PersistentTaskScheduler({
+      store: new MemoryScheduledTaskStore(),
+      lock: new MemorySchedulerLock(),
+      runner: async () => {},
+    });
+    const task = await scheduler.create({
+      sessionId: 'session-a',
+      prompt: 'owned task',
+      type: 'interval',
+      schedule: '1h',
+      intervalSeconds: 3600,
+      enabled: true,
+      model,
+      toolPolicyProfile: 'scheduled',
+    });
+
+    await scheduler.start();
+    await expect(scheduler.delete(task.id, { sessionId: 'session-b' })).resolves.toBe(false);
+    await expect(scheduler.get(task.id, { sessionId: 'session-a' })).resolves.toBeDefined();
+    await expect(scheduler.status()).resolves.toMatchObject({ scheduledTimerCount: 1 });
+    await scheduler.stop();
+  });
+
+  it('starts only tasks owned by the configured session', async () => {
+    const store = new MemoryScheduledTaskStore();
+    const bootstrap = new PersistentTaskScheduler({
+      store,
+      lock: new MemorySchedulerLock(),
+      runner: async () => {},
+    });
+    for (const sessionId of ['session-a', 'session-b']) {
+      await bootstrap.create({
+        sessionId,
+        prompt: `${sessionId} task`,
+        type: 'interval',
+        schedule: '1h',
+        intervalSeconds: 3600,
+        enabled: true,
+        model,
+        toolPolicyProfile: 'scheduled',
+      });
+    }
+    const scheduler = new PersistentTaskScheduler({
+      store,
+      lock: new MemorySchedulerLock(),
+      runner: async () => {},
+      scope: { sessionId: 'session-a' },
+    });
+
+    await scheduler.start();
+    await expect(scheduler.status()).resolves.toMatchObject({
+      taskCount: 1,
+      scheduledTimerCount: 1,
+    });
+    await scheduler.stop();
+  });
 });
 
 class MemoryScheduledTaskStore implements ScheduledTaskStore {
@@ -253,7 +311,8 @@ class MemorySchedulerLock implements SchedulerLock {
 function matchesScope(task: ScheduledTask, scope: TaskSchedulerScope): boolean {
   return (
     (!scope.tenantId || task.tenantId === scope.tenantId) &&
-    (!scope.userId || task.userId === scope.userId)
+    (!scope.userId || task.userId === scope.userId) &&
+    (!scope.sessionId || task.sessionId === scope.sessionId)
   );
 }
 

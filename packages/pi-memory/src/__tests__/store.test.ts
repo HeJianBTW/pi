@@ -413,7 +413,8 @@ describe('snapshot sanitization', () => {
     await store.loadFromDisk();
     const snap = store.formatForSystemPrompt('memory');
     expect(snap).toContain('benign');
-    expect(snap).toContain('[BLOCKED: prior incident]');
+    expect(snap).toContain('[BLOCKED:');
+    expect(snap).not.toContain('prior incident');
     // Should not double-wrap
     expect((snap.match(/\[BLOCKED:/g) ?? []).length).toBe(1);
   });

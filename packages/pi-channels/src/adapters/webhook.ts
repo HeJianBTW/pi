@@ -1,3 +1,4 @@
+import { safeFetch } from '@amaster.ai/pi-shared';
 import type {
   AdapterConfig,
   ChannelAdapter,
@@ -60,11 +61,15 @@ export function createWebhookAdapter(config: AdapterConfig): ChannelAdapter {
       }
       if (body !== undefined) requestHeaders['Content-Type'] = contentType;
 
-      const response = await fetch(message.recipient, {
-        method,
-        headers: requestHeaders,
-        ...(body === undefined ? {} : { body }),
-      });
+      const response = await safeFetch(
+        message.recipient,
+        {
+          method,
+          headers: requestHeaders,
+          ...(body === undefined ? {} : { body }),
+        },
+        { maxRedirects: 0 },
+      );
       if (!response.ok) {
         const text = await response.text().catch(() => '');
         throw new Error(`Webhook error ${response.status}: ${text || response.statusText}`);

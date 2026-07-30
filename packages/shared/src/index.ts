@@ -475,3 +475,10 @@ export type SandboxFileEntry = {
   size?: number;
   modifiedAt?: string;
 };
+
+export {
+  assertPublicHttpUrl,
+  type DnsLookup,
+  readResponseBytes,
+  safeFetch,
+} from './network.js';

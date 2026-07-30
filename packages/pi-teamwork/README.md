@@ -13,12 +13,13 @@ Pi extension for team collaboration and project management. Provides LLM-callabl
 
 ### Auto-Install
 
-When the extension starts and `multica` is not found on `$PATH`, it will automatically install the CLI:
+Runtime auto-installation is disabled because mutable package-manager taps and
+download scripts cannot provide the pinned artifact verification required in a
+credential-bearing agent process. Install a pinned Multica release separately
+and put the verified binary on `$PATH`, or configure `multica.binary`.
 
-- **macOS / Linux**: Homebrew (`brew install multica-ai/tap/multica`) with a fallback to the install script (`curl -fsSL ... | bash`)
-- **Windows**: PowerShell install script (`irm ... | iex`)
-
-Set `autoInstall: false` to disable this behavior.
+The deprecated `autoInstall: true` setting no longer executes an installer. It
+only reports a clear error when the binary is missing.
 
 Configuration may live in user/agent settings or in a trusted project's
 `.pi/settings.json`. Project settings are ignored when trust is declined and do
@@ -106,7 +107,7 @@ For the AMaster provider, the LUI-facing `workspaceId` parameter maps to an AMas
 | `multica.token` | Headless-login token. Omit when multica is already logged in on the machine |
 | `multica.serverUrl` | Self-hosted server API URL. Triggers `multica setup self-host --server-url` on start |
 | `multica.appUrl` | Self-hosted server frontend URL. Required when `serverUrl` is a remote address |
-| `multica.autoInstall` | Auto-install multica CLI if missing (default: `true`) |
+| `multica.autoInstall` | Deprecated compatibility flag; no installer is executed (default: `false`) |
 | `amaster.apiBase` | AMaster Employee API base passed to the CLI as `--api-base` |
 | `amaster.companyId` | Optional AMaster canonical company id override passed to the CLI as `-C` |
 | `amaster.context` / `profile` / `authStore` | Optional CLI context/profile/auth-store overrides |

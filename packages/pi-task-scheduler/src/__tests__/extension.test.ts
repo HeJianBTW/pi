@@ -146,6 +146,62 @@ describe('extension — default file storage mode', () => {
 
     expect(result.content[0].text).toBe('No scheduled tasks.');
   });
+
+  it('dispatches a recorded prompt only while its owning session is active', async () => {
+    const store = new MemStore();
+    const { pi, ctx } = await setupExtension({ store, lock: new MemLock() });
+    const toolCtx = createMockCtx();
+    const createResult = (await pi.tools
+      .get('scheduler_create')!
+      .execute(
+        'create',
+        { type: 'interval', schedule: '1h', prompt: 'session-owned prompt' },
+        undefined,
+        undefined,
+        toolCtx,
+      )) as any;
+    const taskId = JSON.parse(createResult.content[0].text).id;
+
+    await pi.tools
+      .get('scheduler_run_now')!
+      .execute('run', { taskId }, undefined, undefined, toolCtx);
+    await vi.waitFor(() => {
+      expect(pi.sendUserMessage).toHaveBeenCalledWith('session-owned prompt');
+    });
+
+    for (const handler of pi.eventHandlers.session_shutdown ?? []) {
+      await handler({}, ctx);
+    }
+  });
+
+  it('does not dispatch a recorded prompt into a different active session', async () => {
+    const store = new MemStore();
+    const { pi, ctx } = await setupExtension({ store, lock: new MemLock() });
+    const ownerCtx = createMockCtx();
+    const createResult = (await pi.tools
+      .get('scheduler_create')!
+      .execute(
+        'create',
+        { type: 'interval', schedule: '1h', prompt: 'do not cross sessions' },
+        undefined,
+        undefined,
+        ownerCtx,
+      )) as any;
+    const taskId = JSON.parse(createResult.content[0].text).id;
+    ctx.sessionManager.getSessionId = () => 'different-session';
+
+    await pi.tools
+      .get('scheduler_run_now')!
+      .execute('run', { taskId }, undefined, undefined, ownerCtx);
+    await vi.waitFor(() => {
+      expect(store.tasks.get(taskId)?.lastStatus).toBe('error');
+    });
+
+    expect(pi.sendUserMessage).not.toHaveBeenCalled();
+    for (const handler of pi.eventHandlers.session_shutdown ?? []) {
+      await handler({}, ctx);
+    }
+  });
 });
 
 describe('extension — injected scheduler', () => {
@@ -300,7 +356,7 @@ describe('extension — tool operations with injected scheduler', () => {
 
     const updateResult = (await updateTool.execute(
       'id',
-      { taskId, prompt: 'updated', enabled: false },
+      { taskId, prompt: 'updated', enabled: false, sessionId: 'attacker-session' },
       undefined,
       undefined,
       ctx,
@@ -308,6 +364,9 @@ describe('extension — tool operations with injected scheduler', () => {
     const updated = JSON.parse(updateResult.content[0].text);
     expect(updated.prompt).toBe('updated');
     expect(updated.enabled).toBe(false);
+    await expect(externalScheduler.get(taskId)).resolves.toMatchObject({
+      sessionId: 'test-session-1',
+    });
   });
 
   it('scheduler_delete removes a task', async () => {

@@ -1,5 +1,6 @@
 import { mkdir, open, unlink } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
+import { readResponseBytes, safeFetch } from '@amaster.ai/pi-shared';
 import { resolveModel } from './config.js';
 import {
   cancelledError,
@@ -9,7 +10,13 @@ import {
   isAbortError,
   throwDownloadHttpError,
 } from './errors.js';
-import { resolveImageInputs } from './image-input.js';
+import {
+  MAX_BASE64_IMAGE_CHARS,
+  MAX_GENERATED_IMAGES,
+  MAX_IMAGE_BYTES,
+  resolveImageInputs,
+  sniffMime,
+} from './image-input.js';
 import { getAdapter } from './providers/index.js';
 import type {
   GeneratedImage,
@@ -68,6 +75,12 @@ export async function generateImage(
     options.signal,
     inputs,
   );
+  if (raws.length > MAX_GENERATED_IMAGES) {
+    throw new ImageGenError(
+      `Provider returned too many images (maximum ${MAX_GENERATED_IMAGES}).`,
+      'provider returned too many images',
+    );
+  }
 
   if (options.signal?.aborted) throw cancelledError('image generation');
 
@@ -221,8 +234,21 @@ async function materialize(
   signal?: AbortSignal,
 ): Promise<{ bytes: Uint8Array; mimeType: string }> {
   if (raw.data.kind === 'base64') {
+    if (raw.data.bytes.length > MAX_BASE64_IMAGE_CHARS) {
+      throw new ImageGenError(
+        'Provider returned an image that exceeds the size ceiling.',
+        'generated image rejected (too large)',
+      );
+    }
+    const bytes = Buffer.from(raw.data.bytes, 'base64');
+    if (bytes.byteLength > MAX_IMAGE_BYTES || !sniffMime(bytes)) {
+      throw new ImageGenError(
+        'Provider returned invalid or oversized image bytes.',
+        'generated image rejected (invalid or too large)',
+      );
+    }
     return {
-      bytes: Buffer.from(raw.data.bytes, 'base64'),
+      bytes,
       mimeType: raw.data.mimeType ?? 'image/png',
     };
   }
@@ -239,8 +265,15 @@ async function materialize(
   // redacts the URL (dropping ?token=…) and interpolates no raw fetch text.
   let res: Response;
   try {
-    res = await fetchImpl(raw.data.url, { signal: signal ?? null });
+    res = await safeFetch(
+      raw.data.url,
+      { signal: signal ?? null },
+      fetchImpl === globalThis.fetch ? {} : { fetchImpl },
+    );
   } catch (error) {
+    if (error instanceof Error && /public HTTP|redirect limit/i.test(error.message)) {
+      throw new ImageGenError(error.message, 'generated image rejected (unsafe URL)');
+    }
     throw describeDownloadError('generated image', raw.data.url, { rejected: error });
   }
   if (!res.ok) {
@@ -249,10 +282,19 @@ async function materialize(
   // Body reads can fail after headers; keep them in the sanitized download boundary.
   let buf: Uint8Array;
   try {
-    buf = new Uint8Array(await res.arrayBuffer());
+    buf = await readResponseBytes(res, MAX_IMAGE_BYTES);
   } catch (error) {
+    if (error instanceof Error && /size ceiling/i.test(error.message)) {
+      throw new ImageGenError(error.message, 'generated image rejected (too large)');
+    }
     throw describeDownloadError('generated image', raw.data.url, { rejected: error });
   }
-  const mimeType = res.headers.get('content-type')?.split(';')[0]?.trim() || 'image/png';
+  const mimeType = sniffMime(buf);
+  if (!mimeType) {
+    throw new ImageGenError(
+      'Provider returned a file that is not a supported image.',
+      'generated image rejected (invalid image)',
+    );
+  }
   return { bytes: buf, mimeType };
 }
