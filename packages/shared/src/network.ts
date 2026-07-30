@@ -165,6 +165,7 @@ async function pinnedFetch(
         method,
         headers,
         signal: init.signal ?? undefined,
+        family: target.family,
         lookup(_hostname, _options, callback) {
           callback(null, target.address, target.family);
         },

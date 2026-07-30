@@ -63,6 +63,7 @@ jobs:
           install-video-tools: 'true'
       - run: pnpm --filter @amaster.ai/pi-storage prisma:generate
       - run: pnpm --filter @amaster.ai/pi-shared build
+      - run: pnpm --filter @amaster.ai/pi-memory build
       - run: pnpm test
 
   build:
