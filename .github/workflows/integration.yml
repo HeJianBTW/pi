@@ -189,10 +189,9 @@ jobs:
           echo "::warning::PI_INTEGRATION_BASE_URL or PI_INTEGRATION_API_KEY secret not set — skipping Stage B."
 
   # ──────────────────────────────────────────────────────────────────────
-  # Stage C: per-extension LLM-driven E2E. One matrix job per extension —
-  # each job constrains the LLM to a tiny tool allowlist, runs a prompt
-  # that should make the model invoke the target tool, and asserts the
-  # tool's output appears in pi's response.
+  # Stage C: per-extension E2E. Most entries constrain the LLM to a tiny tool
+  # allowlist and assert the tool result; pi-video-gen uses RPC commands
+  # instead so local composition never needs a model call.
   #
   # Skipped on fork PRs (secrets unavailable). Each job duplicates Stage A
   # setup because self-hosted matrix jobs don't share workspace state.
@@ -275,6 +274,9 @@ jobs:
             tools: image_generate
             prompt: "Use image_generate to generate a test image with prompt 'a solid red square'. Report the generated file path."
             assert_pattern: "(image|generated|.png|.jpg|.webp|pi-images)"
+          - extension: pi-video-gen
+            tools: video_compose
+            assert_pattern: "Promo video ready:"
           - extension: pi-browser-use
             tools: browser_list_pages,browser_navigate_page,browser_take_snapshot
             prompt: "Use browser_list_pages first to get the current pageId. Pass that pageId to browser_navigate_page to go to https://example.com, then pass it to browser_take_snapshot and tell me the page title."
@@ -302,6 +304,7 @@ jobs:
         with:
           set-pi-agent-dir: 'true'
           install-pi-cli: 'true'
+          install-video-tools: ${{ matrix.extension == 'pi-video-gen' && 'true' || 'false' }}
           # pi-memory job loads pi-memory-mem0 which needs better-sqlite3's
           # native binding for its OSS vector store. We rebuild for every
           # matrix entry because conditional `if:` on composite-action steps
@@ -310,9 +313,17 @@ jobs:
           prebuild-better-sqlite3: 'true'
 
       - name: Configure pi settings (provider, models, extensions)
-        if: env.PI_INTEGRATION_BASE_URL != '' && env.PI_INTEGRATION_API_KEY != ''
+        if: >
+          matrix.extension == 'pi-video-gen' ||
+          (env.PI_INTEGRATION_BASE_URL != '' &&
+          env.PI_INTEGRATION_API_KEY != '')
         run: |
           set -euo pipefail
+          if [ "${{ matrix.extension }}" = "pi-video-gen" ] &&
+             { [ -z "${PI_INTEGRATION_BASE_URL:-}" ] || [ -z "${PI_INTEGRATION_API_KEY:-}" ]; }; then
+            echo "::error::PI_INTEGRATION_BASE_URL and PI_INTEGRATION_API_KEY are required for pi-video-gen provider configuration."
+            exit 1
+          fi
           mkdir -p "$PI_CODING_AGENT_DIR"
 
           # pi-web-access settings vary by matrix `provider`: the default
@@ -479,6 +490,23 @@ jobs:
                 }
               }
             },
+            "pi-video-gen": {
+              "defaultModel": "ci-seedance-newapi",
+              "outputDir": "${RUNNER_TEMP}/pi-video-gen",
+              "customProviders": {
+                "ci-gateway": {
+                  "api": "newapi",
+                  "baseUrl": "\${PI_INTEGRATION_BASE_URL}",
+                  "apiKey": "\${PI_INTEGRATION_API_KEY}",
+                  "models": [
+                    {
+                      "id": "doubao-seedance-2-0-260128",
+                      "alias": "ci-seedance-newapi"
+                    }
+                  ]
+                }
+              }
+            },
             "pi-browser-use": {
               "sessionMode": "existing",
               "wsEndpoint": "wss://production-sfo.browserless.io/chrome?token=\${BROWSERLESS_TOKEN}",
@@ -489,6 +517,13 @@ jobs:
             }
           }
           EOF
+          if [ "${{ matrix.extension }}" = "pi-video-gen" ]; then
+            mkdir -p "$RUNNER_TEMP/pi-video-gen-home"
+            {
+              echo "HOME=$RUNNER_TEMP/pi-video-gen-home"
+              echo "PI_AGENT_HOME=$PI_CODING_AGENT_DIR"
+            } >> "$GITHUB_ENV"
+          fi
 
       - name: Install monorepo extensions into pi
         run: |
@@ -502,6 +537,157 @@ jobs:
             pi install "./packages/pi-memory-mem0"
           fi
           pi list
+
+      - name: Compose preview video (pi-video-gen only)
+        if: matrix.extension == 'pi-video-gen'
+        run: |
+          set -euo pipefail
+          export PI_OFFLINE=1
+          JOB_DIR="$RUNNER_TEMP/pi-video-gen/preview-promo"
+          SPEC_PATH="$JOB_DIR/timeline-input.json"
+          PREVIEW_PATH="$GITHUB_WORKSPACE/packages/pi-video-gen/preview.png"
+          mkdir -p "$JOB_DIR"
+
+          SPEC_PATH="$SPEC_PATH" PREVIEW_PATH="$PREVIEW_PATH" node --input-type=module <<'NODE'
+          import { writeFile } from 'node:fs/promises';
+
+          const spec = {
+            title: 'Pi Video Gen preview promo',
+            output: { resolution: '1280x720', fps: 25, codec: 'mpeg4' },
+            bgm: null,
+            segments: [
+              {
+                id: 'preview',
+                image: process.env.PREVIEW_PATH,
+                durationSec: 3,
+                motion: 'kenburns-in',
+              },
+            ],
+          };
+          await writeFile(process.env.SPEC_PATH, `${JSON.stringify(spec, null, 2)}\n`);
+          NODE
+
+          PI_E2E_SPEC="$SPEC_PATH" node --input-type=module <<'NODE'
+          import { spawn } from 'node:child_process';
+          import { createInterface } from 'node:readline';
+
+          const child = spawn(
+            'pi',
+            [
+              '--mode',
+              'rpc',
+              '--no-session',
+              '--no-context-files',
+              '--offline',
+              '--approve',
+            ],
+            {
+              cwd: process.env.GITHUB_WORKSPACE,
+              env: process.env,
+              stdio: ['pipe', 'pipe', 'pipe'],
+            },
+          );
+          child.stderr.pipe(process.stderr);
+
+          let doctorOk = false;
+          let composeOk = false;
+          let failure;
+          const timer = setTimeout(() => {
+            failure = new Error('Pi RPC video compose E2E timed out');
+            child.kill('SIGTERM');
+          }, 180_000);
+          const lines = createInterface({ input: child.stdout });
+
+          lines.on('line', (line) => {
+            process.stdout.write(`${line}\n`);
+            let event;
+            try {
+              event = JSON.parse(line);
+            } catch {
+              return;
+            }
+            if (event.type === 'extension_error') {
+              failure = new Error(`Extension error: ${event.error}`);
+              child.stdin.end();
+              return;
+            }
+            if (event.type === 'extension_ui_request' && event.method === 'notify') {
+              const message = String(event.message ?? '');
+              doctorOk ||= message.includes('model: doubao-seedance-2-0-260128 [newapi]')
+                && message.includes('NewAPI API key configured')
+                && message.includes('ffmpeg found')
+                && message.includes('ffprobe found');
+              composeOk ||= message.includes('Promo video ready:');
+            }
+            if (event.id === 'doctor' && event.type === 'response') {
+              child.stdin.write(`${JSON.stringify({
+                id: 'compose',
+                type: 'prompt',
+                message: `/video-gen compose ${process.env.PI_E2E_SPEC}`,
+              })}\n`);
+            }
+            if (event.id === 'compose' && event.type === 'response') {
+              child.stdin.end();
+            }
+          });
+
+          child.stdin.write(`${JSON.stringify({
+            id: 'doctor',
+            type: 'prompt',
+            message: '/video-gen doctor',
+          })}\n`);
+          const exitCode = await new Promise((resolve) => {
+            child.on('exit', (code) => resolve(code));
+          });
+          clearTimeout(timer);
+
+          if (failure) throw failure;
+          if (exitCode !== 0) throw new Error(`Pi RPC exited ${exitCode}`);
+          if (!doctorOk) {
+            throw new Error('Doctor did not resolve the NewAPI model, API key, ffmpeg, and ffprobe');
+          }
+          if (!composeOk) throw new Error('video_compose did not produce the preview promo');
+          NODE
+
+          FINAL_VIDEO="$JOB_DIR/final_video.mp4"
+          PROBE_JSON="$RUNNER_TEMP/pi-video-gen/probe.json"
+          test -s "$FINAL_VIDEO"
+          ffprobe \
+            -v error \
+            -show_entries stream=codec_type,codec_name,width,height \
+            -show_entries format=duration \
+            -of json \
+            "$FINAL_VIDEO" > "$PROBE_JSON"
+          cat "$PROBE_JSON"
+          PROBE_JSON="$PROBE_JSON" node --input-type=module <<'NODE'
+          import { readFile } from 'node:fs/promises';
+
+          const probe = JSON.parse(await readFile(process.env.PROBE_JSON, 'utf8'));
+          const video = probe.streams?.find((stream) => stream.codec_type === 'video');
+          const audio = probe.streams?.find((stream) => stream.codec_type === 'audio');
+          const duration = Number(probe.format?.duration);
+          if (
+            video?.codec_name !== 'mpeg4'
+            || video.width !== 1280
+            || video.height !== 720
+            || audio?.codec_name !== 'aac'
+            || duration < 2.5
+            || duration > 3.5
+          ) {
+            throw new Error(`Unexpected preview promo probe: ${JSON.stringify(probe)}`);
+          }
+          NODE
+
+      - name: Upload preview promo (pi-video-gen only)
+        if: matrix.extension == 'pi-video-gen'
+        uses: actions/upload-artifact@v4
+        with:
+          name: pi-video-gen-preview-promo
+          path: |
+            ${{ runner.temp }}/pi-video-gen/preview-promo/final_video.mp4
+            ${{ runner.temp }}/pi-video-gen/preview-promo/qc/*.png
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Bootstrap multica CLI (pi-teamwork only)
         # pi-teamwork's autoInstall path is broken on this self-hosted runner:
@@ -542,7 +728,10 @@ jobs:
           fi
 
       - name: Run extension prompt (Stage C)
-        if: env.PI_INTEGRATION_BASE_URL != '' && env.PI_INTEGRATION_API_KEY != ''
+        if: >
+          matrix.extension != 'pi-video-gen' &&
+          env.PI_INTEGRATION_BASE_URL != '' &&
+          env.PI_INTEGRATION_API_KEY != ''
         run: |
           set -euo pipefail
           # The firecrawl matrix entry needs a real Firecrawl API key. Skip it
@@ -874,6 +1063,8 @@ jobs:
           echo "✓ pi-image-gen file verification passed."
 
       - name: Skipped (secrets unavailable)
-        if: env.PI_INTEGRATION_BASE_URL == '' || env.PI_INTEGRATION_API_KEY == ''
+        if: >
+          matrix.extension != 'pi-video-gen' &&
+          (env.PI_INTEGRATION_BASE_URL == '' || env.PI_INTEGRATION_API_KEY == '')
         run: |
           echo "::warning::PI_INTEGRATION_* secrets unset — skipping Stage C ${{ matrix.extension }}."

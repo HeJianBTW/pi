@@ -1,0 +1,41 @@
+{
+  "name": "@amaster.ai/pi-video-gen-ffmpeg-linux-arm64",
+  "version": "0.1.0",
+  "description": "LGPL FFmpeg + GPL FFmpeg (libx264) runtime for pi-video-gen on linux arm64",
+  "license": "SEE LICENSE IN SOURCE.md",
+  "files": [
+    "bin",
+    "LICENSE",
+    "GPLv2.txt",
+    "ZLIB_LICENSE.txt",
+    "SOURCE.md",
+    "source"
+  ],
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "libc": [
+    "glibc"
+  ],
+  "exports": {
+    "./ffmpeg": "./bin/ffmpeg",
+    "./ffprobe": "./bin/ffprobe"
+  },
+  "publishConfig": {
+    "access": "public",
+    "executableFiles": [
+      "./bin/ffmpeg",
+      "./bin/ffprobe",
+      "./bin/ffmpeg-gpl",
+      "./bin/ffprobe-gpl"
+    ]
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TGYD-helige/pi.git",
+    "directory": "packages/pi-video-gen/platforms/ffmpeg-linux-arm64"
+  }
+}

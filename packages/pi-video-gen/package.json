@@ -1,0 +1,93 @@
+{
+  "name": "@amaster.ai/pi-video-gen",
+  "version": "0.1.0",
+  "description": "Pi extension for AI video generation plus local video composition: lossless clip concat and mixed image/video timelines with overlays, TTS, soft or burned subtitles, source audio, BGM, and bundled LGPL/GPL FFmpeg runtimes.",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "extension",
+    "video-generation",
+    "seedance",
+    "volcengine",
+    "ark",
+    "kling",
+    "agentic-video"
+  ],
+  "license": "Apache-2.0",
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": {
+      "default": "./package.json"
+    }
+  },
+  "files": [
+    "dist",
+    "skills",
+    "README.md",
+    "preview.png"
+  ],
+  "pi": {
+    "extensions": [
+      "./dist/index.js"
+    ],
+    "skills": [
+      "./skills"
+    ],
+    "image": "https://raw.githubusercontent.com/TGYD-helige/pi/master/packages/pi-video-gen/preview.png"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TGYD-helige/pi.git",
+    "directory": "packages/pi-video-gen"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b --pretty false",
+    "test": "vitest run src"
+  },
+  "dependencies": {
+    "@amaster.ai/pi-shared": "workspace:*",
+    "sharp": "^0.34.0",
+    "msedge-tts": "^2.0.7"
+  },
+  "optionalDependencies": {
+    "@amaster.ai/pi-video-gen-ffmpeg-darwin-arm64": "workspace:*",
+    "@amaster.ai/pi-video-gen-ffmpeg-darwin-x64": "workspace:*",
+    "@amaster.ai/pi-video-gen-ffmpeg-linux-arm64": "workspace:*",
+    "@amaster.ai/pi-video-gen-ffmpeg-linux-x64": "workspace:*",
+    "@amaster.ai/pi-video-gen-ffmpeg-win32-x64": "workspace:*"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": ">=0.80.10",
+    "@earendil-works/pi-coding-agent": ">=0.74.0",
+    "typebox": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-ai": {
+      "optional": true
+    },
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    },
+    "typebox": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "0.80.10",
+    "@earendil-works/pi-coding-agent": "0.80.10",
+    "typebox": "*",
+    "vitest": "^4.0.0",
+    "ffmpeg-static": "^5.2.0"
+  }
+}

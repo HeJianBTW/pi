@@ -32,6 +32,7 @@
       "@prisma/engines",
       "better-sqlite3",
       "esbuild",
+      "ffmpeg-static",
       "koffi",
       "prisma",
       "protobufjs"
