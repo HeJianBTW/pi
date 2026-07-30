@@ -34,16 +34,31 @@ describe('LLM providers include system prompt and environment context', () => {
       search: { provider: 'kimi' },
       providers: { kimi: { apiKey: 'kimi-key' } },
     };
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: 'answer' } }],
-      }),
-    });
+    mockFetch
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          tools: [
+            {
+              type: 'function',
+              function: {
+                name: 'web_search',
+                parameters: { type: 'object', properties: {} },
+              },
+            },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: 'answer' } }],
+        }),
+      });
 
     await search({ query: 'test query' }, settings);
 
-    const body = JSON.parse(mockFetch.mock.calls[0]![1].body);
+    const body = JSON.parse(mockFetch.mock.calls[1]![1].body);
     expect(body.messages[0].role).toBe('system');
     expect(body.messages[0].content).toBe(SEARCH_SYSTEM_PROMPT);
     expect(body.messages[1].role).toBe('user');

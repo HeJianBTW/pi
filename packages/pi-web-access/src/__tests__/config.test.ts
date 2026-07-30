@@ -43,7 +43,7 @@ describe('resolveProvider', () => {
       expect(result.id).toBe('kimi');
       expect(result.baseUrl).toBe('https://api.moonshot.cn/v1');
       expect(result.apiKey).toBe('test-kimi-key');
-      expect(result.model).toBe('kimi-k2.6');
+      expect(result.model).toBe('kimi-k3');
     }
   });
 

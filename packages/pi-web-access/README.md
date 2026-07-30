@@ -47,7 +47,7 @@ Search X (Twitter) for posts and social media content. Only registered when xai 
 | `tavily` | ✓ | ✓ | ✗ | `https://api.tavily.com` | `TAVILY_API_KEY` | - |
 | `brave` | ✓ | ✗ | ✗ | `https://api.search.brave.com` | `BRAVE_API_KEY` | - |
 | `firecrawl` | ✓ | ✓ | ✗ | `https://api.firecrawl.dev` | `FIRECRAWL_API_KEY` | - |
-| `kimi` | ✓ | ✗ | ✗ | `https://api.moonshot.cn/v1` | `MOONSHOT_API_KEY` | `kimi-k2.6` |
+| `kimi` | ✓ | ✗ | ✗ | `https://api.moonshot.cn/v1` | `MOONSHOT_API_KEY` | `kimi-k3` |
 | `mimo` | ✓ | ✗ | ✗ | `https://api.xiaomimimo.com/v1` | `MIMO_API_KEY` | `mimo-v2.5-pro` |
 | `zai` | ✓ | ✓ | ✗ | `https://api.z.ai` | `ZAI_API_KEY` | - |
 | `gemini` | ✓ | ✗ | ✗ | `https://generativelanguage.googleapis.com/v1beta` | `GEMINI_API_KEY` | `gemini-2.5-flash` |
@@ -56,6 +56,8 @@ Search X (Twitter) for posts and social media content. Only registered when xai 
 | `xai` | ✓ | ✗ | ✓ | `https://api.x.ai/v1` | `XAI_API_KEY` | `grok-4.3` |
 | `openai` | ✓ | ✗ | ✗ | `https://api.openai.com/v1` | `OPENAI_API_KEY` | `gpt-5.5` |
 | `anthropic` | ✓ | ✓ | ✗ | `https://api.anthropic.com/v1` | `ANTHROPIC_API_KEY` | `claude-sonnet-4-6` |
+
+Custom Kimi base URLs must support both `/chat/completions` and `/formulas/*`.
 
 **Fetch fallback** (when `fetch.provider` is not set): Jina Reader (`r.jina.ai`, free, JS-rendered) → local HTTP GET + turndown.
 

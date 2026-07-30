@@ -37,7 +37,7 @@ const ENV_VARS: Record<BuiltInProviderId, string> = {
 };
 
 const DEFAULT_MODEL: Partial<Record<BuiltInProviderId, string>> = {
-  kimi: 'kimi-k2.6',
+  kimi: 'kimi-k3',
   mimo: 'mimo-v2.5-pro',
   gemini: 'gemini-2.5-flash',
   perplexity: 'openai/gpt-5.5',
