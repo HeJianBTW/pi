@@ -212,8 +212,15 @@ function motionFilter(
       ? `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1`
       : `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1`;
   }
-  const bigW = Math.round(width * 1.5);
-  const bigH = Math.round(height * 1.5);
+  // zoompan truncates crop origins to chroma-aligned integers. Oversampling
+  // keeps those source-pixel jumps subpixel-sized after the final downscale;
+  // cap the long edge so extreme aspect ratios cannot create huge frames.
+  const scale = Math.max(
+    1.5,
+    Math.min(2880 / Math.min(width, height), 8192 / Math.max(width, height)),
+  );
+  const bigW = 2 * Math.ceil((width * scale) / 2);
+  const bigH = 2 * Math.ceil((height * scale) / 2);
   const pre = `scale=${bigW}:${bigH}:force_original_aspect_ratio=increase,crop=${bigW}:${bigH}`;
   switch (m) {
     case 'kenburns-in':

@@ -25,19 +25,12 @@ jobs:
       - name: Checkout source
         uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - name: Setup pi build environment
+        uses: ./.github/actions/setup-pi-build
         with:
-          node-version: "24"
-
-      - name: Enable Corepack
-        run: corepack enable
-
-      - name: Setup pnpm
-        run: corepack install -g pnpm@10.18.3
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+          build: 'false'
+          install-video-tools: 'true'
+          prebuild-better-sqlite3: 'true'
 
       - name: PR Check
         run: pnpm run pr-check

@@ -40,6 +40,49 @@ async function makeImage(
   return p;
 }
 
+async function makeMotionMarker(dir: string, name: string): Promise<string> {
+  mkdirSync(dir, { recursive: true });
+  const p = join(dir, name);
+  await sharp({ create: { width: 640, height: 360, channels: 3, background: '#000000' } })
+    .composite([
+      {
+        input: Buffer.from(
+          '<svg width="640" height="360"><circle cx="160" cy="90" r="22" fill="white"/></svg>',
+        ),
+      },
+    ])
+    .png()
+    .toFile(p);
+  return p;
+}
+
+function markerMaxAcceleration(videoPath: string): number {
+  const decoded = spawnSync(
+    ffmpegStaticBin,
+    ['-i', videoPath, '-map', '0:v:0', '-f', 'rawvideo', '-pix_fmt', 'gray', '-'],
+    { maxBuffer: 64 * 1024 * 1024 },
+  );
+  expect(decoded.status).toBe(0);
+  const width = 640;
+  const height = 360;
+  const frameSize = width * height;
+  const centers: number[] = [];
+  for (let offset = 0; offset + frameSize <= decoded.stdout.length; offset += frameSize) {
+    let weightedX = 0;
+    let weight = 0;
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const value = Math.max(0, decoded.stdout[offset + y * width + x]! - 96);
+        weightedX += value * x;
+        weight += value;
+      }
+    }
+    centers.push(weightedX / weight);
+  }
+  const velocity = centers.slice(1).map((center, i) => center - centers[i]!);
+  return Math.max(...velocity.slice(1).map((value, i) => Math.abs(value - velocity[i]!)));
+}
+
 function makeVideo(dir: string, name: string): string {
   mkdirSync(dir, { recursive: true });
   const p = join(dir, name);
@@ -580,6 +623,24 @@ describe('timeline pipeline (C1–C4)', () => {
     expect(streams.audioLayout).not.toBe('none');
     expect(streams.subtitleCodec).toBe('mov_text');
   }, 15_000);
+
+  it('renders slow Ken Burns motion without stop-and-jump acceleration', async () => {
+    const image = await makeMotionMarker(cwd, 'marker.png');
+    const jobDir = join(cwd, '.video-gen', 'smooth-motion');
+    mkdirSync(jobDir, { recursive: true });
+    const specPath = join(jobDir, 'timeline-input.json');
+    writeFileSync(
+      specPath,
+      JSON.stringify({
+        output: { resolution: '640x360', fps: 25, codec: 'mpeg4' },
+        segments: [{ id: 'marker', image, durationSec: 3, motion: 'kenburns-in' }],
+      }),
+    );
+
+    const result = await runTimeline({ timelineSpecPath: specPath, ...baseOpts(cwd) });
+
+    expect(markerMaxAcceleration(result.finalVideoPath)).toBeLessThan(0.5);
+  });
 
   it('mixes a trimmed video segment and its source audio into the timeline', async () => {
     const image = await makeImage(cwd, 'intro.png', { r: 20, g: 30, b: 40 });
