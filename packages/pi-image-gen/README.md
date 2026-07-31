@@ -333,6 +333,8 @@ The `alt` text is the filename without its extension — i.e. whatever you passe
 > revised prompt: a cute beaver, photorealistic, water droplets
 ```
 
+The markdown URL is platform-shaped so any CommonMark host (desktop, TUI, CLI) keeps it intact: on macOS/Linux a bare absolute path — byte-identical unless it contains markdown-unsafe characters (whitespace, `#`, `?`, `%`, `()`, `<>`), which are percent-escaped; on Windows a percent-encoded `file:///…` URL (`![result](file:///C:/Users/.../result.png)`) — sanitizers such as react-markdown's `defaultUrlTransform` read `C:` as an unknown URI scheme and strip the img `src`. Independently of the markdown, `details.images[].path` always carries the raw filesystem path.
+
 ### Image-to-image / edit
 
 `image` is always an array — pass `["path"]` for a single image, `["a", "b"]` for multi-image conditioning. Each entry must be:
