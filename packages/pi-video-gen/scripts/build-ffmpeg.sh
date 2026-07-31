@@ -137,6 +137,8 @@ if [ "${GPL_VARIANT:-}" = "1" ]; then
   X264_CROSS_FLAGS=
   if [ -n "$CROSS_FLAGS" ]; then
     X264_CROSS_PREFIX=$(echo "$CROSS_FLAGS" | sed -n 's/.*--cross-prefix=\([^ ]*\).*/\1/p')
+    [ -n "$X264_CROSS_PREFIX" ] ||
+      { echo "no --cross-prefix found in CROSS_FLAGS: $CROSS_FLAGS" >&2; exit 1; }
     X264_CROSS_FLAGS="--host=${X264_CROSS_PREFIX%-} --cross-prefix=$X264_CROSS_PREFIX"
   fi
   (cd "$WORK/x264-$X264_VERSION" && \
