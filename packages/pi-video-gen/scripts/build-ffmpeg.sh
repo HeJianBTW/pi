@@ -121,9 +121,16 @@ if [ "${GPL_VARIANT:-}" = "1" ]; then
   curl -fsSL "$X264_URL" -o "$WORK/x264.tar.gz"
   verify_sha256 "$X264_SHA256" "$WORK/x264.tar.gz"
   tar -xzf "$WORK/x264.tar.gz" -C "$WORK"
+  # x264 derives its toolchain (CC/AR/RANLIB/...) from --cross-prefix; --host
+  # alone only sets the target arch and would build with the HOST compiler.
+  X264_CROSS_FLAGS=
+  if [ -n "$CROSS_FLAGS" ]; then
+    X264_CROSS_PREFIX=$(echo "$CROSS_FLAGS" | sed -n 's/.*--cross-prefix=\([^ ]*\).*/\1/p')
+    X264_CROSS_FLAGS="--host=${X264_CROSS_PREFIX%-} --cross-prefix=$X264_CROSS_PREFIX"
+  fi
   (cd "$WORK/x264-$X264_VERSION" && \
     ./configure --prefix="$WORK/x264-install" --enable-static --disable-cli --disable-opencl --bit-depth=8 \
-      ${CROSS_FLAGS:+--host=$(echo "$CROSS_FLAGS" | sed -n 's/.*--cross-prefix=\([^ ]*\)-.*/\1/p')} && \
+      $X264_CROSS_FLAGS && \
     make -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu)" && \
     make install)
   # ffmpeg's configure discovers x264 via pkg-config, not raw cflags.
