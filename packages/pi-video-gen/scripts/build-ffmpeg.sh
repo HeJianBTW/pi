@@ -30,6 +30,13 @@ verify_sha256() {
   fi
 }
 
+# ffmpeg.org is a single origin host with spotty reachability from CI
+# runners; retry through transient connect failures (curl exit 28) instead
+# of dying on the first attempt. --retry-all-errors needs curl 7.71+.
+fetch() {
+  curl -fsSL --retry 4 --retry-all-errors --connect-timeout 20 "$1" -o "$2"
+}
+
 case "$TARGET" in
   darwin-arm64)
     [ "$(uname -s)" = Darwin ] && [ "$(uname -m)" = arm64 ] ||
@@ -72,7 +79,7 @@ case "$TARGET" in
     ;;
 esac
 
-curl -fsSL "$SOURCE_URL" -o "$WORK/ffmpeg.tar.xz"
+fetch "$SOURCE_URL" "$WORK/ffmpeg.tar.xz"
 verify_sha256 "$FFMPEG_SHA256" "$WORK/ffmpeg.tar.xz"
 tar -xJf "$WORK/ffmpeg.tar.xz" -C "$WORK"
 
@@ -80,7 +87,7 @@ tar -xJf "$WORK/ffmpeg.tar.xz" -C "$WORK"
 # so cross builds do not depend on host development packages.
 zlib_ok=
 for url in $ZLIB_URLS; do
-  if curl -fsSL "$url" -o "$WORK/zlib.tar.gz" && verify_sha256 "$ZLIB_SHA256" "$WORK/zlib.tar.gz"; then
+  if fetch "$url" "$WORK/zlib.tar.gz" && verify_sha256 "$ZLIB_SHA256" "$WORK/zlib.tar.gz"; then
     zlib_ok=1
     break
   fi
@@ -129,7 +136,7 @@ if [ "${GPL_VARIANT:-}" = "1" ]; then
   # from the pinned videolan snapshot first. The resulting binary is GPL —
   # ship it as bin/ffmpeg-gpl with GPLv2 license files, NEVER as bin/ffmpeg.
   echo "[build] x264 variant: fetching $X264_URL"
-  curl -fsSL "$X264_URL" -o "$WORK/x264.tar.gz"
+  fetch "$X264_URL" "$WORK/x264.tar.gz"
   verify_sha256 "$X264_SHA256" "$WORK/x264.tar.gz"
   tar -xzf "$WORK/x264.tar.gz" -C "$WORK"
   # x264 derives its toolchain (CC/AR/RANLIB/...) from --cross-prefix; --host
