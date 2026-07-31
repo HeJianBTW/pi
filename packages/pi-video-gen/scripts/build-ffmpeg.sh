@@ -134,7 +134,7 @@ if [ "${GPL_VARIANT:-}" = "1" ]; then
 else
   ./configure $FF_CONFIGURE_BASE $ZLIB_FLAGS $CROSS_FLAGS
 fi
-make -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu)" ffmpeg ffprobe
+make -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu)" "ffmpeg${EXECUTABLE#ffmpeg}" "ffprobe${EXECUTABLE#ffmpeg}"
 
 mkdir -p "$PACKAGE_ROOT/bin" "$PACKAGE_ROOT/source"
 cp "$WORK/zlib.tar.gz" "$PACKAGE_ROOT/source/zlib-${ZLIB_VERSION}.tar.gz"
