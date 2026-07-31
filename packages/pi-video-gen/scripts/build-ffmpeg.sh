@@ -12,6 +12,10 @@ X264_SHA256=cd71a7515b0e9a012e1ac9b1f8415bebcaf6fc97d4db32286642ac4c0fbe24f9
 MACOSX_DEPLOYMENT_TARGET=11.0
 SOURCE_URL="https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz"
 ZLIB_URL="https://zlib.net/fossils/zlib-${ZLIB_VERSION}.tar.gz"
+# zlib.net occasionally serves a bad payload to CI runners; the official
+# madler/zlib GitHub release asset is byte-identical, so try it first and
+# fall back to zlib.net. The pinned hash arbitrates every candidate.
+ZLIB_URLS="https://github.com/madler/zlib/releases/download/v${ZLIB_VERSION}/zlib-${ZLIB_VERSION}.tar.gz $ZLIB_URL"
 X264_URL="https://code.videolan.org/videolan/x264/-/archive/$X264_VERSION/x264-$X264_VERSION.tar.gz"
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PACKAGE_ROOT=$(CDPATH= cd -- "${SCRIPT_DIR}/.." && pwd)/platforms/ffmpeg-"$TARGET"
@@ -74,8 +78,15 @@ tar -xJf "$WORK/ffmpeg.tar.xz" -C "$WORK"
 
 # PNG support requires zlib. Build the pinned static source for every target
 # so cross builds do not depend on host development packages.
-curl -fsSL "$ZLIB_URL" -o "$WORK/zlib.tar.gz"
-verify_sha256 "$ZLIB_SHA256" "$WORK/zlib.tar.gz"
+zlib_ok=
+for url in $ZLIB_URLS; do
+  if curl -fsSL "$url" -o "$WORK/zlib.tar.gz" && verify_sha256 "$ZLIB_SHA256" "$WORK/zlib.tar.gz"; then
+    zlib_ok=1
+    break
+  fi
+  echo "[build] zlib fetch failed or hash mismatch: $url" >&2
+done
+[ -n "$zlib_ok" ] || { echo "[build] all zlib mirrors failed" >&2; exit 1; }
 tar -xzf "$WORK/zlib.tar.gz" -C "$WORK"
 case "$TARGET" in
   linux-arm64) ZLIB_CHOST=aarch64-linux-gnu ;;
@@ -126,6 +137,8 @@ if [ "${GPL_VARIANT:-}" = "1" ]; then
   X264_CROSS_FLAGS=
   if [ -n "$CROSS_FLAGS" ]; then
     X264_CROSS_PREFIX=$(echo "$CROSS_FLAGS" | sed -n 's/.*--cross-prefix=\([^ ]*\).*/\1/p')
+    [ -n "$X264_CROSS_PREFIX" ] ||
+      { echo "no --cross-prefix found in CROSS_FLAGS: $CROSS_FLAGS" >&2; exit 1; }
     X264_CROSS_FLAGS="--host=${X264_CROSS_PREFIX%-} --cross-prefix=$X264_CROSS_PREFIX"
   fi
   (cd "$WORK/x264-$X264_VERSION" && \
