@@ -87,6 +87,7 @@ describe('pi-video-gen package artifacts', () => {
     expect(publishWorkflow).toContain('docker exec --user');
     expect(publishWorkflow).toContain('gcc gcc-mingw-w64-x86-64');
     expect(publishWorkflow).toContain('libc6-dev');
+    expect(publishWorkflow).toContain('/tmp/runner-home');
     expect(publishWorkflow).toContain('/usr/lib/wine/wine64');
     expect(publishWorkflow).toContain('Verify FFmpeg binary');
     expect(publishWorkflow).toContain('vtool -show-build');

@@ -75,6 +75,8 @@ jobs:
                 apt-get install -y --no-install-recommends \
                   ca-certificates curl gcc gcc-mingw-w64-x86-64 libc6-dev make nasm pkg-config wine64 xz-utils
               '
+              docker exec "$win_container" install -d \
+                -o "$(id -u)" -g "$(id -g)" /tmp/runner-home
               ;;
           esac
 
@@ -82,7 +84,7 @@ jobs:
         run: |
           if [ "${{ matrix.target }}" = win32-x64 ]; then
             win_container="pi-video-gen-win32-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-            docker exec --user "$(id -u):$(id -g)" --env HOME=/tmp \
+            docker exec --user "$(id -u):$(id -g)" --env HOME=/tmp/runner-home \
               "$win_container" packages/pi-video-gen/scripts/build-ffmpeg.sh win32-x64
           else
             packages/pi-video-gen/scripts/build-ffmpeg.sh "${{ matrix.target }}"
@@ -92,7 +94,7 @@ jobs:
         run: |
           if [ "${{ matrix.target }}" = win32-x64 ]; then
             win_container="pi-video-gen-win32-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-            docker exec --user "$(id -u):$(id -g)" --env HOME=/tmp --env GPL_VARIANT=1 \
+            docker exec --user "$(id -u):$(id -g)" --env HOME=/tmp/runner-home --env GPL_VARIANT=1 \
               "$win_container" packages/pi-video-gen/scripts/build-ffmpeg.sh win32-x64
           else
             GPL_VARIANT=1 packages/pi-video-gen/scripts/build-ffmpeg.sh "${{ matrix.target }}"
@@ -107,7 +109,7 @@ jobs:
           gpl_probe="${gpl%/*}/ffprobe-gpl"
           win_container="pi-video-gen-win32-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           run_win_container() {
-            docker exec --user "$(id -u):$(id -g)" --env HOME=/tmp --env WINEDEBUG=-all \
+            docker exec --user "$(id -u):$(id -g)" --env HOME=/tmp/runner-home --env WINEDEBUG=-all \
               "$win_container" "$@"
           }
           run_ffmpeg() {
