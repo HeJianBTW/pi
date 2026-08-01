@@ -1,7 +1,7 @@
-name: TMP win32 FFmpeg dry-run
+name: TMP FFmpeg matrix dry-run
 
-# Throwaway pre-merge validation for the npm-publish win32-x64 build on the
-# self-hosted runner — runs the exact install/build/verify steps end-to-end.
+# Throwaway pre-merge validation for the npm-publish FFmpeg matrix. It runs
+# the exact install/build/verify path end-to-end without publishing packages.
 # DELETE before merging.
 
 on:
@@ -14,56 +14,120 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 jobs:
-  win32-ffmpeg-dry-run:
-    name: dry-run win32-x64 FFmpeg build
-    runs-on: [instance-hnpsq9go, linux, x64]
+  ffmpeg-dry-run:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    name: dry-run FFmpeg build (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: darwin-arm64
+            runner: macos-15
+          - target: darwin-x64
+            runner: macos-15-intel
+          - target: linux-x64
+            runner: ubuntu-22.04
+          - target: linux-arm64
+            runner: ubuntu-22.04
+          - target: win32-x64
+            runner: [instance-hnpsq9go, linux, x64]
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
 
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
 
-      - name: Install build dependencies
+      - name: Inspect self-hosted container capability
+        if: matrix.target == 'win32-x64'
         run: |
-          missing=
-          for tool in x86_64-w64-mingw32-gcc nasm pkg-config wine64; do
-            command -v "$tool" >/dev/null 2>&1 || missing="$missing $tool"
-          done
-          if [ -n "$missing" ]; then
-            if sudo -n true 2>/dev/null; then
-              sudo -n apt-get update
-              sudo -n apt-get install -y gcc-mingw-w64-x86-64 nasm pkg-config wine64
-            else
-              echo "missing build tools:$missing" >&2
-              echo "this runner has no passwordless sudo; preinstall once as root:" >&2
-              echo "  apt-get update && apt-get install -y gcc-mingw-w64-x86-64 nasm pkg-config wine64" >&2
-              exit 1
-            fi
+          if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+            echo "Docker is available to the runner service account."
+          else
+            echo "Docker is unavailable to the runner service account."
           fi
 
+      - name: Install build dependencies
+        run: |
+          case "${{ matrix.target }}" in
+            darwin-*)
+              brew install nasm pkg-config
+              ;;
+            linux-x64)
+              sudo apt-get update
+              sudo apt-get install -y nasm pkg-config
+              ;;
+            linux-arm64)
+              sudo apt-get update
+              sudo apt-get install -y gcc-aarch64-linux-gnu pkg-config qemu-user
+              ;;
+            win32-x64)
+              missing=
+              for tool in x86_64-w64-mingw32-gcc nasm pkg-config; do
+                command -v "$tool" >/dev/null 2>&1 || missing="$missing $tool"
+              done
+              [ -x /usr/lib/wine/wine64 ] || missing="$missing /usr/lib/wine/wine64"
+              if [ -n "$missing" ]; then
+                echo "missing build tools:$missing" >&2
+                echo "install once in the runner image or as an administrator:" >&2
+                echo "  apt-get update && apt-get install -y gcc-mingw-w64-x86-64 nasm pkg-config wine64" >&2
+                exit 1
+              fi
+              ;;
+          esac
+
       - name: Build minimal LGPL FFmpeg
-        run: packages/pi-video-gen/scripts/build-ffmpeg.sh win32-x64
+        run: packages/pi-video-gen/scripts/build-ffmpeg.sh "${{ matrix.target }}"
 
       - name: Build GPL FFmpeg variant (x264 for h264)
-        run: GPL_VARIANT=1 packages/pi-video-gen/scripts/build-ffmpeg.sh win32-x64
+        run: GPL_VARIANT=1 packages/pi-video-gen/scripts/build-ffmpeg.sh "${{ matrix.target }}"
 
       - name: Verify FFmpeg binary
         shell: bash
         run: |
-          bin="packages/pi-video-gen/platforms/ffmpeg-win32-x64/bin/ffmpeg"
-          gpl="packages/pi-video-gen/platforms/ffmpeg-win32-x64/bin/ffmpeg-gpl"
+          bin="packages/pi-video-gen/platforms/ffmpeg-${{ matrix.target }}/bin/ffmpeg"
+          gpl="packages/pi-video-gen/platforms/ffmpeg-${{ matrix.target }}/bin/ffmpeg-gpl"
           probe="${bin%/*}/ffprobe"
           gpl_probe="${gpl%/*}/ffprobe-gpl"
           run_ffmpeg() {
             executable="$1"
             shift
-            WINEDEBUG=-all /usr/lib/wine/wine64 "${executable}.exe" "$@"
+            case "${{ matrix.target }}" in
+              darwin-*|linux-x64) "$executable" "$@" ;;
+              linux-arm64) qemu-aarch64 -L /usr/aarch64-linux-gnu "$executable" "$@" ;;
+              win32-x64) WINEDEBUG=-all /usr/lib/wine/wine64 "${executable}.exe" "$@" ;;
+            esac
           }
-          WINEDEBUG=-all /usr/lib/wine/wine64 "${bin}.exe" -version
-          WINEDEBUG=-all /usr/lib/wine/wine64 "${probe}.exe" -version
-          WINEDEBUG=-all /usr/lib/wine/wine64 "${gpl}.exe" -version
-          WINEDEBUG=-all /usr/lib/wine/wine64 "${gpl_probe}.exe" -version
-          x86_64-w64-mingw32-objdump -f "${bin}.exe" | grep -q 'pei-x86-64'
+          case "${{ matrix.target }}" in
+            darwin-*)
+              "$bin" -version
+              "$probe" -version
+              "$gpl" -version
+              "$gpl_probe" -version
+              xcrun vtool -show-build "$bin" | grep -q 'minos 11.0'
+              ;;
+            linux-x64)
+              "$bin" -version
+              "$probe" -version
+              "$gpl" -version
+              "$gpl_probe" -version
+              ldd "$bin"
+              ;;
+            linux-arm64)
+              qemu-aarch64 -L /usr/aarch64-linux-gnu "$bin" -version
+              qemu-aarch64 -L /usr/aarch64-linux-gnu "$probe" -version
+              qemu-aarch64 -L /usr/aarch64-linux-gnu "$gpl" -version
+              qemu-aarch64 -L /usr/aarch64-linux-gnu "$gpl_probe" -version
+              aarch64-linux-gnu-readelf -h "$bin" | grep -q 'AArch64'
+              ;;
+            win32-x64)
+              WINEDEBUG=-all /usr/lib/wine/wine64 "${bin}.exe" -version
+              WINEDEBUG=-all /usr/lib/wine/wine64 "${probe}.exe" -version
+              WINEDEBUG=-all /usr/lib/wine/wine64 "${gpl}.exe" -version
+              WINEDEBUG=-all /usr/lib/wine/wine64 "${gpl_probe}.exe" -version
+              x86_64-w64-mingw32-objdump -f "${bin}.exe" | grep -q 'pei-x86-64'
+              ;;
+          esac
           python3 - <<'PY'
           import base64
           from pathlib import Path
@@ -98,18 +162,18 @@ jobs:
             -t 0.8 -c:a aac -c:s mov_text -y
           )
           run_ffmpeg "$bin" "${smoke_args[@]}" -c:v mpeg4 \
-            "timeline-smoke-win32-x64.mp4"
+            "timeline-smoke-${{ matrix.target }}.mp4"
           run_ffmpeg "$gpl" "${smoke_args[@]}" -c:v libx264 \
-            "timeline-smoke-win32-x64-h264.mp4"
+            "timeline-smoke-${{ matrix.target }}-h264.mp4"
           run_ffmpeg "$bin" \
-            -ss 0.1 -t 0.3 -i "timeline-smoke-win32-x64.mp4" \
+            -ss 0.1 -t 0.3 -i "timeline-smoke-${{ matrix.target }}.mp4" \
             -f lavfi -i anullsrc=r=48000:cl=stereo \
             -filter_complex "
               [0:v]scale=64:64:force_original_aspect_ratio=increase,crop=64:64,fps=25[v];
               [0:a]volume=0.5[src];
               [src][1:a]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.95:level=false[a]" \
             -map "[v]" -map "[a]" -t 0.3 -c:v mpeg4 -c:a aac -y \
-            "mixed-media-smoke-win32-x64.mp4"
+            "mixed-media-smoke-${{ matrix.target }}.mp4"
           run_ffmpeg "$bin" -ss 0.2 \
-            -i "mixed-media-smoke-win32-x64.mp4" \
+            -i "mixed-media-smoke-${{ matrix.target }}.mp4" \
             -frames:v 1 -y timeline-smoke-qc.png

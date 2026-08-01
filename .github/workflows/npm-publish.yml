@@ -32,6 +32,7 @@ jobs:
   build-video-ffmpeg:
     name: build pi-video-gen FFmpeg (${{ matrix.target }})
     strategy:
+      fail-fast: false
       matrix:
         include:
           # darwin targets need macOS hosts; linux-* targets keep the pinned
@@ -71,23 +72,19 @@ jobs:
               sudo apt-get install -y gcc-aarch64-linux-gnu pkg-config qemu-user
               ;;
             win32-x64)
-              # Runs on the self-hosted runner, which has no passwordless
-              # sudo: use its pre-provisioned toolchain when present and only
-              # fall back to apt when sudo -n works.
+              # This self-hosted runner intentionally has no passwordless sudo.
+              # Consume its pre-provisioned cross toolchain instead of trying
+              # to mutate the host during a release.
               missing=
-              for tool in x86_64-w64-mingw32-gcc nasm pkg-config wine64; do
+              for tool in x86_64-w64-mingw32-gcc nasm pkg-config; do
                 command -v "$tool" >/dev/null 2>&1 || missing="$missing $tool"
               done
+              [ -x /usr/lib/wine/wine64 ] || missing="$missing /usr/lib/wine/wine64"
               if [ -n "$missing" ]; then
-                if sudo -n true 2>/dev/null; then
-                  sudo -n apt-get update
-                  sudo -n apt-get install -y gcc-mingw-w64-x86-64 nasm pkg-config wine64
-                else
-                  echo "missing build tools:$missing" >&2
-                  echo "this runner has no passwordless sudo; preinstall once as root:" >&2
-                  echo "  apt-get update && apt-get install -y gcc-mingw-w64-x86-64 nasm pkg-config wine64" >&2
-                  exit 1
-                fi
+                echo "missing pre-provisioned build tools:$missing" >&2
+                echo "install once in the runner image or as an administrator:" >&2
+                echo "  apt-get update && apt-get install -y gcc-mingw-w64-x86-64 nasm pkg-config wine64" >&2
+                exit 1
               fi
               ;;
           esac

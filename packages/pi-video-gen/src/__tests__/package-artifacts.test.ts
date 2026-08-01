@@ -74,7 +74,13 @@ describe('pi-video-gen package artifacts', () => {
   });
 
   it('builds against declared platform baselines and verifies release binaries', () => {
+    expect(publishWorkflow).toContain('fail-fast: false');
     expect(publishWorkflow).toContain('runner: ubuntu-22.04');
+    expect(publishWorkflow).toMatch(
+      /- target: win32-x64\n\s+runner: \[instance-hnpsq9go, linux, x64\]/,
+    );
+    expect(publishWorkflow).not.toContain('sudo -n');
+    expect(publishWorkflow).toContain('[ -x /usr/lib/wine/wine64 ]');
     expect(publishWorkflow).toContain('Verify FFmpeg binary');
     expect(publishWorkflow).toContain('vtool -show-build');
     expect(publishWorkflow).not.toContain('vars.X264_SHA256');
