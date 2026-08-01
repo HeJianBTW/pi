@@ -557,11 +557,29 @@ jobs:
           fi
           git push origin "refs/tags/${tag_name}"
 
+      - name: Generate release summary
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PI_INTEGRATION_API_KEY: ${{ secrets.PI_INTEGRATION_API_KEY }}
+          PI_INTEGRATION_BASE_URL: ${{ secrets.PI_INTEGRATION_BASE_URL }}
+          PUBLISHED_PACKAGES: ${{ steps.versioning.outputs.publish_filters }}
+          RELEASE_CHANNEL: ${{ inputs.npm_tag }}
+          RELEASE_VERSION: ${{ steps.versioning.outputs.release_version }}
+        run: |
+          tag_name="v${RELEASE_VERSION}"
+          if gh release view "${tag_name}" >/dev/null 2>&1; then
+            echo "GitHub release ${tag_name} already exists; skipping summary generation."
+            exit 0
+          fi
+          node .github/scripts/generate-release-summary.mjs \
+            --version "${RELEASE_VERSION}" \
+            --channel "${RELEASE_CHANNEL}" \
+            --output .release-notes.md
+
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ steps.versioning.outputs.release_version }}
-          RELEASE_CHANNEL: ${{ inputs.npm_tag }}
         run: |
           tag_name="v${RELEASE_VERSION}"
           if gh release view "${tag_name}" >/dev/null 2>&1; then
@@ -571,7 +589,7 @@ jobs:
           gh release create "${tag_name}" \
             --verify-tag \
             --title "v${RELEASE_VERSION}" \
-            --notes "Published npm packages with dist-tag \`${RELEASE_CHANNEL}\`."
+            --notes-file .release-notes.md
 
   notify-feishu:
     name: notify feishu

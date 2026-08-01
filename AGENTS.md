@@ -229,7 +229,7 @@ import {
 2. Agent dir: `$PI_CODING_AGENT_DIR/settings.json`
 3. Trusted project: `<cwd>/.pi/settings.json`
 
-Extensions must pass `projectTrusted: isProjectTrusted(ctx)` when loading from an extension context. If trust is absent or declined, project settings and policies are ignored. `${ENV_VAR:-fallback}` interpolation applies only to global and agent-dir settings, never to project settings. Loaders may opt into bare `$ENV_VAR` compatibility with `expandBareEnvVars`; bare references do not support the `:-fallback` form.
+Extensions must pass `projectTrusted: isProjectTrusted(ctx)` when loading from an extension context. If trust is absent or declined, project settings and policies are ignored. `${ENV_VAR:-fallback}` and bare `$ENV_VAR` interpolation apply only to global and agent-dir settings, never to project settings. Loaders may opt out of bare `$ENV_VAR` compatibility with `expandBareEnvVars: false`; bare references do not support the `:-fallback` form.
 
 ---
 
