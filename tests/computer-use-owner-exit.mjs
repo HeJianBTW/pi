@@ -50,14 +50,15 @@ try {
 
   owner.kill('SIGKILL');
   await waitFor(() => owner.exitCode !== null || owner.signalCode !== null, 5_000);
-  await waitFor(
-    () =>
-      !existsSync(socketPath) &&
-      !existsSync(`/proc/${daemonPid}`) &&
-      !existsSync(`/proc/${leasePid}`) &&
-      !existsSync(`/proc/${proxyPid}`),
-    5_000,
-  );
+  let cleanupStatus;
+  try {
+    await waitFor(async () => {
+      cleanupStatus = await inspectCleanup(socketPath, { daemonPid, leasePid, proxyPid });
+      return cleanupStatus.complete;
+    }, 5_000);
+  } catch {
+    throw new Error(`Cua Driver cleanup timed out: ${JSON.stringify(cleanupStatus)}`);
+  }
 
   console.log('Cua Driver lease, daemon, and proxy exited after their owner was killed.');
 } finally {
@@ -118,6 +119,37 @@ async function processMatchesSocket(pid, socket) {
   if (!socket) return false;
   const command = await readFile(`/proc/${pid}/cmdline`, 'utf8').catch(() => '');
   return command.includes(socket);
+}
+
+async function inspectCleanup(socket, { daemonPid, leasePid, proxyPid }) {
+  const [daemon, lease, proxy] = await Promise.all([
+    inspectProcess(daemonPid, socket),
+    inspectProcess(leasePid, socket),
+    inspectProcess(proxyPid, socket),
+  ]);
+  const socketExists = existsSync(socket);
+  return {
+    complete: !socketExists && !daemon.running && !lease.running && !proxy.running,
+    socketExists,
+    daemon,
+    lease,
+    proxy,
+  };
+}
+
+async function inspectProcess(pid, socket) {
+  const stat = await readFile(`/proc/${pid}/stat`, 'utf8').catch(() => '');
+  if (!stat) return { pid, state: 'missing', matchesSocket: false, running: false };
+
+  const command = await readFile(`/proc/${pid}/cmdline`, 'utf8').catch(() => '');
+  const state = stat.slice(stat.lastIndexOf(')') + 2).charAt(0) || 'unknown';
+  const matchesSocket = command.includes(socket);
+  return {
+    pid,
+    state,
+    matchesSocket,
+    running: matchesSocket && state !== 'Z' && state !== 'X',
+  };
 }
 
 async function waitFor(check, timeoutMs) {

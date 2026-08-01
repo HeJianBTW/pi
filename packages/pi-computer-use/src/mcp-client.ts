@@ -20,7 +20,14 @@ const DAEMON_LEASE_SCRIPT = `
 if IFS= read -r _; then exit 0; fi
 attempt=0
 while [ "$attempt" -lt 100 ]; do
-  if [ -S "$2" ]; then exec "$1" stop --socket "$2"; fi
+  if [ -S "$2" ]; then
+    "$1" stop --socket "$2" >/dev/null 2>&1
+    status=$("$1" status --socket "$2" 2>&1)
+    if [ -S "$2" ] && [ "$status" = "Cua Driver daemon is not running" ]; then
+      /bin/rm -f -- "$2"
+    fi
+    exit 0
+  fi
   attempt=$((attempt + 1))
   sleep 0.1
 done
