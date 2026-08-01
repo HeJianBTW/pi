@@ -86,7 +86,7 @@ jobs:
                 export DEBIAN_FRONTEND=noninteractive
                 apt-get update
                 apt-get install -y --no-install-recommends \
-                  ca-certificates curl gcc gcc-mingw-w64-x86-64 make nasm pkg-config wine64 xz-utils
+                  ca-certificates curl gcc gcc-mingw-w64-x86-64 libc6-dev make nasm pkg-config wine64 xz-utils
               '
               ;;
           esac
