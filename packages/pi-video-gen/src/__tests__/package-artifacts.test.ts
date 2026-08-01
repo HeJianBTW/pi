@@ -60,6 +60,8 @@ describe('pi-video-gen package artifacts', () => {
     expect(script).toMatch(/--enable-decoder=[^\n]*gif/);
     expect(script).toMatch(/--enable-filter=[^\n]*alimiter/);
     expect(script).toContain('MACOSX_DEPLOYMENT_TARGET=11.0');
+    expect(script).toMatch(/linux-arm64\)[\s\S]*--pkg-config=pkg-config/);
+    expect(script).toMatch(/win32-x64\)[\s\S]*--pkg-config=pkg-config/);
     // Base (LGPL) build has NO third-party codec libs; the opt-in GPL_VARIANT
     // branch may add libx264 only inside its own guarded section.
     const gplMarker =
@@ -74,12 +76,26 @@ describe('pi-video-gen package artifacts', () => {
   });
 
   it('builds against declared platform baselines and verifies release binaries', () => {
+    expect(publishWorkflow).toContain('fail-fast: false');
     expect(publishWorkflow).toContain('runner: ubuntu-22.04');
+    expect(publishWorkflow).toMatch(
+      /- target: win32-x64\n\s+runner: \[instance-hnpsq9go, linux, x64\]/,
+    );
+    expect(publishWorkflow).not.toContain('sudo -n');
+    expect(publishWorkflow).toContain('docker run --detach');
+    expect(publishWorkflow).toContain('ubuntu:22.04 sleep infinity');
+    expect(publishWorkflow).toContain('docker exec --user');
+    expect(publishWorkflow).toContain('gcc gcc-mingw-w64-x86-64');
+    expect(publishWorkflow).toContain('libc6-dev');
+    expect(publishWorkflow).toContain('/tmp/runner-home');
+    expect(publishWorkflow).toContain('/usr/lib/wine/wine64');
     expect(publishWorkflow).toContain('Verify FFmpeg binary');
     expect(publishWorkflow).toContain('vtool -show-build');
     expect(publishWorkflow).not.toContain('vars.X264_SHA256');
     expect(publishWorkflow).toContain('timeline-smoke');
-    expect(publishWorkflow).toContain('timeline-smoke.jpg');
+    expect(publishWorkflow).not.toContain('timeline-smoke.jpg');
+    expect(publishWorkflow).toContain('-i packages/pi-video-gen/preview.png');
+    expect(publishWorkflow).toContain('-nostdin -xerror');
     expect(publishWorkflow).toContain('atrim=0:0.2');
     expect(publishWorkflow).toContain('zoompan=');
     expect(publishWorkflow).toContain('xfade=');
@@ -97,7 +113,9 @@ describe('pi-video-gen package artifacts', () => {
 
   it('executes cross-compiled release binaries before publishing them', () => {
     expect(publishWorkflow).toContain('qemu-aarch64 -L /usr/aarch64-linux-gnu "$bin" -version');
-    expect(publishWorkflow).toContain(`WINEDEBUG=-all /usr/lib/wine/wine64 "\${bin}.exe" -version`);
+    expect(publishWorkflow).toContain(
+      `run_win_container /usr/lib/wine/wine64 "\${bin}.exe" -version`,
+    );
     expect(publishWorkflow).toContain(`probe="\${bin%/*}/ffprobe"`);
     expect(publishWorkflow).toContain(`gpl_probe="\${gpl%/*}/ffprobe-gpl"`);
     expect(publishWorkflow).not.toContain(`\${bin/ffmpeg/ffprobe}`);
