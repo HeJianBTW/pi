@@ -1,0 +1,115 @@
+name: TMP win32 FFmpeg dry-run
+
+# Throwaway pre-merge validation for the npm-publish win32-x64 build on the
+# self-hosted runner — runs the exact install/build/verify steps end-to-end.
+# DELETE before merging.
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+jobs:
+  win32-ffmpeg-dry-run:
+    name: dry-run win32-x64 FFmpeg build
+    runs-on: [instance-hnpsq9go, linux, x64]
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          missing=
+          for tool in x86_64-w64-mingw32-gcc nasm pkg-config wine64; do
+            command -v "$tool" >/dev/null 2>&1 || missing="$missing $tool"
+          done
+          if [ -n "$missing" ]; then
+            if sudo -n true 2>/dev/null; then
+              sudo -n apt-get update
+              sudo -n apt-get install -y gcc-mingw-w64-x86-64 nasm pkg-config wine64
+            else
+              echo "missing build tools:$missing" >&2
+              echo "this runner has no passwordless sudo; preinstall once as root:" >&2
+              echo "  apt-get update && apt-get install -y gcc-mingw-w64-x86-64 nasm pkg-config wine64" >&2
+              exit 1
+            fi
+          fi
+
+      - name: Build minimal LGPL FFmpeg
+        run: packages/pi-video-gen/scripts/build-ffmpeg.sh win32-x64
+
+      - name: Build GPL FFmpeg variant (x264 for h264)
+        run: GPL_VARIANT=1 packages/pi-video-gen/scripts/build-ffmpeg.sh win32-x64
+
+      - name: Verify FFmpeg binary
+        shell: bash
+        run: |
+          bin="packages/pi-video-gen/platforms/ffmpeg-win32-x64/bin/ffmpeg"
+          gpl="packages/pi-video-gen/platforms/ffmpeg-win32-x64/bin/ffmpeg-gpl"
+          probe="${bin%/*}/ffprobe"
+          gpl_probe="${gpl%/*}/ffprobe-gpl"
+          run_ffmpeg() {
+            executable="$1"
+            shift
+            WINEDEBUG=-all /usr/lib/wine/wine64 "${executable}.exe" "$@"
+          }
+          WINEDEBUG=-all /usr/lib/wine/wine64 "${bin}.exe" -version
+          WINEDEBUG=-all /usr/lib/wine/wine64 "${probe}.exe" -version
+          WINEDEBUG=-all /usr/lib/wine/wine64 "${gpl}.exe" -version
+          WINEDEBUG=-all /usr/lib/wine/wine64 "${gpl_probe}.exe" -version
+          x86_64-w64-mingw32-objdump -f "${bin}.exe" | grep -q 'pei-x86-64'
+          python3 - <<'PY'
+          import base64
+          from pathlib import Path
+          Path("timeline-smoke.jpg").write_bytes(base64.b64decode(
+              "/9j/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAAIAAgDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAf/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAABAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCEALQD/9k="
+          ))
+          Path("timeline-smoke.srt").write_text(
+              "1\n00:00:00,000 --> 00:00:00,500\nTimeline smoke\n",
+              encoding="utf-8",
+          )
+          PY
+          smoke_args=(
+            -loop 1 -framerate 25 -t 0.5 -i timeline-smoke.jpg
+            -loop 1 -framerate 25 -t 0.5 -i timeline-smoke.jpg
+            -loop 1 -framerate 25 -t 0.5 -i packages/pi-video-gen/preview.png
+            -f lavfi -i anullsrc=r=48000:cl=stereo
+            -f lavfi -i anullsrc=r=48000:cl=stereo
+            -f lavfi -i sine=frequency=440:sample_rate=48000
+            -i timeline-smoke.srt
+            -filter_complex "
+              [0:v]scale=64:64,zoompan=z='min(zoom+0.001,1.1)':d=1:s=64x64:fps=25,settb=AVTB[v0];
+              [1:v]scale=64:64,settb=AVTB[v1];
+              [2:v]scale=16:16,format=rgba[ovr];
+              [v0][ovr]overlay=0:0:shortest=1[vo];
+              [vo][v1]xfade=transition=fade:duration=0.1:offset=0.4[v];
+              [3:a]atrim=0:0.25[a0];
+              [4:a]atrim=0:0.25[a1];
+              [a0][a1]concat=n=2:v=0:a=1[voice];
+              [5:a]atrim=0:0.5[bgm];
+              [voice][bgm]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.95:level=false[a]"
+            -map "[v]" -map "[a]" -map 6:s
+            -t 0.8 -c:a aac -c:s mov_text -y
+          )
+          run_ffmpeg "$bin" "${smoke_args[@]}" -c:v mpeg4 \
+            "timeline-smoke-win32-x64.mp4"
+          run_ffmpeg "$gpl" "${smoke_args[@]}" -c:v libx264 \
+            "timeline-smoke-win32-x64-h264.mp4"
+          run_ffmpeg "$bin" \
+            -ss 0.1 -t 0.3 -i "timeline-smoke-win32-x64.mp4" \
+            -f lavfi -i anullsrc=r=48000:cl=stereo \
+            -filter_complex "
+              [0:v]scale=64:64:force_original_aspect_ratio=increase,crop=64:64,fps=25[v];
+              [0:a]volume=0.5[src];
+              [src][1:a]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.95:level=false[a]" \
+            -map "[v]" -map "[a]" -t 0.3 -c:v mpeg4 -c:a aac -y \
+            "mixed-media-smoke-win32-x64.mp4"
+          run_ffmpeg "$bin" -ss 0.2 \
+            -i "mixed-media-smoke-win32-x64.mp4" \
+            -frames:v 1 -y timeline-smoke-qc.png
