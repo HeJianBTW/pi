@@ -63,13 +63,13 @@ case "$TARGET" in
     ;;
   linux-arm64)
     command -v aarch64-linux-gnu-gcc >/dev/null
-    CROSS_FLAGS="--enable-cross-compile --target-os=linux --arch=aarch64 --cross-prefix=aarch64-linux-gnu-"
+    CROSS_FLAGS="--enable-cross-compile --target-os=linux --arch=aarch64 --cross-prefix=aarch64-linux-gnu- --pkg-config=pkg-config"
     EXECUTABLE=ffmpeg
     RUNTIME_BASELINE="Linux glibc (built on Ubuntu 22.04)"
     ;;
   win32-x64)
     command -v x86_64-w64-mingw32-gcc >/dev/null
-    CROSS_FLAGS="--enable-cross-compile --target-os=mingw32 --arch=x86_64 --cross-prefix=x86_64-w64-mingw32- --extra-ldflags=-static"
+    CROSS_FLAGS="--enable-cross-compile --target-os=mingw32 --arch=x86_64 --cross-prefix=x86_64-w64-mingw32- --pkg-config=pkg-config --extra-ldflags=-static"
     EXECUTABLE=ffmpeg.exe
     RUNTIME_BASELINE="Windows x64"
     ;;

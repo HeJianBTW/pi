@@ -72,28 +72,44 @@ jobs:
               sudo apt-get install -y gcc-aarch64-linux-gnu pkg-config qemu-user
               ;;
             win32-x64)
-              # This self-hosted runner intentionally has no passwordless sudo.
-              # Consume its pre-provisioned cross toolchain instead of trying
-              # to mutate the host during a release.
-              missing=
-              for tool in x86_64-w64-mingw32-gcc nasm pkg-config; do
-                command -v "$tool" >/dev/null 2>&1 || missing="$missing $tool"
-              done
-              [ -x /usr/lib/wine/wine64 ] || missing="$missing /usr/lib/wine/wine64"
-              if [ -n "$missing" ]; then
-                echo "missing pre-provisioned build tools:$missing" >&2
-                echo "install once in the runner image or as an administrator:" >&2
-                echo "  apt-get update && apt-get install -y gcc-mingw-w64-x86-64 nasm pkg-config wine64" >&2
-                exit 1
-              fi
+              # The self-hosted runner has Docker access but intentionally has
+              # no passwordless sudo. Install the cross toolchain inside an
+              # ephemeral container without mutating the host.
+              win_container="pi-video-gen-win32-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+              docker pull ubuntu:22.04
+              docker run --detach --rm --name "$win_container" \
+                --env HTTP_PROXY --env HTTPS_PROXY --env NO_PROXY \
+                --env http_proxy --env https_proxy --env no_proxy \
+                --volume "$GITHUB_WORKSPACE:/workspace" --workdir /workspace \
+                ubuntu:22.04 sleep infinity
+              docker exec "$win_container" sh -c '
+                export DEBIAN_FRONTEND=noninteractive
+                apt-get update
+                apt-get install -y --no-install-recommends \
+                  ca-certificates curl gcc-mingw-w64-x86-64 make nasm pkg-config wine64 xz-utils
+              '
               ;;
           esac
 
       - name: Build minimal LGPL FFmpeg
-        run: packages/pi-video-gen/scripts/build-ffmpeg.sh "${{ matrix.target }}"
+        run: |
+          if [ "${{ matrix.target }}" = win32-x64 ]; then
+            win_container="pi-video-gen-win32-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+            docker exec --user "$(id -u):$(id -g)" --env HOME=/tmp \
+              "$win_container" packages/pi-video-gen/scripts/build-ffmpeg.sh win32-x64
+          else
+            packages/pi-video-gen/scripts/build-ffmpeg.sh "${{ matrix.target }}"
+          fi
 
       - name: Build GPL FFmpeg variant (x264 for h264)
-        run: GPL_VARIANT=1 packages/pi-video-gen/scripts/build-ffmpeg.sh "${{ matrix.target }}"
+        run: |
+          if [ "${{ matrix.target }}" = win32-x64 ]; then
+            win_container="pi-video-gen-win32-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+            docker exec --user "$(id -u):$(id -g)" --env HOME=/tmp --env GPL_VARIANT=1 \
+              "$win_container" packages/pi-video-gen/scripts/build-ffmpeg.sh win32-x64
+          else
+            GPL_VARIANT=1 packages/pi-video-gen/scripts/build-ffmpeg.sh "${{ matrix.target }}"
+          fi
 
       - name: Verify FFmpeg binary
         shell: bash
@@ -102,13 +118,18 @@ jobs:
           gpl="packages/pi-video-gen/platforms/ffmpeg-${{ matrix.target }}/bin/ffmpeg-gpl"
           probe="${bin%/*}/ffprobe"
           gpl_probe="${gpl%/*}/ffprobe-gpl"
+          win_container="pi-video-gen-win32-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          run_win_container() {
+            docker exec --user "$(id -u):$(id -g)" --env HOME=/tmp --env WINEDEBUG=-all \
+              "$win_container" "$@"
+          }
           run_ffmpeg() {
             executable="$1"
             shift
             case "${{ matrix.target }}" in
               darwin-*|linux-x64) "$executable" "$@" ;;
               linux-arm64) qemu-aarch64 -L /usr/aarch64-linux-gnu "$executable" "$@" ;;
-              win32-x64) WINEDEBUG=-all /usr/lib/wine/wine64 "${executable}.exe" "$@" ;;
+              win32-x64) run_win_container /usr/lib/wine/wine64 "${executable}.exe" "$@" ;;
             esac
           }
           case "${{ matrix.target }}" in
@@ -134,11 +155,11 @@ jobs:
               aarch64-linux-gnu-readelf -h "$bin" | grep -q 'AArch64'
               ;;
             win32-x64)
-              WINEDEBUG=-all /usr/lib/wine/wine64 "${bin}.exe" -version
-              WINEDEBUG=-all /usr/lib/wine/wine64 "${probe}.exe" -version
-              WINEDEBUG=-all /usr/lib/wine/wine64 "${gpl}.exe" -version
-              WINEDEBUG=-all /usr/lib/wine/wine64 "${gpl_probe}.exe" -version
-              x86_64-w64-mingw32-objdump -f "${bin}.exe" | grep -q 'pei-x86-64'
+              run_win_container /usr/lib/wine/wine64 "${bin}.exe" -version
+              run_win_container /usr/lib/wine/wine64 "${probe}.exe" -version
+              run_win_container /usr/lib/wine/wine64 "${gpl}.exe" -version
+              run_win_container /usr/lib/wine/wine64 "${gpl_probe}.exe" -version
+              run_win_container x86_64-w64-mingw32-objdump -f "${bin}.exe" | grep -q 'pei-x86-64'
               ;;
           esac
           python3 - <<'PY'
@@ -190,6 +211,10 @@ jobs:
           run_ffmpeg "$bin" -ss 0.2 \
             -i "mixed-media-smoke-${{ matrix.target }}.mp4" \
             -frames:v 1 -y timeline-smoke-qc.png
+
+      - name: Stop Windows build container
+        if: always() && matrix.target == 'win32-x64'
+        run: docker rm --force "pi-video-gen-win32-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" || true
 
       - name: Preserve executable permissions
         run: |
