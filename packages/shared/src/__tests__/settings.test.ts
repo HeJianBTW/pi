@@ -70,7 +70,7 @@ describe('loadPiSettings env var resolution', () => {
     expect(result.name).toBe('claude-opus');
   });
 
-  it('keeps bare env refs literal by default', async () => {
+  it('resolves bare env refs by default', async () => {
     process.env.TEST_MODEL = 'claude-opus';
     writeFileSync(
       settingsPath,
@@ -79,10 +79,10 @@ describe('loadPiSettings env var resolution', () => {
       }),
     );
     const result = await loadSettings<{ name: string }>('myExt');
-    expect(result.name).toBe('$TEST_MODEL');
+    expect(result.name).toBe('claude-opus');
   });
 
-  it('resolves bare env refs when explicitly enabled', async () => {
+  it('keeps bare env refs literal when explicitly disabled', async () => {
     process.env.TEST_MODEL = 'claude-opus';
     writeFileSync(
       settingsPath,
@@ -92,9 +92,9 @@ describe('loadPiSettings env var resolution', () => {
     );
     const { loadPiSettings } = await import('../../src/settings.js');
     const result = loadPiSettings<{ name: string }>('myExt', {
-      expandBareEnvVars: true,
+      expandBareEnvVars: false,
     });
-    expect(result.name).toBe('claude-opus');
+    expect(result.name).toBe('$TEST_MODEL');
   });
 
   it('resolves env ref with default to default when env is unset', async () => {

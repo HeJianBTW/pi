@@ -8,6 +8,7 @@ export type BuiltInProviderId =
   | 'zai'
   | 'gemini'
   | 'perplexity'
+  | 'deepseek'
   | 'openrouter'
   | 'xai'
   | 'openai'
