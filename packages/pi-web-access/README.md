@@ -58,8 +58,6 @@ Search X (Twitter) for posts and social media content. Only registered when xai 
 | `openai` | ✓ | ✗ | ✗ | `https://api.openai.com/v1` | `OPENAI_API_KEY` | `gpt-5.5` |
 | `anthropic` | ✓ | ✓ | ✗ | `https://api.anthropic.com/v1` | `ANTHROPIC_API_KEY` | `claude-sonnet-4-6` |
 
-DeepSeek search uses its Responses API (`POST /responses`) with `deepseek-v4-flash`.
-
 Custom Kimi base URLs must support both `/chat/completions` and `/formulas/*`.
 
 **Fetch fallback** (when `fetch.provider` is not set): Jina Reader (`r.jina.ai`, free, JS-rendered) → local HTTP GET + turndown.
