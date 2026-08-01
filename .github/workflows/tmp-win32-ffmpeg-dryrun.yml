@@ -149,20 +149,15 @@ jobs:
               run_win_container x86_64-w64-mingw32-objdump -f "${bin}.exe" | grep -q 'pei-x86-64'
               ;;
           esac
-          python3 - <<'PY'
-          import base64
-          from pathlib import Path
-          Path("timeline-smoke.jpg").write_bytes(base64.b64decode(
-              "/9j/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAAIAAgDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAf/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAABAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCEALQD/9k="
-          ))
-          Path("timeline-smoke.srt").write_text(
-              "1\n00:00:00,000 --> 00:00:00,500\nTimeline smoke\n",
-              encoding="utf-8",
-          )
-          PY
+          cat > timeline-smoke.srt <<'EOF'
+          1
+          00:00:00,000 --> 00:00:00,500
+          Timeline smoke
+          EOF
           smoke_args=(
-            -loop 1 -framerate 25 -t 0.5 -i timeline-smoke.jpg
-            -loop 1 -framerate 25 -t 0.5 -i timeline-smoke.jpg
+            -nostdin -xerror
+            -loop 1 -framerate 25 -t 0.5 -i packages/pi-video-gen/preview.png
+            -loop 1 -framerate 25 -t 0.5 -i packages/pi-video-gen/preview.png
             -loop 1 -framerate 25 -t 0.5 -i packages/pi-video-gen/preview.png
             -f lavfi -i anullsrc=r=48000:cl=stereo
             -f lavfi -i anullsrc=r=48000:cl=stereo

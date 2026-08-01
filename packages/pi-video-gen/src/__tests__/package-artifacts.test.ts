@@ -91,7 +91,9 @@ describe('pi-video-gen package artifacts', () => {
     expect(publishWorkflow).toContain('vtool -show-build');
     expect(publishWorkflow).not.toContain('vars.X264_SHA256');
     expect(publishWorkflow).toContain('timeline-smoke');
-    expect(publishWorkflow).toContain('timeline-smoke.jpg');
+    expect(publishWorkflow).not.toContain('timeline-smoke.jpg');
+    expect(publishWorkflow).toContain('-i packages/pi-video-gen/preview.png');
+    expect(publishWorkflow).toContain('-nostdin -xerror');
     expect(publishWorkflow).toContain('atrim=0:0.2');
     expect(publishWorkflow).toContain('zoompan=');
     expect(publishWorkflow).toContain('xfade=');
