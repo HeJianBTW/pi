@@ -16,6 +16,22 @@ import type { McpToolResult } from './tool-result.js';
 
 const MCP_TIMEOUT_MS = 60_000;
 const DAEMON_START_TIMEOUT_MS = 10_000;
+const DAEMON_LEASE_SCRIPT = `
+if IFS= read -r _; then exit 0; fi
+attempt=0
+while [ "$attempt" -lt 100 ]; do
+  if [ -S "$2" ]; then
+    "$1" stop --socket "$2" >/dev/null 2>&1
+    status=$("$1" status --socket "$2" 2>&1)
+    if [ -S "$2" ] && [ "$status" = "Cua Driver daemon is not running" ]; then
+      /bin/rm -f -- "$2"
+    fi
+    exit 0
+  fi
+  attempt=$((attempt + 1))
+  sleep 0.1
+done
+`;
 const execFileAsync = promisify(execFile);
 const packageDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -124,6 +140,7 @@ export type ConnectionState =
 export class CuaDriverClient {
   private client: Client | null = null;
   private daemonProcess: ChildProcess | null = null;
+  private daemonLease: ChildProcess | null = null;
   private daemonSocket: string | null = null;
   private activeLayout: DriverLayout | null = null;
   private state: ConnectionState = 'disconnected';
@@ -231,6 +248,38 @@ export class CuaDriverClient {
     if (this.daemonSocket) return this.daemonSocket;
     const socket = this.createSocketPath();
     this.daemonSocket = socket;
+
+    if (process.platform !== 'win32') {
+      // This anonymous pipe is the lease: owner death closes it even after SIGKILL.
+      const lease = spawn(
+        '/bin/sh',
+        ['-c', DAEMON_LEASE_SCRIPT, 'pi-computer-use-lease', layout.binaryPath, socket],
+        {
+          env: this.daemonEnvironment(layout.embedded),
+          stdio: ['pipe', 'ignore', 'ignore'],
+        },
+      );
+      this.daemonLease = lease;
+      await new Promise<void>((resolve, reject) => {
+        const onError = (error: Error) => {
+          lease.removeListener('spawn', onSpawn);
+          reject(error);
+        };
+        const onSpawn = () => {
+          lease.removeListener('error', onError);
+          resolve();
+        };
+        lease.once('error', onError);
+        lease.once('spawn', onSpawn);
+      });
+      lease.unref?.();
+      (lease.stdin as (typeof lease.stdin & { unref?: () => void }) | null)?.unref?.();
+      lease.once('error', () => {
+        if (this.daemonLease !== lease) return;
+        console.error('[pi-computer-use] failed to start daemon lease');
+        void this.stopDaemon();
+      });
+    }
 
     if (process.platform === 'darwin' && layout.appPath && !layout.embedded) {
       const launcher = spawn(
@@ -421,9 +470,14 @@ export class CuaDriverClient {
     const socket = this.daemonSocket;
     const layout = this.activeLayout;
     const daemonProcess = this.daemonProcess;
+    const daemonLease = this.daemonLease;
     this.daemonSocket = null;
     this.activeLayout = null;
     this.daemonProcess = null;
+    this.daemonLease = null;
+
+    if (daemonLease?.stdin?.writable) daemonLease.stdin.end('cancel\n');
+    else daemonLease?.kill();
 
     if (socket && layout) {
       try {
@@ -432,7 +486,7 @@ export class CuaDriverClient {
           timeout: 3_000,
         });
       } catch {
-        // The daemon may already be gone; the owned process is killed below.
+        console.error('[pi-computer-use] failed to stop owned daemon');
       }
     }
     daemonProcess?.kill();

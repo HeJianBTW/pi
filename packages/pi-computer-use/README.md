@@ -95,7 +95,9 @@ schemas.
 
 Driver startup, reconnect, and the first macOS permission probe are session-owned.
 Cancelling a tool stops only that caller's wait or MCP request; session shutdown
-aborts the shared work.
+aborts the shared work. macOS and Linux also use a transient pipe-backed lease to
+stop the owned daemon after an abrupt host exit; no persistent service or system
+scheduler is installed.
 
 - **Bundled macOS:** launches the signed `CuaDriver.app` through LaunchServices,
   so Accessibility and Screen Recording grants belong to `com.trycua.driver`.
