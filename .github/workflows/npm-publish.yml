@@ -34,6 +34,11 @@ jobs:
     strategy:
       matrix:
         include:
+          # darwin targets need macOS hosts; linux-* targets keep the pinned
+          # ubuntu-22.04 image for the published glibc baseline. win32-x64
+          # produces PE binaries via mingw (host-glibc-agnostic), so it runs
+          # on the accelerated self-hosted runner for reliable source
+          # downloads (ffmpeg.org, zlib.net, code.videolan.org).
           - target: darwin-arm64
             runner: macos-15
           - target: darwin-x64
@@ -43,7 +48,7 @@ jobs:
           - target: linux-arm64
             runner: ubuntu-22.04
           - target: win32-x64
-            runner: ubuntu-24.04
+            runner: [instance-hnpsq9go, linux, x64]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
 
