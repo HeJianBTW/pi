@@ -55,4 +55,22 @@ describe('storage JsonScheduledTaskStore', () => {
     const reloaded = await new JsonScheduledTaskStore(filePath).list();
     expect(reloaded.map((task) => task.id).sort()).toEqual(tasks.map((task) => task.id).sort());
   });
+
+  it('isolates reads and mutations by session', async () => {
+    const store = new JsonScheduledTaskStore(filePath);
+    const owned = makeTask({ id: 'owned', sessionId: 'session-a' });
+    const foreign = makeTask({ id: 'foreign', sessionId: 'session-b' });
+    await store.create(owned);
+    await store.create(foreign);
+
+    expect((await store.list({ sessionId: 'session-a' })).map((task) => task.id)).toEqual([
+      'owned',
+    ]);
+    await expect(store.get(foreign.id, { sessionId: 'session-a' })).resolves.toBeUndefined();
+    await expect(
+      store.update(foreign.id, { ...foreign, prompt: 'changed' }, { sessionId: 'session-a' }),
+    ).resolves.toBeUndefined();
+    await expect(store.delete(foreign.id, { sessionId: 'session-a' })).resolves.toBe(false);
+    await expect(store.get(foreign.id, { sessionId: 'session-b' })).resolves.toMatchObject(foreign);
+  });
 });

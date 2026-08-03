@@ -30,6 +30,24 @@ const SETTINGS_KEY = 'pi-security';
 const EXTENSION_STATUS_KEY = 'pi-security';
 const DEFAULT_PROFILE = 'auto-review';
 const DEFAULT_AUDIT_LIMIT = 200;
+const PATH_ARGUMENT_KEYS = new Set([
+  'path',
+  'paths',
+  'files',
+  'file_path',
+  'file_paths',
+  'cwd',
+  'output_dir',
+  'directory',
+  'directories',
+  'image',
+  'images',
+  'image_path',
+  'firstFrame',
+  'lastFrame',
+  'referenceImages',
+]);
+const CAMEL_CASE_PATH_ARGUMENT_KEY = /(?:Path|Paths|Dir|Directory|Directories)$/;
 
 export type PiSecurityExtensionConfig = {
   enabled?: boolean;
@@ -349,11 +367,11 @@ function grantSignature(
   const normalize = (value: JsonValue, key?: string): JsonValue => {
     if (
       typeof value === 'string' &&
-      ['path', 'file_path', 'cwd', 'output_dir', 'directory'].includes(key ?? '')
+      (PATH_ARGUMENT_KEYS.has(key ?? '') || CAMEL_CASE_PATH_ARGUMENT_KEY.test(key ?? ''))
     ) {
       return canonicalizeSecurityPath(ctx.cwd, value);
     }
-    if (Array.isArray(value)) return value.map((item) => normalize(item));
+    if (Array.isArray(value)) return value.map((item) => normalize(item, key));
     if (value && typeof value === 'object') {
       const sorted: JsonObject = {};
       for (const childKey of Object.keys(value).sort()) {

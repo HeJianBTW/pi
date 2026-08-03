@@ -122,6 +122,23 @@ describe('createMem0Tools', () => {
     const tools = createMem0Tools(mockProvider(), 'u');
     expect(tools.map((t) => t.name)).toEqual(['mem0_search', 'mem0_profile', 'mem0_save']);
   });
+
+  it('bounds text returned by external providers', async () => {
+    const provider = mockProvider({
+      getAll: vi.fn().mockResolvedValue([{ id: '1', memory: 'x'.repeat(100 * 1024) }]),
+    });
+    const tool = createMem0Tools(provider, 'u').find(
+      (candidate) => candidate.name === 'mem0_profile',
+    )!;
+
+    const result = await tool.execute('c', {});
+    const text = (result.content[0] as { text: string }).text;
+    const parsed = JSON.parse(text);
+
+    expect(Buffer.byteLength(text, 'utf8')).toBeLessThan(50 * 1024);
+    expect(parsed).toMatchObject({ truncated: true });
+    expect(parsed.preview).toContain('[UNTRUSTED MEMORY DATA]');
+  });
 });
 
 describe('mem0_search tool', () => {

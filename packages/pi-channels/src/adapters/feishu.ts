@@ -525,8 +525,8 @@ export function createFeishuAdapter(
 
     if (server) return;
     const incoming = cfg.incoming ?? {};
-    if (!optionalNonEmptyString(cfg.verificationToken) && !optionalNonEmptyString(cfg.encryptKey)) {
-      throw new Error('Feishu HTTP mode requires verificationToken or encryptKey');
+    if (!optionalNonEmptyString(cfg.encryptKey)) {
+      throw new Error('Feishu HTTP mode requires encryptKey for event signature verification');
     }
     const host = incoming.host ?? '127.0.0.1';
     const port = incoming.port ?? 8787;

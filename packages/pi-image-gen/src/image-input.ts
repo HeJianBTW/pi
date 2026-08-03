@@ -1,6 +1,6 @@
 import { constants } from 'node:fs';
 import { lstat, open, realpath } from 'node:fs/promises';
-import { isAbsolute, relative, resolve } from 'node:path';
+import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { readResponseBytes, safeFetch } from '@amaster.ai/pi-shared';
 import { describeDownloadError, ImageGenError, throwDownloadHttpError } from './errors.js';
 import type { ResolvedImageInput } from './types.js';
@@ -113,7 +113,7 @@ async function resolveOne(
   const lexicalRoot = resolve(cwd);
   const root = await realpath(cwd).catch(() => resolve(cwd));
   const pathFromRoot = relative(lexicalRoot, absolute);
-  if (pathFromRoot.startsWith('..') || isAbsolute(pathFromRoot)) {
+  if (pathFromRoot === '..' || pathFromRoot.startsWith(`..${sep}`) || isAbsolute(pathFromRoot)) {
     throw new ImageGenError(
       `${inputLabel} must be inside the approved project directory.`,
       `${logLabel} rejected (outside cwd)`,
@@ -159,7 +159,8 @@ async function resolveOne(
       const canonicalInfo = await lstat(canonical);
       const canonicalFromRoot = relative(root, canonical);
       if (
-        canonicalFromRoot.startsWith('..') ||
+        canonicalFromRoot === '..' ||
+        canonicalFromRoot.startsWith(`..${sep}`) ||
         isAbsolute(canonicalFromRoot) ||
         canonicalInfo.dev !== openedInfo.dev ||
         canonicalInfo.ino !== openedInfo.ino

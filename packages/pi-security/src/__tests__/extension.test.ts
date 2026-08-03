@@ -8,7 +8,11 @@ import type {
   ToolCallEventResult,
 } from '@earendil-works/pi-coding-agent';
 import { describe, expect, it, vi } from 'vitest';
-import piSecurityExtension, { resolvePiSecurityConfig } from '../extension.js';
+import piSecurityExtension, {
+  authorizePiToolCall,
+  type PiSecurityExtensionState,
+  resolvePiSecurityConfig,
+} from '../extension.js';
 
 describe('pi security extension', () => {
   it('resolves conservative extension defaults', () => {
@@ -91,6 +95,87 @@ describe('pi security extension', () => {
       )) as ToolCallEventResult;
 
       expect(changed.block).toBe(true);
+      expect(select).toHaveBeenCalledTimes(2);
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+      await rm(firstTarget, { recursive: true, force: true });
+      await rm(secondTarget, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    {
+      label: 'path array',
+      toolName: 'mcp__filesystem__read_multiple_files',
+      input: { paths: ['linked/file.txt'] },
+    },
+    {
+      label: 'browser file array alias',
+      toolName: 'mcp__cua__browser_set_input_files',
+      input: { files: ['linked/upload.txt'] },
+    },
+    {
+      label: 'camelCase path alias',
+      toolName: 'image_generate',
+      input: { outputDir: 'linked' },
+    },
+    {
+      label: 'video frame path alias',
+      toolName: 'video_generate',
+      input: {
+        firstFrame: 'linked/frame.png',
+        lastFrame: 'linked/tail.png',
+        referenceImages: ['linked/reference.png'],
+      },
+    },
+    {
+      label: 'snake_case image path alias',
+      toolName: 'mcp__cua__set_cursor_style',
+      input: { image_path: 'linked/cursor.png' },
+    },
+  ])('does not reuse a session grant when a $label symlink is retargeted', async (testCase) => {
+    const cwd = await mkdtemp(join(tmpdir(), 'pi-security-grant-array-'));
+    const firstTarget = await mkdtemp(join(tmpdir(), 'pi-security-target-array-a-'));
+    const secondTarget = await mkdtemp(join(tmpdir(), 'pi-security-target-array-b-'));
+    const link = join(cwd, 'linked');
+    try {
+      await symlink(firstTarget, link, 'dir');
+      const select = vi
+        .fn()
+        .mockResolvedValueOnce('Allow similar for this session')
+        .mockResolvedValueOnce('Deny');
+      const ctx = createContext({ cwd, select });
+      const state: PiSecurityExtensionState = {
+        config: {
+          enabled: true,
+          profile: 'grant-test',
+          security: {
+            profiles: {
+              'grant-test': {
+                defaultDecision: { kind: 'ask', reason: 'Test approval required.' },
+              },
+            },
+          },
+          auditLimit: 200,
+          allowSessionGrants: true,
+        },
+        auditLog: [],
+        grants: [],
+      };
+      const event = (toolCallId: string): ToolCallEvent =>
+        ({
+          type: 'tool_call',
+          toolCallId,
+          toolName: testCase.toolName,
+          input: testCase.input,
+        }) as ToolCallEvent;
+
+      await expect(authorizePiToolCall(event('tool-1'), ctx, state)).resolves.toBeUndefined();
+      await unlink(link);
+      await symlink(secondTarget, link, 'dir');
+      const changed = await authorizePiToolCall(event('tool-2'), ctx, state);
+
+      expect(changed?.block).toBe(true);
       expect(select).toHaveBeenCalledTimes(2);
     } finally {
       await rm(cwd, { recursive: true, force: true });

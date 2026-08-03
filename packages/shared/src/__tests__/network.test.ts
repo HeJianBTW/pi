@@ -11,6 +11,7 @@ describe('network', () => {
     'http://10.0.0.1/private',
     'http://[::1]/private',
     'http://[fec0::1]/private',
+    'http://[64:ff9b:1::a00:1]/private',
     'http://[::ffff:127.0.0.1]/private',
     'http://[::ffff:169.254.169.254]/latest/meta-data',
     'file:///etc/passwd',

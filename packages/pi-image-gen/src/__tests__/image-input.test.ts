@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -49,6 +49,16 @@ describe('resolveImageInputs', () => {
     writeFileSync(join(dir, 'b.jpg'), JPEG_BYTES);
     const out = await resolveImageInputs(['./b.jpg'], dir, fetch);
     expect(out[0]?.mimeType).toBe('image/jpeg');
+  });
+
+  it('allows a dot-prefixed child directory whose name starts with two dots', async () => {
+    const dir = makeTempDir();
+    mkdirSync(join(dir, '..frames'));
+    writeFileSync(join(dir, '..frames', 'frame.png'), PNG_BYTES);
+
+    const out = await resolveImageInputs(['..frames/frame.png'], dir, fetch);
+
+    expect(out[0]?.mimeType).toBe('image/png');
   });
 
   it('rejects a local path that escapes cwd', async () => {

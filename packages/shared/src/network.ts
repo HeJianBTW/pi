@@ -1,7 +1,7 @@
 import { lookup as nodeLookup } from 'node:dns/promises';
 import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
-import { isIP } from 'node:net';
+import { BlockList, isIP } from 'node:net';
 import { Readable } from 'node:stream';
 
 export type DnsLookup = (hostname: string) => Promise<Array<{ address: string; family: number }>>;
@@ -9,6 +9,8 @@ export type DnsLookup = (hostname: string) => Promise<Array<{ address: string; f
 const defaultLookup: DnsLookup = async (hostname) =>
   nodeLookup(hostname, { all: true, verbatim: true });
 const platformFetch = globalThis.fetch;
+const localUseAddresses = new BlockList();
+localUseAddresses.addSubnet('64:ff9b:1::', 48, 'ipv6');
 
 function isPublicIpv4(address: string): boolean {
   const octets = address.split('.').map(Number);
@@ -45,6 +47,7 @@ function isPublicIp(address: string): boolean {
   const family = isIP(normalized);
   if (family === 4) return isPublicIpv4(normalized);
   if (family !== 6) return false;
+  if (localUseAddresses.check(normalized, 'ipv6')) return false;
   if (
     normalized === '::' ||
     normalized === '::1' ||

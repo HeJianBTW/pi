@@ -255,17 +255,32 @@ describe('Feishu adapter', () => {
     });
 
     await expect(adapter.start?.(vi.fn())).rejects.toThrow(
-      'Feishu HTTP mode requires verificationToken or encryptKey',
+      'Feishu HTTP mode requires encryptKey for event signature verification',
     );
   });
 
-  it('allows authenticated HTTP mode and binds to loopback by default', async () => {
+  it('rejects HTTP mode with only a verification token', async () => {
     const adapter = createFeishuAdapter({
       type: 'feishu',
       appId: 'cli_xxx',
       appSecret: 'secret',
       eventMode: 'http',
       verificationToken: 'verify-me',
+      incoming: { port: 0 },
+    });
+
+    await expect(adapter.start?.(vi.fn())).rejects.toThrow(
+      'Feishu HTTP mode requires encryptKey for event signature verification',
+    );
+  });
+
+  it('allows signed HTTP mode and binds to loopback by default', async () => {
+    const adapter = createFeishuAdapter({
+      type: 'feishu',
+      appId: 'cli_xxx',
+      appSecret: 'secret',
+      eventMode: 'http',
+      encryptKey: 'encrypt-me',
       incoming: { port: 0 },
     });
 

@@ -101,7 +101,8 @@ public callback URL:
 
 Use HTTP callback mode when the deployment already exposes a Feishu event URL.
 The SDK handles challenge responses, token verification, and encrypted event
-payloads:
+payloads. `encryptKey` is required in HTTP mode because it is used to verify
+ordinary event signatures; `verificationToken` alone is not sufficient:
 
 ```json
 {
