@@ -66,7 +66,7 @@ export default function piImageGenExtension(pi: ExtensionAPI): void {
       name: 'image_generate',
       label: 'ImageGen',
       description:
-        'Generate or edit images. The image model is fixed by pi-image-gen.defaultModel in settings (this tool does not accept a model parameter). Pass `image` to do image-to-image / edit / style transfer / character preservation: a regular image file inside the session cwd (absolute or relative) or a public http(s) URL. To iterate on a previous result, pass its file path back when it is inside cwd. Do NOT pass base64 or data: URIs — write bytes to a file under cwd first. Saves the output to disk and returns the absolute path(s). When reporting the result to the user, render each generated image as inline markdown `![alt](absolute_path)` (the tool result already includes a copy-pasteable line) so the UI can display it; do not just paste the bare path. Run /image-gen list to see the active model.',
+        'Generate or edit images. The image model is fixed by pi-image-gen.defaultModel in settings (this tool does not accept a model parameter). Pass `image` to do image-to-image / edit / style transfer / character preservation: a regular image file inside the session cwd (absolute or relative) or a public http(s) URL. To iterate on a previous result, pass its file path back when it is inside cwd. Do NOT pass base64 or data: URIs — write bytes to a file under cwd first. Saves the output to disk and returns the absolute path(s). When reporting the result to the user, render each generated image as inline markdown — copy the `![alt](…)` line(s) from the tool result verbatim so the UI can display it; do not just paste the bare path. Run /image-gen list to see the active model.',
       promptSnippet:
         'Generate or edit raster images (photos, illustrations, textures, mockups). Not for icons/logos/diagrams that should be repo-native SVG/CSS/canvas.',
       promptGuidelines: buildImageGuidelines(caps),
@@ -313,11 +313,56 @@ export function formatToolResultText(result: ImageGenResult): string {
     '',
     ...result.images.flatMap((img) => {
       const alt = altFromPath(img.path);
-      const md = `![${alt}](${img.path})`;
+      const md = `![${alt}](${markdownImageUrl(img.path)})`;
       return img.revisedPrompt ? [md, `> revised prompt: ${img.revisedPrompt}`] : [md];
     }),
   ];
   return lines.join('\n');
+}
+
+/**
+ * Markdown-safe image URL for a saved absolute path — valid CommonMark for
+ * any host renderer (desktop, TUI, CLI alike):
+ * - Windows drive-letter paths (`C:\…`) become percent-encoded
+ *   `file:///C:/…` URLs — markdown URL sanitizers read `C:` as an unknown
+ *   URI scheme and strip the img `src` otherwise.
+ * - POSIX paths stay bare absolute paths; only markdown/URL-unsafe
+ *   characters are percent-escaped, so clean paths stay byte-identical.
+ * Hand-rolled (not pathToFileURL) so the Windows case behaves the same on
+ * every OS and stays testable off-Windows.
+ */
+export function markdownImageUrl(absolutePath: string): string {
+  const drive = /^([A-Za-z]:)[\\/]/.exec(absolutePath)?.[1];
+  if (!drive) return escapeMarkdownUnsafe(absolutePath);
+  const segments = absolutePath
+    .slice(3)
+    .split(/[\\/]+/)
+    .filter(Boolean)
+    .map(encodeUrlSegment);
+  return `file:///${drive}/${segments.join('/')}`;
+}
+
+/**
+ * file:// URLs must be ASCII, so Windows path segments get full
+ * percent-encoding; ( ) additionally need escaping (encodeURIComponent
+ * leaves them) or they unbalance the markdown link destination.
+ */
+function encodeUrlSegment(segment: string): string {
+  return encodeURIComponent(segment).replace(/[()]/g, hexEscape);
+}
+
+/**
+ * Escape just the characters that break a bare path inside a markdown link
+ * destination or a URL parse: whitespace, # ? % < > and ( ). Everything else
+ * — including CJK — passes through byte-identical, so POSIX paths that render
+ * inline today keep their exact current output.
+ */
+function escapeMarkdownUnsafe(path: string): string {
+  return path.replace(/[\s#%()?<>]/g, hexEscape);
+}
+
+function hexEscape(ch: string): string {
+  return `%${ch.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`;
 }
 
 /**

@@ -32,8 +32,14 @@ jobs:
   build-video-ffmpeg:
     name: build pi-video-gen FFmpeg (${{ matrix.target }})
     strategy:
+      fail-fast: false
       matrix:
         include:
+          # darwin targets need macOS hosts; linux-* targets keep the pinned
+          # ubuntu-22.04 image for the published glibc baseline. win32-x64
+          # produces PE binaries via mingw (host-glibc-agnostic), so it runs
+          # on the accelerated self-hosted runner for reliable source
+          # downloads (ffmpeg.org, zlib.net, code.videolan.org).
           - target: darwin-arm64
             runner: macos-15
           - target: darwin-x64
@@ -43,7 +49,7 @@ jobs:
           - target: linux-arm64
             runner: ubuntu-22.04
           - target: win32-x64
-            runner: ubuntu-24.04
+            runner: [instance-hnpsq9go, linux, x64]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
 
@@ -66,16 +72,46 @@ jobs:
               sudo apt-get install -y gcc-aarch64-linux-gnu pkg-config qemu-user
               ;;
             win32-x64)
-              sudo apt-get update
-              sudo apt-get install -y gcc-mingw-w64-x86-64 nasm pkg-config wine64
+              # The self-hosted runner has Docker access but intentionally has
+              # no passwordless sudo. Install the cross toolchain inside an
+              # ephemeral container without mutating the host.
+              win_container="pi-video-gen-win32-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+              docker pull ubuntu:22.04
+              docker run --detach --rm --name "$win_container" \
+                --env HTTP_PROXY --env HTTPS_PROXY --env NO_PROXY \
+                --env http_proxy --env https_proxy --env no_proxy \
+                --volume "$GITHUB_WORKSPACE:/workspace" --workdir /workspace \
+                ubuntu:22.04 sleep infinity
+              docker exec "$win_container" sh -c '
+                export DEBIAN_FRONTEND=noninteractive
+                apt-get update
+                apt-get install -y --no-install-recommends \
+                  ca-certificates curl gcc gcc-mingw-w64-x86-64 libc6-dev make nasm pkg-config wine64 xz-utils
+              '
+              docker exec "$win_container" install -d \
+                -o "$(id -u)" -g "$(id -g)" /tmp/runner-home
               ;;
           esac
 
       - name: Build minimal LGPL FFmpeg
-        run: packages/pi-video-gen/scripts/build-ffmpeg.sh "${{ matrix.target }}"
+        run: |
+          if [ "${{ matrix.target }}" = win32-x64 ]; then
+            win_container="pi-video-gen-win32-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+            docker exec --user "$(id -u):$(id -g)" --env HOME=/tmp/runner-home \
+              "$win_container" packages/pi-video-gen/scripts/build-ffmpeg.sh win32-x64
+          else
+            packages/pi-video-gen/scripts/build-ffmpeg.sh "${{ matrix.target }}"
+          fi
 
       - name: Build GPL FFmpeg variant (x264 for h264)
-        run: GPL_VARIANT=1 packages/pi-video-gen/scripts/build-ffmpeg.sh "${{ matrix.target }}"
+        run: |
+          if [ "${{ matrix.target }}" = win32-x64 ]; then
+            win_container="pi-video-gen-win32-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+            docker exec --user "$(id -u):$(id -g)" --env HOME=/tmp/runner-home --env GPL_VARIANT=1 \
+              "$win_container" packages/pi-video-gen/scripts/build-ffmpeg.sh win32-x64
+          else
+            GPL_VARIANT=1 packages/pi-video-gen/scripts/build-ffmpeg.sh "${{ matrix.target }}"
+          fi
 
       - name: Verify FFmpeg binary
         shell: bash
@@ -84,13 +120,18 @@ jobs:
           gpl="packages/pi-video-gen/platforms/ffmpeg-${{ matrix.target }}/bin/ffmpeg-gpl"
           probe="${bin%/*}/ffprobe"
           gpl_probe="${gpl%/*}/ffprobe-gpl"
+          win_container="pi-video-gen-win32-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          run_win_container() {
+            docker exec --user "$(id -u):$(id -g)" --env HOME=/tmp/runner-home --env WINEDEBUG=-all \
+              "$win_container" "$@"
+          }
           run_ffmpeg() {
             executable="$1"
             shift
             case "${{ matrix.target }}" in
               darwin-*|linux-x64) "$executable" "$@" ;;
               linux-arm64) qemu-aarch64 -L /usr/aarch64-linux-gnu "$executable" "$@" ;;
-              win32-x64) WINEDEBUG=-all /usr/lib/wine/wine64 "${executable}.exe" "$@" ;;
+              win32-x64) run_win_container /usr/lib/wine/wine64 "${executable}.exe" "$@" ;;
             esac
           }
           case "${{ matrix.target }}" in
@@ -116,27 +157,22 @@ jobs:
               aarch64-linux-gnu-readelf -h "$bin" | grep -q 'AArch64'
               ;;
             win32-x64)
-              WINEDEBUG=-all /usr/lib/wine/wine64 "${bin}.exe" -version
-              WINEDEBUG=-all /usr/lib/wine/wine64 "${probe}.exe" -version
-              WINEDEBUG=-all /usr/lib/wine/wine64 "${gpl}.exe" -version
-              WINEDEBUG=-all /usr/lib/wine/wine64 "${gpl_probe}.exe" -version
-              x86_64-w64-mingw32-objdump -f "${bin}.exe" | grep -q 'pei-x86-64'
+              run_win_container /usr/lib/wine/wine64 "${bin}.exe" -version
+              run_win_container /usr/lib/wine/wine64 "${probe}.exe" -version
+              run_win_container /usr/lib/wine/wine64 "${gpl}.exe" -version
+              run_win_container /usr/lib/wine/wine64 "${gpl_probe}.exe" -version
+              run_win_container x86_64-w64-mingw32-objdump -f "${bin}.exe" | grep -q 'pei-x86-64'
               ;;
           esac
-          python3 - <<'PY'
-          import base64
-          from pathlib import Path
-          Path("timeline-smoke.jpg").write_bytes(base64.b64decode(
-              "/9j/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAAIAAgDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAf/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAABAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCEALQD/9k="
-          ))
-          Path("timeline-smoke.srt").write_text(
-              "1\n00:00:00,000 --> 00:00:00,500\nTimeline smoke\n",
-              encoding="utf-8",
-          )
-          PY
+          cat > timeline-smoke.srt <<'EOF'
+          1
+          00:00:00,000 --> 00:00:00,500
+          Timeline smoke
+          EOF
           smoke_args=(
-            -loop 1 -framerate 25 -t 0.5 -i timeline-smoke.jpg
-            -loop 1 -framerate 25 -t 0.5 -i timeline-smoke.jpg
+            -nostdin -xerror
+            -loop 1 -framerate 25 -t 0.5 -i packages/pi-video-gen/preview.png
+            -loop 1 -framerate 25 -t 0.5 -i packages/pi-video-gen/preview.png
             -loop 1 -framerate 25 -t 0.5 -i packages/pi-video-gen/preview.png
             -f lavfi -i anullsrc=r=48000:cl=stereo
             -f lavfi -i anullsrc=r=48000:cl=stereo
@@ -172,6 +208,10 @@ jobs:
           run_ffmpeg "$bin" -ss 0.2 \
             -i "mixed-media-smoke-${{ matrix.target }}.mp4" \
             -frames:v 1 -y timeline-smoke-qc.png
+
+      - name: Stop Windows build container
+        if: always() && matrix.target == 'win32-x64'
+        run: docker rm --force "pi-video-gen-win32-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" || true
 
       - name: Preserve executable permissions
         run: |
@@ -517,11 +557,29 @@ jobs:
           fi
           git push origin "refs/tags/${tag_name}"
 
+      - name: Generate release summary
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PI_INTEGRATION_API_KEY: ${{ secrets.PI_INTEGRATION_API_KEY }}
+          PI_INTEGRATION_BASE_URL: ${{ secrets.PI_INTEGRATION_BASE_URL }}
+          PUBLISHED_PACKAGES: ${{ steps.versioning.outputs.publish_filters }}
+          RELEASE_CHANNEL: ${{ inputs.npm_tag }}
+          RELEASE_VERSION: ${{ steps.versioning.outputs.release_version }}
+        run: |
+          tag_name="v${RELEASE_VERSION}"
+          if gh release view "${tag_name}" >/dev/null 2>&1; then
+            echo "GitHub release ${tag_name} already exists; skipping summary generation."
+            exit 0
+          fi
+          node .github/scripts/generate-release-summary.mjs \
+            --version "${RELEASE_VERSION}" \
+            --channel "${RELEASE_CHANNEL}" \
+            --output .release-notes.md
+
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ steps.versioning.outputs.release_version }}
-          RELEASE_CHANNEL: ${{ inputs.npm_tag }}
         run: |
           tag_name="v${RELEASE_VERSION}"
           if gh release view "${tag_name}" >/dev/null 2>&1; then
@@ -531,7 +589,7 @@ jobs:
           gh release create "${tag_name}" \
             --verify-tag \
             --title "v${RELEASE_VERSION}" \
-            --notes "Published npm packages with dist-tag \`${RELEASE_CHANNEL}\`."
+            --notes-file .release-notes.md
 
   notify-feishu:
     name: notify feishu

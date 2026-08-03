@@ -538,6 +538,10 @@ jobs:
           fi
           pi list
 
+      - name: Verify computer-use daemon follows abrupt owner exit
+        if: matrix.extension == 'pi-computer-use'
+        run: node tests/computer-use-owner-exit.mjs
+
       - name: Compose preview video (pi-video-gen only)
         if: matrix.extension == 'pi-video-gen'
         run: |

@@ -8,7 +8,7 @@ export type PiSettingsOptions = {
   configDir?: string;
   /** Whether project-local settings and policies may be read. Defaults to false. */
   projectTrusted?: boolean;
-  /** Also expand bare $ENV_VAR references in global and agent-dir settings. */
+  /** Whether to expand bare $ENV_VAR references in global and agent-dir settings. Defaults to true. */
   expandBareEnvVars?: boolean;
   /** Refuse malformed/unreadable trusted project settings instead of ignoring them. */
   strictProjectSettings?: boolean;
@@ -117,7 +117,7 @@ export function loadPiSettings<T>(key: string, options?: PiSettingsOptions): T {
 
   const globalSettings = readSettingsSection<T>(join(globalDir, 'settings.json'), key, {
     expandEnv: true,
-    expandBareEnvVars: options?.expandBareEnvVars === true,
+    expandBareEnvVars: options?.expandBareEnvVars !== false,
   });
 
   const configSettings =
@@ -125,7 +125,7 @@ export function loadPiSettings<T>(key: string, options?: PiSettingsOptions): T {
       ? ({} as Partial<T>)
       : readSettingsSection<T>(join(configDir, 'settings.json'), key, {
           expandEnv: true,
-          expandBareEnvVars: options?.expandBareEnvVars === true,
+          expandBareEnvVars: options?.expandBareEnvVars !== false,
         });
 
   const projectSettings =

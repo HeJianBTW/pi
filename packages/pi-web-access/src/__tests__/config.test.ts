@@ -94,6 +94,18 @@ describe('resolveProvider', () => {
     }
   });
 
+  it('resolves deepseek with env var and default model', () => {
+    process.env.DEEPSEEK_API_KEY = 'test-deepseek-key';
+    const result = resolveProvider('deepseek', {});
+    expect(result).not.toHaveProperty('error');
+    if (!('error' in result)) {
+      expect(result.id).toBe('deepseek');
+      expect(result.baseUrl).toBe('https://api.deepseek.com');
+      expect(result.apiKey).toBe('test-deepseek-key');
+      expect(result.model).toBe('deepseek-v4-flash');
+    }
+  });
+
   it('settings apiKey overrides env var', () => {
     process.env.TAVILY_API_KEY = 'env-key';
     const settings: WebToolSettings = {

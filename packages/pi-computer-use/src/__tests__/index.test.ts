@@ -110,7 +110,10 @@ vi.mock('node:child_process', () => ({
     };
     child.stderr = new EventEmitter();
     child.kill = vi.fn();
-    queueMicrotask(() => child.emit('exit', 0));
+    queueMicrotask(() => {
+      child.emit('spawn');
+      child.emit('exit', 0);
+    });
     return child;
   }),
   execFile: vi.fn((...args: unknown[]) => {

@@ -37,6 +37,7 @@ const providers: WebProvider[] = [
   new OpenRouterProvider(),
   new XaiProvider(),
   new OpenAIProvider(),
+  new OpenAIProvider('deepseek'),
   new AnthropicProvider(),
 ];
 

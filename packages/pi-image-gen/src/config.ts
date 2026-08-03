@@ -22,7 +22,6 @@ export function loadImageGenSettings(cwd: string, projectTrusted = false): Image
     return loadPiSettings<ImageGenSettings>(SETTINGS_KEY, {
       cwd,
       projectTrusted,
-      expandBareEnvVars: true,
     });
   } catch {
     return {};

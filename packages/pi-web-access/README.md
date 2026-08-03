@@ -52,6 +52,7 @@ Search X (Twitter) for posts and social media content. Only registered when xai 
 | `zai` | ✓ | ✓ | ✗ | `https://api.z.ai` | `ZAI_API_KEY` | - |
 | `gemini` | ✓ | ✗ | ✗ | `https://generativelanguage.googleapis.com/v1beta` | `GEMINI_API_KEY` | `gemini-2.5-flash` |
 | `perplexity` | ✓ | ✓ | ✗ | `https://api.perplexity.ai` | `PERPLEXITY_API_KEY` | `openai/gpt-5.5` |
+| `deepseek` | ✓ | ✗ | ✗ | `https://api.deepseek.com` | `DEEPSEEK_API_KEY` | `deepseek-v4-flash` |
 | `openrouter` | ✓ | ✓ | ✗ | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` | `openai/gpt-4.1-mini` |
 | `xai` | ✓ | ✗ | ✓ | `https://api.x.ai/v1` | `XAI_API_KEY` | `grok-4.3` |
 | `openai` | ✓ | ✗ | ✗ | `https://api.openai.com/v1` | `OPENAI_API_KEY` | `gpt-5.5` |

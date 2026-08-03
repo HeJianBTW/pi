@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { altFromPath, formatCommandSummary, formatToolResultText } from '../index.js';
+import {
+  altFromPath,
+  formatCommandSummary,
+  formatToolResultText,
+  markdownImageUrl,
+} from '../index.js';
 import type { ImageGenResult } from '../types.js';
 
 describe('altFromPath', () => {
@@ -92,6 +97,51 @@ describe('formatToolResultText', () => {
       }),
     );
     expect(text).toContain('Generated 2 image(s) via amaster (custom) (qwen-image-2.0)');
+  });
+
+  it('rewrites Windows paths as file:/// URLs (regression: raw C:\\… loses the img src)', () => {
+    const text = formatToolResultText(
+      makeResult({
+        images: [
+          { path: 'C:\\Users\\tester\\workspace\\images\\result.png', mimeType: 'image/png' },
+        ],
+      }),
+    );
+    expect(text).toContain('![result](file:///C:/Users/tester/workspace/images/result.png)');
+    expect(text).not.toContain('C:\\Users');
+  });
+});
+
+describe('markdownImageUrl', () => {
+  it('rewrites Windows drive paths as file:/// URLs', () => {
+    expect(markdownImageUrl('C:\\Users\\tester\\images\\result.png')).toBe(
+      'file:///C:/Users/tester/images/result.png',
+    );
+    expect(markdownImageUrl('C:/Users/tester/images/result.png')).toBe(
+      'file:///C:/Users/tester/images/result.png',
+    );
+  });
+
+  it('percent-encodes spaces, CJK, # and parens', () => {
+    expect(markdownImageUrl('D:\\我的 图片\\cat (1)#v2.png')).toBe(
+      'file:///D:/%E6%88%91%E7%9A%84%20%E5%9B%BE%E7%89%87/cat%20%281%29%23v2.png',
+    );
+  });
+
+  it('leaves clean POSIX absolute paths byte-identical (they already render inline)', () => {
+    expect(markdownImageUrl('/Users/me/.pi/images/white.png')).toBe(
+      '/Users/me/.pi/images/white.png',
+    );
+  });
+
+  it('escapes markdown-unsafe chars in POSIX paths but leaves CJK untouched', () => {
+    expect(markdownImageUrl('/Users/me/my 图/cat (1)#v2.png')).toBe(
+      '/Users/me/my%20图/cat%20%281%29%23v2.png',
+    );
+  });
+
+  it('pads control-char escapes to two hex digits', () => {
+    expect(markdownImageUrl('/tmp/a\tb.png')).toBe('/tmp/a%09b.png');
   });
 });
 

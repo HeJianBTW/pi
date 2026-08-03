@@ -4,13 +4,15 @@ import type { ResolvedProvider, SearchParams, SearchResponse, SearchResult } fro
 const DEFAULT_TIMEOUT_MS = 60_000;
 
 export class OpenAIProvider extends BaseProvider {
-  readonly id = 'openai' as const;
+  constructor(readonly id: 'openai' | 'deepseek' = 'openai') {
+    super();
+  }
 
   override async search(params: SearchParams, provider: ResolvedProvider): Promise<SearchResponse> {
+    const name = this.id === 'deepseek' ? 'DeepSeek' : 'OpenAI';
+    const envVar = this.id === 'deepseek' ? 'DEEPSEEK_API_KEY' : 'OPENAI_API_KEY';
     if (!provider.apiKey) {
-      throw new Error(
-        'OpenAI API key not configured. Set OPENAI_API_KEY env var or configure in settings.json.',
-      );
+      throw new Error(`${name} API key not configured. Set ${envVar} or configure settings.json.`);
     }
 
     const url = `${provider.baseUrl.replace(/\/$/, '')}/responses`;
@@ -23,7 +25,7 @@ export class OpenAIProvider extends BaseProvider {
     }
 
     const body = {
-      model: provider.model ?? 'gpt-5.5',
+      model: provider.model ?? (this.id === 'deepseek' ? 'deepseek-v4-flash' : 'gpt-5.5'),
       instructions: SEARCH_SYSTEM_PROMPT,
       input: `${getEnvironmentContext()}\n\n${params.query}`,
       tools: [tool],
@@ -42,7 +44,7 @@ export class OpenAIProvider extends BaseProvider {
     });
     if (!response.ok) {
       const text = await response.text().catch(() => '');
-      throw new Error(`OpenAI API error ${response.status}: ${text}`);
+      throw new Error(`${name} API error ${response.status}: ${text}`);
     }
 
     const data = (await response.json()) as {

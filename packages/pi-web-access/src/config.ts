@@ -15,6 +15,7 @@ const DEFAULT_BASE_URL: Record<BuiltInProviderId, string> = {
   zai: 'https://api.z.ai',
   gemini: 'https://generativelanguage.googleapis.com/v1beta',
   perplexity: 'https://api.perplexity.ai',
+  deepseek: 'https://api.deepseek.com',
   openrouter: 'https://openrouter.ai/api/v1',
   xai: 'https://api.x.ai/v1',
   openai: 'https://api.openai.com/v1',
@@ -30,6 +31,7 @@ const ENV_VARS: Record<BuiltInProviderId, string> = {
   zai: 'ZAI_API_KEY',
   gemini: 'GEMINI_API_KEY',
   perplexity: 'PERPLEXITY_API_KEY',
+  deepseek: 'DEEPSEEK_API_KEY',
   openrouter: 'OPENROUTER_API_KEY',
   xai: 'XAI_API_KEY',
   openai: 'OPENAI_API_KEY',
@@ -41,6 +43,7 @@ const DEFAULT_MODEL: Partial<Record<BuiltInProviderId, string>> = {
   mimo: 'mimo-v2.5-pro',
   gemini: 'gemini-2.5-flash',
   perplexity: 'openai/gpt-5.5',
+  deepseek: 'deepseek-v4-flash',
   xai: 'grok-4.3',
   openai: 'gpt-5.5',
   anthropic: 'claude-sonnet-4-6',
@@ -53,7 +56,6 @@ export function loadWebToolSettings(cwd: string, projectTrusted = false): WebToo
     return loadPiSettings<WebToolSettings>(SETTINGS_KEY, {
       cwd,
       projectTrusted,
-      expandBareEnvVars: true,
     });
   } catch {
     return {};
@@ -104,6 +106,7 @@ const ALL_SEARCH_PROVIDER_IDS: BuiltInProviderId[] = [
   'zai',
   'gemini',
   'perplexity',
+  'deepseek',
 ];
 
 /**

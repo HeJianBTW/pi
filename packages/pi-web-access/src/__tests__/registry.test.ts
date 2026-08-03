@@ -30,6 +30,7 @@ describe('getProvider registry', () => {
     'zai',
     'gemini',
     'perplexity',
+    'deepseek',
     'openrouter',
     'xai',
     'openai',
@@ -50,7 +51,7 @@ describe('getProvider registry', () => {
   });
 
   it('search-only providers throw on fetch', async () => {
-    const searchOnly: BuiltInProviderId[] = ['kimi', 'mimo', 'gemini', 'xai', 'openai'];
+    const searchOnly: BuiltInProviderId[] = ['kimi', 'mimo', 'gemini', 'xai', 'openai', 'deepseek'];
     for (const id of searchOnly) {
       const provider = getProvider(id)!;
       await expect(provider.fetch('https://example.com', { id, baseUrl: '' })).rejects.toThrow(

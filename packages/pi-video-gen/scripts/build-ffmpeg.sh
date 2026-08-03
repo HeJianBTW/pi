@@ -12,6 +12,10 @@ X264_SHA256=cd71a7515b0e9a012e1ac9b1f8415bebcaf6fc97d4db32286642ac4c0fbe24f9
 MACOSX_DEPLOYMENT_TARGET=11.0
 SOURCE_URL="https://ffmpeg.org/releases/ffmpeg-${FFMPEG_VERSION}.tar.xz"
 ZLIB_URL="https://zlib.net/fossils/zlib-${ZLIB_VERSION}.tar.gz"
+# zlib.net occasionally serves a bad payload to CI runners; the official
+# madler/zlib GitHub release asset is byte-identical, so try it first and
+# fall back to zlib.net. The pinned hash arbitrates every candidate.
+ZLIB_URLS="https://github.com/madler/zlib/releases/download/v${ZLIB_VERSION}/zlib-${ZLIB_VERSION}.tar.gz $ZLIB_URL"
 X264_URL="https://code.videolan.org/videolan/x264/-/archive/$X264_VERSION/x264-$X264_VERSION.tar.gz"
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PACKAGE_ROOT=$(CDPATH= cd -- "${SCRIPT_DIR}/.." && pwd)/platforms/ffmpeg-"$TARGET"
@@ -24,6 +28,13 @@ verify_sha256() {
   else
     printf '%s  %s\n' "$1" "$2" | shasum -a 256 -c -
   fi
+}
+
+# ffmpeg.org is a single origin host with spotty reachability from CI
+# runners; retry through transient connect failures (curl exit 28) instead
+# of dying on the first attempt. --retry-all-errors needs curl 7.71+.
+fetch() {
+  curl -fsSL --retry 4 --retry-all-errors --connect-timeout 20 "$1" -o "$2"
 }
 
 case "$TARGET" in
@@ -52,13 +63,13 @@ case "$TARGET" in
     ;;
   linux-arm64)
     command -v aarch64-linux-gnu-gcc >/dev/null
-    CROSS_FLAGS="--enable-cross-compile --target-os=linux --arch=aarch64 --cross-prefix=aarch64-linux-gnu-"
+    CROSS_FLAGS="--enable-cross-compile --target-os=linux --arch=aarch64 --cross-prefix=aarch64-linux-gnu- --pkg-config=pkg-config"
     EXECUTABLE=ffmpeg
     RUNTIME_BASELINE="Linux glibc (built on Ubuntu 22.04)"
     ;;
   win32-x64)
     command -v x86_64-w64-mingw32-gcc >/dev/null
-    CROSS_FLAGS="--enable-cross-compile --target-os=mingw32 --arch=x86_64 --cross-prefix=x86_64-w64-mingw32- --extra-ldflags=-static"
+    CROSS_FLAGS="--enable-cross-compile --target-os=mingw32 --arch=x86_64 --cross-prefix=x86_64-w64-mingw32- --pkg-config=pkg-config --extra-ldflags=-static"
     EXECUTABLE=ffmpeg.exe
     RUNTIME_BASELINE="Windows x64"
     ;;
@@ -68,14 +79,21 @@ case "$TARGET" in
     ;;
 esac
 
-curl -fsSL "$SOURCE_URL" -o "$WORK/ffmpeg.tar.xz"
+fetch "$SOURCE_URL" "$WORK/ffmpeg.tar.xz"
 verify_sha256 "$FFMPEG_SHA256" "$WORK/ffmpeg.tar.xz"
 tar -xJf "$WORK/ffmpeg.tar.xz" -C "$WORK"
 
 # PNG support requires zlib. Build the pinned static source for every target
 # so cross builds do not depend on host development packages.
-curl -fsSL "$ZLIB_URL" -o "$WORK/zlib.tar.gz"
-verify_sha256 "$ZLIB_SHA256" "$WORK/zlib.tar.gz"
+zlib_ok=
+for url in $ZLIB_URLS; do
+  if fetch "$url" "$WORK/zlib.tar.gz" && verify_sha256 "$ZLIB_SHA256" "$WORK/zlib.tar.gz"; then
+    zlib_ok=1
+    break
+  fi
+  echo "[build] zlib fetch failed or hash mismatch: $url" >&2
+done
+[ -n "$zlib_ok" ] || { echo "[build] all zlib mirrors failed" >&2; exit 1; }
 tar -xzf "$WORK/zlib.tar.gz" -C "$WORK"
 case "$TARGET" in
   linux-arm64) ZLIB_CHOST=aarch64-linux-gnu ;;
@@ -118,12 +136,21 @@ if [ "${GPL_VARIANT:-}" = "1" ]; then
   # from the pinned videolan snapshot first. The resulting binary is GPL —
   # ship it as bin/ffmpeg-gpl with GPLv2 license files, NEVER as bin/ffmpeg.
   echo "[build] x264 variant: fetching $X264_URL"
-  curl -fsSL "$X264_URL" -o "$WORK/x264.tar.gz"
+  fetch "$X264_URL" "$WORK/x264.tar.gz"
   verify_sha256 "$X264_SHA256" "$WORK/x264.tar.gz"
   tar -xzf "$WORK/x264.tar.gz" -C "$WORK"
+  # x264 derives its toolchain (CC/AR/RANLIB/...) from --cross-prefix; --host
+  # alone only sets the target arch and would build with the HOST compiler.
+  X264_CROSS_FLAGS=
+  if [ -n "$CROSS_FLAGS" ]; then
+    X264_CROSS_PREFIX=$(echo "$CROSS_FLAGS" | sed -n 's/.*--cross-prefix=\([^ ]*\).*/\1/p')
+    [ -n "$X264_CROSS_PREFIX" ] ||
+      { echo "no --cross-prefix found in CROSS_FLAGS: $CROSS_FLAGS" >&2; exit 1; }
+    X264_CROSS_FLAGS="--host=${X264_CROSS_PREFIX%-} --cross-prefix=$X264_CROSS_PREFIX"
+  fi
   (cd "$WORK/x264-$X264_VERSION" && \
     ./configure --prefix="$WORK/x264-install" --enable-static --disable-cli --disable-opencl --bit-depth=8 \
-      ${CROSS_FLAGS:+--host=$(echo "$CROSS_FLAGS" | sed -n 's/.*--cross-prefix=\([^ ]*\)-.*/\1/p')} && \
+      $X264_CROSS_FLAGS && \
     make -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu)" && \
     make install)
   # ffmpeg's configure discovers x264 via pkg-config, not raw cflags.
@@ -134,7 +161,7 @@ if [ "${GPL_VARIANT:-}" = "1" ]; then
 else
   ./configure $FF_CONFIGURE_BASE $ZLIB_FLAGS $CROSS_FLAGS
 fi
-make -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu)" ffmpeg ffprobe
+make -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu)" "ffmpeg${EXECUTABLE#ffmpeg}" "ffprobe${EXECUTABLE#ffmpeg}"
 
 mkdir -p "$PACKAGE_ROOT/bin" "$PACKAGE_ROOT/source"
 cp "$WORK/zlib.tar.gz" "$PACKAGE_ROOT/source/zlib-${ZLIB_VERSION}.tar.gz"

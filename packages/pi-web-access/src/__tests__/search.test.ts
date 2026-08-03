@@ -363,6 +363,50 @@ describe('search', () => {
     expect(result.results[0]!.url).toBe('https://example.com');
   });
 
+  it('uses search.provider deepseek with Responses API web search', async () => {
+    const settings: WebToolSettings = {
+      search: { provider: 'deepseek' },
+      providers: { deepseek: { apiKey: 'deepseek-key' } },
+    };
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        output: [
+          {
+            type: 'message',
+            content: [
+              {
+                type: 'output_text',
+                text: 'DeepSeek answer',
+                annotations: [
+                  { type: 'url_citation', url: 'https://example.com', title: 'Example' },
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+    });
+
+    const result = await search({ query: 'test query' }, settings);
+
+    expect(result).toEqual({
+      provider: 'deepseek',
+      query: 'test query',
+      answer: 'DeepSeek answer',
+      results: [{ title: 'Example', url: 'https://example.com', content: '' }],
+    });
+    const [url, options] = mockFetch.mock.calls[0]!;
+    expect(url).toBe('https://api.deepseek.com/responses');
+    expect(options.headers.Authorization).toBe('Bearer deepseek-key');
+    expect(JSON.parse(options.body)).toEqual(
+      expect.objectContaining({
+        model: 'deepseek-v4-flash',
+        tools: [{ type: 'web_search' }],
+      }),
+    );
+  });
+
   it('uses search.provider zai', async () => {
     const settings: WebToolSettings = {
       search: { provider: 'zai' },
