@@ -50,14 +50,14 @@ function createMockPi() {
   };
 }
 
-function createMockCtx(cwd = '/tmp') {
+function createMockCtx(cwd = '/tmp', sessionId = 'test-session-1') {
   return {
     cwd,
     ui: {
       setStatus: vi.fn(),
       notify: vi.fn(),
     },
-    sessionManager: { getSessionId: () => 'test-session-1' },
+    sessionManager: { getSessionId: () => sessionId },
     model: { id: 'test-model' },
   };
 }
@@ -104,10 +104,13 @@ class MemLock implements SchedulerLock {
   }
 }
 
-async function setupExtension(injectedConfig?: Record<string, unknown>) {
+async function setupExtension(
+  injectedConfig?: Record<string, unknown>,
+  sessionId = 'test-session-1',
+) {
   const { default: taskSchedulerExtension } = await import('../extension.js');
   const pi = createMockPi();
-  const ctx = createMockCtx();
+  const ctx = createMockCtx('/tmp', sessionId);
 
   taskSchedulerExtension(pi as any, injectedConfig as any);
 
@@ -138,6 +141,84 @@ describe('extension — default file storage mode', () => {
     expect(ctx.ui.setStatus).toHaveBeenCalledWith('pi-scheduler', 'scheduler: active');
   });
 
+  it('keeps concurrent session files independent', async () => {
+    const { mkdtemp, rm, writeFile } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const dataDir = await mkdtemp(join(tmpdir(), 'pi-task-scheduler-sessions-'));
+    const started: Array<Awaited<ReturnType<typeof setupExtension>>> = [];
+
+    try {
+      const now = new Date().toISOString();
+      await writeFile(
+        join(dataDir, 'tasks.json'),
+        JSON.stringify([
+          {
+            id: 'legacy-a',
+            sessionId: 'session-a',
+            prompt: 'legacy session-a task',
+            type: 'interval',
+            schedule: '1h',
+            intervalSeconds: 3_600,
+            enabled: false,
+            model: { provider: 'test', model: 'test-model' },
+            toolPolicyProfile: 'default',
+            createdAt: now,
+            updatedAt: now,
+            runCount: 0,
+          },
+        ]),
+      );
+      const sessionA = await setupExtension({ dataDir }, 'session-a');
+      const sessionB = await setupExtension({ dataDir }, 'session-b');
+      started.push(sessionA, sessionB);
+
+      await sessionA.pi.tools
+        .get('scheduler_create')!
+        .execute(
+          'create-a',
+          { type: 'interval', schedule: '1h', prompt: 'session-a task', enabled: false },
+          undefined,
+          undefined,
+          createMockCtx('/tmp', 'session-a'),
+        );
+      await sessionB.pi.tools
+        .get('scheduler_create')!
+        .execute(
+          'create-b',
+          { type: 'interval', schedule: '1h', prompt: 'session-b task', enabled: false },
+          undefined,
+          undefined,
+          createMockCtx('/tmp', 'session-b'),
+        );
+
+      for (const instance of started.splice(0)) {
+        for (const handler of instance.pi.eventHandlers.session_shutdown ?? []) {
+          await handler({}, instance.ctx);
+        }
+      }
+
+      const restartedA = await setupExtension({ dataDir }, 'session-a');
+      started.push(restartedA);
+      const result = (await restartedA.pi.tools
+        .get('scheduler_list')!
+        .execute('list-a', {}, undefined, undefined, createMockCtx('/tmp', 'session-a'))) as {
+        content: Array<{ text: string }>;
+      };
+
+      expect(result.content[0]!.text).toContain('session-a task');
+      expect(result.content[0]!.text).toContain('legacy session-a task');
+      expect(result.content[0]!.text).not.toContain('session-b task');
+    } finally {
+      for (const instance of started) {
+        for (const handler of instance.pi.eventHandlers.session_shutdown ?? []) {
+          await handler({}, instance.ctx);
+        }
+      }
+      await rm(dataDir, { recursive: true, force: true });
+    }
+  });
+
   it('scheduler_list returns empty when no tasks', async () => {
     const { pi } = await setupExtension({ dataDir: '/tmp/pi-test-ext' });
 
@@ -145,6 +226,62 @@ describe('extension — default file storage mode', () => {
     const result = (await tool.execute('id', {}, undefined, undefined, createMockCtx())) as any;
 
     expect(result.content[0].text).toBe('No scheduled tasks.');
+  });
+
+  it('dispatches a recorded prompt only while its owning session is active', async () => {
+    const store = new MemStore();
+    const { pi, ctx } = await setupExtension({ store, lock: new MemLock() });
+    const toolCtx = createMockCtx();
+    const createResult = (await pi.tools
+      .get('scheduler_create')!
+      .execute(
+        'create',
+        { type: 'interval', schedule: '1h', prompt: 'session-owned prompt' },
+        undefined,
+        undefined,
+        toolCtx,
+      )) as any;
+    const taskId = JSON.parse(createResult.content[0].text).id;
+
+    await pi.tools
+      .get('scheduler_run_now')!
+      .execute('run', { taskId }, undefined, undefined, toolCtx);
+    await vi.waitFor(() => {
+      expect(pi.sendUserMessage).toHaveBeenCalledWith('session-owned prompt');
+    });
+
+    for (const handler of pi.eventHandlers.session_shutdown ?? []) {
+      await handler({}, ctx);
+    }
+  });
+
+  it('does not dispatch a recorded prompt into a different active session', async () => {
+    const store = new MemStore();
+    const { pi, ctx } = await setupExtension({ store, lock: new MemLock() });
+    const ownerCtx = createMockCtx();
+    const createResult = (await pi.tools
+      .get('scheduler_create')!
+      .execute(
+        'create',
+        { type: 'interval', schedule: '1h', prompt: 'do not cross sessions' },
+        undefined,
+        undefined,
+        ownerCtx,
+      )) as any;
+    const taskId = JSON.parse(createResult.content[0].text).id;
+    ctx.sessionManager.getSessionId = () => 'different-session';
+
+    await pi.tools
+      .get('scheduler_run_now')!
+      .execute('run', { taskId }, undefined, undefined, ownerCtx);
+    await vi.waitFor(() => {
+      expect(store.tasks.get(taskId)?.lastStatus).toBe('error');
+    });
+
+    expect(pi.sendUserMessage).not.toHaveBeenCalled();
+    for (const handler of pi.eventHandlers.session_shutdown ?? []) {
+      await handler({}, ctx);
+    }
   });
 });
 
@@ -300,7 +437,7 @@ describe('extension — tool operations with injected scheduler', () => {
 
     const updateResult = (await updateTool.execute(
       'id',
-      { taskId, prompt: 'updated', enabled: false },
+      { taskId, prompt: 'updated', enabled: false, sessionId: 'attacker-session' },
       undefined,
       undefined,
       ctx,
@@ -308,6 +445,9 @@ describe('extension — tool operations with injected scheduler', () => {
     const updated = JSON.parse(updateResult.content[0].text);
     expect(updated.prompt).toBe('updated');
     expect(updated.enabled).toBe(false);
+    await expect(externalScheduler.get(taskId)).resolves.toMatchObject({
+      sessionId: 'test-session-1',
+    });
   });
 
   it('scheduler_delete removes a task', async () => {

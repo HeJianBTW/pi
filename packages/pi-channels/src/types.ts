@@ -36,7 +36,7 @@ export type OnIncomingMessage = (message: IncomingMessage) => void | Promise<voi
 
 export type ChannelAdapter = {
   direction: AdapterDirection;
-  send?(message: ChannelMessage): Promise<void>;
+  send?(message: ChannelMessage, signal?: AbortSignal): Promise<void>;
   start?(onMessage: OnIncomingMessage): Promise<void>;
   stop?(): Promise<void>;
   sendTyping?(recipient: string): Promise<void>;

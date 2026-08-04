@@ -4,7 +4,15 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { generateImage } from '../generate.js';
+import { MAX_BASE64_IMAGE_CHARS } from '../image-input.js';
 import type { ImageGenSettings } from '../types.js';
+
+const { safeFetchMock } = vi.hoisted(() => ({ safeFetchMock: vi.fn() }));
+
+vi.mock('@amaster.ai/pi-shared', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  safeFetch: safeFetchMock,
+}));
 
 const PNG_BYTES = Buffer.from(
   '89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d49444154789c63000100000005000115c46f250000000049454e44ae426082',
@@ -30,6 +38,7 @@ describe('generateImage', () => {
 
   beforeEach(() => {
     tmpDirs.length = 0;
+    safeFetchMock.mockReset();
   });
 
   afterEach(() => {
@@ -70,6 +79,21 @@ describe('generateImage', () => {
     expect(readFileSync(result.images[0]!.path)).toEqual(PNG_BYTES);
   });
 
+  it('rejects an oversized provider base64 result before materialization', async () => {
+    const cwd = makeTmpDir();
+    vi.stubEnv('OPENAI_API_KEY', 'sk-test');
+    const oversized = `${PNG_BYTES.toString('base64')}${'A'.repeat(MAX_BASE64_IMAGE_CHARS + 1)}`;
+    const fetchImpl: typeof fetch = (async () =>
+      fakeJsonResponse({ data: [{ b64_json: oversized }] })) as typeof fetch;
+
+    await expect(
+      generateImage(
+        { prompt: 'a cat' },
+        { cwd, settings: { defaultModel: 'gpt-image-2' }, fetchImpl },
+      ),
+    ).rejects.toThrow(/size ceiling/i);
+  });
+
   it('downloads url-style results and writes them to disk', async () => {
     const cwd = makeTmpDir();
     const settings: ImageGenSettings = {
@@ -92,6 +116,7 @@ describe('generateImage', () => {
         headers: { 'content-type': 'image/png' },
       });
     }) as typeof fetch;
+    safeFetchMock.mockImplementation(fetchImpl);
 
     const result = await generateImage({ prompt: 'house' }, { cwd, settings, fetchImpl });
     expect(result.provider).toBe('myprov (custom)');
@@ -126,6 +151,7 @@ describe('generateImage', () => {
         { status: 403 },
       );
     }) as typeof fetch;
+    safeFetchMock.mockImplementation(fetchImpl);
 
     await expect(generateImage({ prompt: 'house' }, { cwd, settings, fetchImpl })).rejects.toThrow(
       /403/,
@@ -310,6 +336,7 @@ describe('generateImage', () => {
       ctrl.abort();
       throw new DOMException('stop now', 'AbortError');
     }) as typeof fetch;
+    safeFetchMock.mockImplementation(fetchImpl);
 
     await expect(
       generateImage(
@@ -347,6 +374,7 @@ describe('generateImage', () => {
       mkdirSync(firstPath);
       throw new Error('download failed token=secret');
     }) as typeof fetch;
+    safeFetchMock.mockImplementation(fetchImpl);
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     try {
@@ -368,7 +396,9 @@ describe('generateImage', () => {
     const cwd = makeTmpDir();
     vi.stubEnv('OPENAI_API_KEY', 'sk-test');
     const ctrl = new AbortController();
-    const largeImage = Buffer.alloc(8 * 1024 * 1024, 0x61).toString('base64');
+    const largeBytes = Buffer.alloc(8 * 1024 * 1024, 0x61);
+    PNG_BYTES.copy(largeBytes);
+    const largeImage = largeBytes.toString('base64');
 
     const fetchImpl: typeof fetch = (async () =>
       fakeJsonResponse({
@@ -590,6 +620,7 @@ describe('generateImage', () => {
       }
       return fetchImpl(input, init);
     }) as typeof fetch;
+    safeFetchMock.mockImplementation(wrappedFetch);
 
     const result = await generateImage(
       { prompt: 'x' },

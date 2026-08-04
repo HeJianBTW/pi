@@ -69,6 +69,7 @@ Every package is ESM-only and published under the `@amaster.ai` npm scope.
   </tr>
   <tr>
     <td><strong>@amaster.ai/pi-goal</strong><br><img src="./packages/pi-goal/preview.png" alt="pi-goal preview" width="260"></td>
+    <td><strong>@amaster.ai/pi-video-gen</strong><br><img src="./packages/pi-video-gen/preview.png" alt="pi-video-gen preview" width="260"></td>
   </tr>
 </table>
 

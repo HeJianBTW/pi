@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import {
+  matchesScheduledTaskScope,
   normalizeScheduledTask,
   type ScheduledTask,
   type ScheduledTaskStore,
@@ -16,14 +17,15 @@ export class JsonScheduledTaskStore implements ScheduledTaskStore {
 
   constructor(private readonly filePath: string) {}
 
-  async list(_scope: TaskSchedulerScope = {}): Promise<ScheduledTask[]> {
+  async list(scope: TaskSchedulerScope = {}): Promise<ScheduledTask[]> {
     await this.load();
-    return Array.from(this.tasks.values());
+    return Array.from(this.tasks.values()).filter((task) => matchesScheduledTaskScope(task, scope));
   }
 
-  async get(taskId: string, _scope: TaskSchedulerScope = {}): Promise<ScheduledTask | undefined> {
+  async get(taskId: string, scope: TaskSchedulerScope = {}): Promise<ScheduledTask | undefined> {
     await this.load();
-    return this.tasks.get(taskId);
+    const task = this.tasks.get(taskId);
+    return task && matchesScheduledTaskScope(task, scope) ? task : undefined;
   }
 
   async create(task: ScheduledTask): Promise<ScheduledTask> {
@@ -37,11 +39,12 @@ export class JsonScheduledTaskStore implements ScheduledTaskStore {
   async update(
     taskId: string,
     task: ScheduledTask,
-    _scope: TaskSchedulerScope = {},
+    scope: TaskSchedulerScope = {},
   ): Promise<ScheduledTask | undefined> {
     const normalized = normalizeScheduledTask(task);
     const updated = await this.updateState(() => {
-      if (!this.tasks.has(taskId)) {
+      const existing = this.tasks.get(taskId);
+      if (!existing || !matchesScheduledTaskScope(existing, scope)) {
         return false;
       }
       this.tasks.set(taskId, normalized);
@@ -53,9 +56,10 @@ export class JsonScheduledTaskStore implements ScheduledTaskStore {
     return normalized;
   }
 
-  async delete(taskId: string, _scope: TaskSchedulerScope = {}): Promise<boolean> {
+  async delete(taskId: string, scope: TaskSchedulerScope = {}): Promise<boolean> {
     return await this.updateState(() => {
-      if (!this.tasks.has(taskId)) {
+      const existing = this.tasks.get(taskId);
+      if (!existing || !matchesScheduledTaskScope(existing, scope)) {
         return false;
       }
       return this.tasks.delete(taskId);

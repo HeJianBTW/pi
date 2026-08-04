@@ -1,9 +1,16 @@
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resolveModel } from '../config.js';
 import { generateImage } from '../generate.js';
+
+const { safeFetchMock } = vi.hoisted(() => ({ safeFetchMock: vi.fn() }));
+
+vi.mock('@amaster.ai/pi-shared', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  safeFetch: safeFetchMock,
+}));
 
 const PNG_BYTES = Buffer.from(
   '89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d49444154789c63000100000005000115c46f250000000049454e44ae426082',
@@ -18,6 +25,10 @@ function fakeJsonResponse(payload: unknown): Response {
 }
 
 describe('ark provider (Volcengine Seedream)', () => {
+  beforeEach(() => {
+    safeFetchMock.mockReset();
+  });
+
   afterEach(() => {
     vi.unstubAllEnvs();
   });
@@ -120,6 +131,7 @@ describe('ark provider (Volcengine Seedream)', () => {
         headers: { 'content-type': 'image/png' },
       });
     }) as typeof fetch;
+    safeFetchMock.mockImplementation(wrapped);
 
     const result = await generateImage(
       { prompt: 'redraw it', image: [refPath] },

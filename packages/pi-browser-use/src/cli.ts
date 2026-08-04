@@ -15,6 +15,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprot
 import { createFetchVisionCaller, handleAnalyzeScreenshot } from './analyze-screenshot.js';
 import { type BrowserUseConfig, resolveConfig } from './config.js';
 import { DevToolsClient } from './index.js';
+import { prepareBrowserProfile } from './profile.js';
 import {
   augmentToolDescription,
   extractTextContent,
@@ -82,6 +83,7 @@ export function parseArgs(argv: string[]): BrowserUseConfig {
 
 async function main(): Promise<void> {
   const config = resolveConfig(parseArgs(process.argv.slice(2)));
+  prepareBrowserProfile(config);
   const client = new DevToolsClient(config);
   await client.connect();
 

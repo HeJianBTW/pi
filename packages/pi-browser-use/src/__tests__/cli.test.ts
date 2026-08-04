@@ -3,6 +3,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, test, vi } from 'vitest';
 
+const mockPrepareBrowserProfile = vi.hoisted(() => vi.fn());
+
+vi.mock('../profile.js', () => ({ prepareBrowserProfile: mockPrepareBrowserProfile }));
+
 vi.mock('../index.js', () => ({
   DevToolsClient: class {
     connect = vi.fn();
@@ -25,6 +29,14 @@ vi.mock('@modelcontextprotocol/sdk/server/stdio.js', () => ({
 }));
 
 const { parseArgs } = await import('../cli.js');
+
+describe('cli startup', () => {
+  it('prepares the resolved browser profile before starting the client', () => {
+    expect(mockPrepareBrowserProfile).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionMode: 'persistent', userDataDir: expect.any(String) }),
+    );
+  });
+});
 
 describe('parseArgs', () => {
   it('collects repeated URL pattern flags into arrays', () => {

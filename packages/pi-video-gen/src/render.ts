@@ -1,7 +1,6 @@
-import { COPYFILE_EXCL } from 'node:constants';
 import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { copyFile, lstat, mkdir, readFile, realpath, rename } from 'node:fs/promises';
+import { lstat, mkdir, readFile, realpath, rename, writeFile } from 'node:fs/promises';
 import { basename, dirname, extname, join, resolve, sep } from 'node:path';
 import { resolveOutputDir } from './config.js';
 import {
@@ -14,6 +13,7 @@ import {
   VideoGenError,
 } from './errors.js';
 import { concatVideos } from './ffmpeg.js';
+import { readApprovedFrame } from './frame-input.js';
 import {
   type ActiveJobs,
   assertSafeId,
@@ -355,6 +355,7 @@ export async function runRender(opts: {
           const sourcePath = kind === 'firstFrame' ? shot.firstFramePath : shot.lastFramePath;
           if (!sourcePath) continue;
           const absSource = resolve(cwd, sourcePath);
+          const frameBytes = await readApprovedFrame(absSource, cwd);
           const ext = extname(absSource) || '.png';
           const relSnap = join(
             'shots',
@@ -371,14 +372,13 @@ export async function runRender(opts: {
               'render: snapshot destination not a file',
             );
           }
-          // Copy to an EXCLUSIVELY-created sibling temp (COPYFILE_EXCL — a
-          // pre-placed symlink fails EEXIST instead of being followed), then
+          // Write to an EXCLUSIVELY-created sibling temp, then
           // atomic rename(2), which replaces the destination entry outright.
           let tmpSnap = '';
           for (let i = 0; ; i++) {
             const candidate = `${destPath}.tmp-${process.pid}-${snapshotCounter++}-${i}`;
             try {
-              await copyFile(absSource, candidate, COPYFILE_EXCL);
+              await writeFile(candidate, frameBytes, { flag: 'wx' });
               tmpSnap = candidate;
               break;
             } catch (error) {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  matchesScheduledTaskScope,
   PersistentTaskScheduler,
   resolveScheduledTaskDefinition,
   type ScheduledTask,
@@ -186,18 +187,76 @@ describe('task scheduler', () => {
     expect(completed?.lastError).toBeUndefined();
     await scheduler.stop();
   });
+
+  it('does not unschedule a task when scoped deletion is denied', async () => {
+    const scheduler = new PersistentTaskScheduler({
+      store: new MemoryScheduledTaskStore(),
+      lock: new MemorySchedulerLock(),
+      runner: async () => {},
+    });
+    const task = await scheduler.create({
+      sessionId: 'session-a',
+      prompt: 'owned task',
+      type: 'interval',
+      schedule: '1h',
+      intervalSeconds: 3600,
+      enabled: true,
+      model,
+      toolPolicyProfile: 'scheduled',
+    });
+
+    await scheduler.start();
+    await expect(scheduler.delete(task.id, { sessionId: 'session-b' })).resolves.toBe(false);
+    await expect(scheduler.get(task.id, { sessionId: 'session-a' })).resolves.toBeDefined();
+    await expect(scheduler.status()).resolves.toMatchObject({ scheduledTimerCount: 1 });
+    await scheduler.stop();
+  });
+
+  it('starts only tasks owned by the configured session', async () => {
+    const store = new MemoryScheduledTaskStore();
+    const bootstrap = new PersistentTaskScheduler({
+      store,
+      lock: new MemorySchedulerLock(),
+      runner: async () => {},
+    });
+    for (const sessionId of ['session-a', 'session-b']) {
+      await bootstrap.create({
+        sessionId,
+        prompt: `${sessionId} task`,
+        type: 'interval',
+        schedule: '1h',
+        intervalSeconds: 3600,
+        enabled: true,
+        model,
+        toolPolicyProfile: 'scheduled',
+      });
+    }
+    const scheduler = new PersistentTaskScheduler({
+      store,
+      lock: new MemorySchedulerLock(),
+      runner: async () => {},
+      scope: { sessionId: 'session-a' },
+    });
+
+    await scheduler.start();
+    await expect(scheduler.status()).resolves.toMatchObject({
+      taskCount: 1,
+      scheduledTimerCount: 1,
+    });
+    await scheduler.stop();
+  });
 });
 
 class MemoryScheduledTaskStore implements ScheduledTaskStore {
   readonly tasks = new Map<string, ScheduledTask>();
 
   async list(scope: TaskSchedulerScope = {}): Promise<ScheduledTask[]> {
-    return [...this.tasks.values()].filter((task) => matchesScope(task, scope));
+    return [...this.tasks.values()].filter((task) => matchesScheduledTaskScope(task, scope));
   }
 
   async get(taskId: string, scope: TaskSchedulerScope = {}): Promise<ScheduledTask | undefined> {
     const task = this.tasks.get(taskId);
-    return task && matchesScope(task, scope) ? task : undefined;
+    return task && matchesScheduledTaskScope(task, scope) ? task : undefined;
   }
 
   async create(task: ScheduledTask): Promise<ScheduledTask> {
@@ -248,13 +307,6 @@ class MemorySchedulerLock implements SchedulerLock {
   holderPid(): number | undefined {
     return this.locked ? process.pid : undefined;
   }
-}
-
-function matchesScope(task: ScheduledTask, scope: TaskSchedulerScope): boolean {
-  return (
-    (!scope.tenantId || task.tenantId === scope.tenantId) &&
-    (!scope.userId || task.userId === scope.userId)
-  );
 }
 
 async function waitFor(assertion: () => boolean | Promise<boolean>): Promise<void> {

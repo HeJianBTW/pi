@@ -1,5 +1,7 @@
-import { readFile } from 'node:fs/promises';
-import { isAbsolute, resolve } from 'node:path';
+import { constants } from 'node:fs';
+import { lstat, open, realpath } from 'node:fs/promises';
+import { isAbsolute, relative, resolve, sep } from 'node:path';
+import { readResponseBytes } from '@amaster.ai/pi-shared';
 import { describeDownloadError, ImageGenError, throwDownloadHttpError } from './errors.js';
 import type { ResolvedImageInput } from './types.js';
 
@@ -12,11 +14,14 @@ const MAGIC_BYTES: Array<{ mimeType: string; bytes: number[] }> = [
 ];
 
 const DATA_URI_RE = /^data:(image\/[a-z+.-]+);base64,(.+)$/i;
+export const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
+export const MAX_BASE64_IMAGE_CHARS = Math.ceil(MAX_IMAGE_BYTES / 3) * 4;
+export const MAX_GENERATED_IMAGES = 10;
 
 export async function resolveImageInputs(
   raw: string[] | undefined,
   cwd: string,
-  fetchImpl: typeof fetch,
+  fetchImpl: (input: string | URL, init?: RequestInit) => Promise<Response>,
   signal?: AbortSignal,
 ): Promise<ResolvedImageInput[]> {
   if (!raw || raw.length === 0) return [];
@@ -32,7 +37,7 @@ async function resolveOne(
   value: string,
   inputLabel: string,
   cwd: string,
-  fetchImpl: typeof fetch,
+  fetchImpl: (input: string | URL, init?: RequestInit) => Promise<Response>,
   signal?: AbortSignal,
 ): Promise<ResolvedImageInput> {
   const trimmed = value.trim();
@@ -71,6 +76,9 @@ async function resolveOne(
     try {
       res = await fetchImpl(trimmed, { signal: signal ?? null });
     } catch (error) {
+      if (error instanceof Error && /public HTTP|redirect limit/i.test(error.message)) {
+        throw new ImageGenError(error.message, `${logLabel} rejected (unsafe URL)`);
+      }
       throw describeDownloadError(logLabel, trimmed, { rejected: error });
     }
     if (!res.ok) {
@@ -79,21 +87,91 @@ async function resolveOne(
     // Body reads can fail after headers; keep them in the sanitized download boundary.
     let buf: Uint8Array;
     try {
-      buf = new Uint8Array(await res.arrayBuffer());
+      buf = await readResponseBytes(res, MAX_IMAGE_BYTES);
     } catch (error) {
+      if (error instanceof Error && /size ceiling/i.test(error.message)) {
+        throw new ImageGenError(error.message, `${logLabel} rejected (too large)`);
+      }
       throw describeDownloadError(logLabel, trimmed, { rejected: error });
     }
-    const mimeType =
-      res.headers.get('content-type')?.split(';')[0]?.trim() || sniffMime(buf) || 'image/png';
+    const mimeType = sniffMime(buf);
+    if (!mimeType) {
+      throw new ImageGenError(
+        `${inputLabel} is not a valid supported image.`,
+        `${logLabel} rejected (invalid image)`,
+      );
+    }
     return { bytes: buf, mimeType };
   }
 
   // Anything else — treat as a file path (absolute or relative to cwd).
   const absolute = isAbsolute(trimmed) ? trimmed : resolve(cwd, trimmed);
+  const lexicalRoot = resolve(cwd);
+  const root = await realpath(cwd).catch(() => resolve(cwd));
+  const pathFromRoot = relative(lexicalRoot, absolute);
+  if (pathFromRoot === '..' || pathFromRoot.startsWith(`..${sep}`) || isAbsolute(pathFromRoot)) {
+    throw new ImageGenError(
+      `${inputLabel} must be inside the approved project directory.`,
+      `${logLabel} rejected (outside cwd)`,
+    );
+  }
   let bytes: Buffer;
   try {
-    bytes = await readFile(absolute);
-  } catch {
+    const info = await lstat(absolute);
+    if (info.isSymbolicLink()) {
+      throw new ImageGenError(
+        `${inputLabel} must not be a symlink.`,
+        `${logLabel} rejected (symlink)`,
+      );
+    }
+    if (!info.isFile()) {
+      throw new ImageGenError(
+        `${inputLabel} must be a regular file.`,
+        `${logLabel} rejected (not regular)`,
+      );
+    }
+    if (info.size > MAX_IMAGE_BYTES) {
+      throw new ImageGenError(
+        `${inputLabel} exceeds the image size ceiling.`,
+        `${logLabel} rejected (too large)`,
+      );
+    }
+    const file = await open(absolute, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    try {
+      const openedInfo = await file.stat();
+      if (!openedInfo.isFile()) {
+        throw new ImageGenError(
+          `${inputLabel} must be a regular file.`,
+          `${logLabel} rejected (not regular)`,
+        );
+      }
+      if (openedInfo.size > MAX_IMAGE_BYTES) {
+        throw new ImageGenError(
+          `${inputLabel} exceeds the image size ceiling.`,
+          `${logLabel} rejected (too large)`,
+        );
+      }
+      const canonical = await realpath(absolute);
+      const canonicalInfo = await lstat(canonical);
+      const canonicalFromRoot = relative(root, canonical);
+      if (
+        canonicalFromRoot === '..' ||
+        canonicalFromRoot.startsWith(`..${sep}`) ||
+        isAbsolute(canonicalFromRoot) ||
+        canonicalInfo.dev !== openedInfo.dev ||
+        canonicalInfo.ino !== openedInfo.ino
+      ) {
+        throw new ImageGenError(
+          `${inputLabel} must be inside the approved project directory.`,
+          `${logLabel} rejected (outside cwd)`,
+        );
+      }
+      bytes = await file.readFile();
+    } finally {
+      await file.close();
+    }
+  } catch (error) {
+    if (error instanceof ImageGenError) throw error;
     // Do NOT interpolate the resolved absolute path or the raw fs error (errno +
     // full path) — both are sensitive and would reach stderr via the plain-Error
     // path. Keep the message body-free, path-free, and actionable.
@@ -102,7 +180,13 @@ async function resolveOne(
       `${logLabel} not readable`,
     );
   }
-  const mimeType = sniffMime(bytes) ?? extToMime(absolute) ?? 'image/png';
+  const mimeType = sniffMime(bytes);
+  if (!mimeType) {
+    throw new ImageGenError(
+      `${inputLabel} is not a valid supported image.`,
+      `${logLabel} rejected (invalid image)`,
+    );
+  }
   return { bytes, mimeType };
 }
 
@@ -133,23 +217,6 @@ export function sniffMime(bytes: Uint8Array): string | undefined {
     return mimeType;
   }
   return undefined;
-}
-
-function extToMime(path: string): string | undefined {
-  const ext = path.split('.').pop()?.toLowerCase();
-  switch (ext) {
-    case 'png':
-      return 'image/png';
-    case 'jpg':
-    case 'jpeg':
-      return 'image/jpeg';
-    case 'webp':
-      return 'image/webp';
-    case 'gif':
-      return 'image/gif';
-    default:
-      return undefined;
-  }
 }
 
 export function toDataUri(input: ResolvedImageInput): string {
@@ -183,6 +250,7 @@ export function classifyImageOutput(
 
   const dataMatch = DATA_URI_RE.exec(trimmed);
   if (dataMatch) {
+    if (dataMatch[2]!.length > MAX_BASE64_IMAGE_CHARS) return null;
     return {
       kind: 'base64',
       bytes: dataMatch[2]!,
@@ -192,7 +260,13 @@ export function classifyImageOutput(
 
   // Maybe bare base64 — try to decode and sniff. Bail cheaply on anything that
   // can't possibly be an image (too short, contains non-base64 chars).
-  if (trimmed.length < 16 || /[^A-Za-z0-9+/=\s]/.test(trimmed)) return null;
+  if (
+    trimmed.length < 16 ||
+    trimmed.length > MAX_BASE64_IMAGE_CHARS ||
+    /[^A-Za-z0-9+/=\s]/.test(trimmed)
+  ) {
+    return null;
+  }
   let decoded: Buffer;
   try {
     decoded = Buffer.from(trimmed, 'base64');

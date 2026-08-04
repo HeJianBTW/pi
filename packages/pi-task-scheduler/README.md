@@ -76,7 +76,10 @@ external infrastructure needed.
 pi.extensions → session_start → creates file-based scheduler → registers tools + commands
 ```
 
-- **Storage**: `<agentDir>/data/tasks.json` (configurable via `dataDir`)
+- **Storage**: per-session `tasks-<session-hash>.json` and `scheduler-<session-hash>.lock`
+  files under `<agentDir>/data` (base directory configurable via `dataDir`)
+- **Upgrade**: matching tasks from the legacy `tasks.json` are copied on first use; the
+  legacy file is retained
 - **Lifecycle**: scheduler starts on `session_start`, stops on `session_shutdown`
 - **Commands**: `/pi-scheduler-status`, `/pi-scheduler-list`, `/pi-scheduler-run-now`
 - **LLM Tools**: `scheduler_create`, `scheduler_list`, `scheduler_get`, `scheduler_update`, `scheduler_delete`, `scheduler_run_now`

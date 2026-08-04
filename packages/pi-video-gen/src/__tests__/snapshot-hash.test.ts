@@ -4,20 +4,26 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 /**
- * Catches the OLD "hash the source buffer" implementation deterministically:
- * if the source mutates BETWEEN the pre-copy read and the copy itself, the old
- * code froze hash(old bytes) while the snapshot holds new bytes. The correct
- * implementation hashes the SNAPSHOT after copy, so it must always match the
- * on-disk snapshot content.
+ * Catches an implementation that hashes the approved source bytes instead of
+ * the final snapshot bytes. The write seam replaces the snapshot payload after
+ * source validation; the manifest must still hash what landed on disk.
  */
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs/promises')>();
   return {
     ...actual,
-    copyFile: vi.fn(async (src: string, dest: string) => {
-      // mutate the source mid-copy: the snapshot will hold 'v2-mutated'
-      writeFileSync(src, 'v2-mutated');
-      return actual.copyFile(src, dest);
+    writeFile: vi.fn(async (dest: string, data: Uint8Array, options?: object) => {
+      const snapshotBytes = dest.includes('.tmp-')
+        ? Buffer.concat([
+            Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+            Buffer.from('v2-mutated'),
+          ])
+        : data;
+      return actual.writeFile(
+        dest,
+        snapshotBytes,
+        options as Parameters<typeof actual.writeFile>[2],
+      );
     }),
   };
 });
@@ -41,7 +47,13 @@ describe('snapshot hash is of the SNAPSHOT bytes (not a pre-copy source read)', 
     mkdirSync(join(cwd, 'frames'), { recursive: true });
     mkdirSync(jobDir, { recursive: true });
     const frame = join(cwd, 'frames', 'a.png');
-    writeFileSync(frame, 'v1-original');
+    writeFileSync(
+      frame,
+      Buffer.concat([
+        Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+        Buffer.from('v1-original'),
+      ]),
+    );
     writeFileSync(
       join(jobDir, 'render-input.json'),
       JSON.stringify({ shots: [{ id: 's1', videoPrompt: 'm1', firstFramePath: frame }] }),
@@ -79,9 +91,9 @@ describe('snapshot hash is of the SNAPSHOT bytes (not a pre-copy source read)', 
     const manifest = loadRenderJob(jobDir)!;
     const snapPath = join(jobDir, 'shots', 's1', 'first_frame.png');
     const snapBytes = readFileSync(snapPath);
-    expect(snapBytes.toString()).toBe('v2-mutated'); // the mutation landed in the snapshot
+    expect(snapBytes.subarray(8).toString()).toBe('v2-mutated'); // the mutation landed in the snapshot
     const expectHash = createHash('sha256').update(snapBytes).digest('hex');
-    // OLD implementation (hash of pre-copy read 'v1-original') would FAIL here.
+    // Hashing the validated source bytes ('v1-original') would fail here.
     expect(manifest.frameHashes[join('shots', 's1', 'first_frame.png')]).toBe(expectHash);
   });
 });

@@ -2,6 +2,10 @@ import { beforeEach, describe, expect, it, test, vi } from 'vitest';
 
 // --- Mocks ---
 
+const mockPrepareBrowserProfile = vi.hoisted(() => vi.fn());
+
+vi.mock('../profile.js', () => ({ prepareBrowserProfile: mockPrepareBrowserProfile }));
+
 const mockListAllTools = vi.fn(() =>
   Promise.resolve([
     {
@@ -155,6 +159,7 @@ describe('browserUseExtension', () => {
     mockClose.mockClear();
     mockComplete.mockClear();
     mockListAllTools.mockClear();
+    mockPrepareBrowserProfile.mockClear();
   });
 
   test('registers session_start and session_shutdown handlers', () => {
@@ -174,6 +179,14 @@ describe('browserUseExtension', () => {
     test('reads pi-browser-use section from config.json', async () => {
       await startExtension({ headless: true });
       expect(registeredTools.size).toBeGreaterThan(0);
+    });
+
+    it('prepares the resolved browser profile before connecting', async () => {
+      await startExtension({ sessionMode: 'persistent', userDataDir: '/tmp/test-profile' });
+
+      expect(mockPrepareBrowserProfile).toHaveBeenCalledWith(
+        expect.objectContaining({ sessionMode: 'persistent', userDataDir: '/tmp/test-profile' }),
+      );
     });
   });
 

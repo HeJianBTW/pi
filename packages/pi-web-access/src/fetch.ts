@@ -1,3 +1,4 @@
+import { assertPublicHttpUrl, type DnsLookup, safeFetch } from '@amaster.ai/pi-shared';
 import TurndownService from 'turndown';
 import { resolveFetchProvider } from './config.js';
 import type { FetchResponse } from './providers/index.js';
@@ -36,15 +37,22 @@ async function fetchViaJina(url: string, timeoutMs: number): Promise<FetchRespon
 
 // ─── Local fallback (HTTP GET + turndown) ────────────────────────────────────
 
-async function fetchLocal(url: string, timeoutMs: number): Promise<FetchResponse> {
-  const response = await fetch(url, {
-    headers: {
-      'User-Agent': USER_AGENT,
-      Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+async function fetchLocal(
+  url: string,
+  timeoutMs: number,
+  lookup?: DnsLookup,
+): Promise<FetchResponse> {
+  const response = await safeFetch(
+    url,
+    {
+      headers: {
+        'User-Agent': USER_AGENT,
+        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      },
+      signal: AbortSignal.timeout(timeoutMs),
     },
-    signal: AbortSignal.timeout(timeoutMs),
-    redirect: 'follow',
-  });
+    lookup ? { lookup } : {},
+  );
 
   if (!response.ok) {
     throw new Error(`Failed to fetch ${url}: HTTP ${response.status}`);
@@ -68,11 +76,16 @@ async function fetchLocal(url: string, timeoutMs: number): Promise<FetchResponse
 
 // ─── Default fallback: Jina Reader → Local ───────────────────────────────────
 
-async function fetchWithFallback(url: string, timeoutMs: number): Promise<FetchResponse> {
+async function fetchWithFallback(
+  url: string,
+  timeoutMs: number,
+  lookup?: DnsLookup,
+): Promise<FetchResponse> {
+  await assertPublicHttpUrl(url, lookup);
   try {
     return await fetchViaJina(url, timeoutMs);
   } catch {
-    return fetchLocal(url, timeoutMs);
+    return fetchLocal(url, timeoutMs, lookup);
   }
 }
 
@@ -81,15 +94,18 @@ async function fetchWithFallback(url: string, timeoutMs: number): Promise<FetchR
 export async function webFetch(
   params: WebFetchParams,
   settings: WebToolSettings,
+  lookup?: DnsLookup,
 ): Promise<FetchResponse> {
   const timeoutMs = settings.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const resolved = resolveFetchProvider(settings);
   if (resolved) {
+    if (lookup) await assertPublicHttpUrl(params.url, lookup);
+    else await assertPublicHttpUrl(params.url);
     const provider = getProvider(resolved.id);
     if (!provider) {
       throw new Error(`Provider "${resolved.id}" is not registered.`);
     }
     return provider.fetch(params.url, resolved);
   }
-  return fetchWithFallback(params.url, timeoutMs);
+  return fetchWithFallback(params.url, timeoutMs, lookup);
 }

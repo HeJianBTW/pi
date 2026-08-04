@@ -10,7 +10,12 @@ import type {
   TeamworkProvider,
   Workspace,
 } from '../types.js';
-import { ensureMulticaBinary, type InstallResult } from './multica-installer.js';
+
+export type InstallResult = {
+  installed: boolean;
+  alreadyPresent: boolean;
+  error?: string;
+};
 
 export type InitMulticaResult = {
   adapter: MulticaAdapter;
@@ -22,15 +27,21 @@ export async function initMulticaProvider(
   exec: ExecFn,
 ): Promise<InitMulticaResult> {
   const binary = config.binary?.trim() || 'multica';
-  const autoInstall = config.autoInstall !== false;
-
-  let installResult: InstallResult = { installed: true, alreadyPresent: true };
-
-  if (autoInstall) {
-    installResult = await ensureMulticaBinary(binary, exec);
-    if (!installResult.installed) {
-      return { adapter: new MulticaAdapter(config, exec), installResult };
-    }
+  let available = false;
+  try {
+    available = (await exec(binary, ['--version'])).code === 0;
+  } catch {
+    available = false;
+  }
+  const installResult: InstallResult = available
+    ? { installed: true, alreadyPresent: true }
+    : {
+        installed: false,
+        alreadyPresent: false,
+        error: 'install a pinned multica release manually',
+      };
+  if (!installResult.installed) {
+    return { adapter: new MulticaAdapter(config, exec), installResult };
   }
 
   if (config.serverUrl) {

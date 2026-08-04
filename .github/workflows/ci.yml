@@ -18,6 +18,9 @@ env:
 jobs:
   lint:
     name: Lint
+    if: >
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on:
       - instance-hnpsq9go
       - linux
@@ -29,6 +32,9 @@ jobs:
 
   typecheck:
     name: Typecheck
+    if: >
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on:
       - instance-hnpsq9go
       - linux
@@ -42,11 +48,19 @@ jobs:
 
   test:
     name: Test
+    if: >
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on:
       - instance-hnpsq9go
       - linux
       - x64
     steps:
+      - name: Isolate temporary files
+        run: |
+          job_tmp="$RUNNER_TEMP/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-test"
+          mkdir -p "$job_tmp"
+          echo "TMPDIR=$job_tmp" >> "$GITHUB_ENV"
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-pi-build
         with:
@@ -58,6 +72,9 @@ jobs:
 
   build:
     name: Build
+    if: >
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on:
       - instance-hnpsq9go
       - linux

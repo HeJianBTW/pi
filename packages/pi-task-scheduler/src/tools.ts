@@ -31,6 +31,10 @@ function formatTaskSummary(task: ScheduledTask) {
   };
 }
 
+function sessionScope(ctx: ExtensionContext) {
+  return { sessionId: ctx.sessionManager.getSessionId() };
+}
+
 const taskTypeSchema = Type.Union([
   Type.Literal('cron'),
   Type.Literal('once'),
@@ -111,8 +115,8 @@ export function createSchedulerTools(scheduler: TaskScheduler): ToolDefinition[]
       description: 'List all scheduled prompts with their status and next run time.',
       promptSnippet: 'List all scheduled prompts.',
       parameters: Type.Object({}),
-      async execute(): Promise<AgentToolResult<unknown>> {
-        const tasks = await scheduler.list();
+      async execute(_id, _params, _signal, _onUpdate, ctx): Promise<AgentToolResult<unknown>> {
+        const tasks = await scheduler.list(sessionScope(ctx));
         if (tasks.length === 0) {
           return textResult('No scheduled tasks.');
         }
@@ -131,8 +135,11 @@ export function createSchedulerTools(scheduler: TaskScheduler): ToolDefinition[]
       async execute(
         _toolCallId: string,
         params: Record<string, unknown>,
+        _signal,
+        _onUpdate,
+        ctx,
       ): Promise<AgentToolResult<unknown>> {
-        const task = await scheduler.get(params.taskId as string);
+        const task = await scheduler.get(params.taskId as string, sessionScope(ctx));
         if (!task) {
           return textResult(`Task not found: ${params.taskId}`);
         }
@@ -156,17 +163,28 @@ export function createSchedulerTools(scheduler: TaskScheduler): ToolDefinition[]
       async execute(
         _toolCallId: string,
         params: Record<string, unknown>,
+        _signal,
+        _onUpdate,
+        ctx,
       ): Promise<AgentToolResult<unknown>> {
-        const { taskId, type, schedule, ...rest } = params as {
+        const { taskId, type, schedule, prompt, name, description, enabled } = params as {
           taskId: string;
           type?: string;
           schedule?: string;
-          [key: string]: unknown;
+          prompt?: string;
+          name?: string;
+          description?: string;
+          enabled?: boolean;
         };
-        const update: Record<string, unknown> = { ...rest };
+        const update: Record<string, unknown> = {
+          ...(prompt !== undefined ? { prompt } : {}),
+          ...(name !== undefined ? { name } : {}),
+          ...(description !== undefined ? { description } : {}),
+          ...(enabled !== undefined ? { enabled } : {}),
+        };
         if (type !== undefined || schedule !== undefined) {
           try {
-            const existing = await scheduler.get(taskId);
+            const existing = await scheduler.get(taskId, sessionScope(ctx));
             if (!existing) {
               return textResult(`Task not found: ${taskId}`);
             }
@@ -181,7 +199,7 @@ export function createSchedulerTools(scheduler: TaskScheduler): ToolDefinition[]
             );
           }
         }
-        const task = await scheduler.update(taskId, update);
+        const task = await scheduler.update(taskId, update, sessionScope(ctx));
         if (!task) {
           return textResult(`Task not found: ${taskId}`);
         }
@@ -198,9 +216,12 @@ export function createSchedulerTools(scheduler: TaskScheduler): ToolDefinition[]
       async execute(
         _toolCallId: string,
         params: Record<string, unknown>,
+        _signal,
+        _onUpdate,
+        ctx,
       ): Promise<AgentToolResult<unknown>> {
         const taskId = params.taskId as string;
-        const deleted = await scheduler.delete(taskId);
+        const deleted = await scheduler.delete(taskId, sessionScope(ctx));
         return textResult(deleted ? `Deleted task: ${taskId}` : `Task not found: ${taskId}`);
       },
     },
@@ -214,9 +235,12 @@ export function createSchedulerTools(scheduler: TaskScheduler): ToolDefinition[]
       async execute(
         _toolCallId: string,
         params: Record<string, unknown>,
+        _signal,
+        _onUpdate,
+        ctx,
       ): Promise<AgentToolResult<unknown>> {
         const taskId = params.taskId as string;
-        const task = await scheduler.runNow(taskId);
+        const task = await scheduler.runNow(taskId, sessionScope(ctx));
         if (!task) {
           return textResult(`Task not found: ${taskId}`);
         }

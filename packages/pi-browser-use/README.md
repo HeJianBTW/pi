@@ -78,6 +78,8 @@ npx @amaster.ai/pi-browser-use --config path/to/config.json
 | `isolated` | Launches a fresh ephemeral browser profile each session. No state carried over. |
 | `existing` | Connects to an already-running browser instance (via `browserUrl`, `wsEndpoint`, or auto-discovery). |
 
+> **Note:** Do not run the agent (or anything that launches this browser) via `sudo` — the profile would be created with root-owned files, and Chrome then shows a "can't read your preferences" dialog on every launch. On startup the extension detects an inaccessible default profile, moves it aside to `~/.pi/browser-profile.inaccessible-<timestamp>`, and starts fresh; a custom `userDataDir` in this state fails fast with an ownership remediation hint instead.
+
 ```json
 {
   "pi-browser-use": {

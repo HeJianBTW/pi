@@ -2,8 +2,9 @@
  * LLM-callable tools for Mem0: search, profile (get all), and save (verbatim store).
  */
 
-import type { AgentToolResult } from '@earendil-works/pi-coding-agent';
+import { type AgentToolResult, truncateHead, truncateLine } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
+import { formatRecalledMemory, redactMemoryText } from './privacy.js';
 import type { Mem0Provider } from './provider.js';
 
 export interface ToolDefinition {
@@ -22,7 +23,17 @@ export interface ToolDefinition {
 }
 
 function textResult(text: string): AgentToolResult<unknown> {
-  return { content: [{ type: 'text' as const, text }], details: undefined };
+  const result = truncateHead(text, { maxBytes: 47 * 1024, maxLines: 1_900 });
+  const output = result.truncated
+    ? JSON.stringify({
+        truncated: true,
+        preview: truncateLine(text, 4_000).text,
+      })
+    : result.content;
+  return {
+    content: [{ type: 'text' as const, text: output }],
+    details: undefined,
+  };
 }
 
 export function createMem0Tools(provider: Mem0Provider, userId: string): ToolDefinition[] {
@@ -49,7 +60,10 @@ export function createMem0Tools(provider: Mem0Provider, userId: string): ToolDef
         }
         return textResult(
           JSON.stringify({
-            results: results.map((r) => ({ memory: r.memory, score: r.score })),
+            results: results.map((r) => ({
+              memory: formatRecalledMemory(r.memory),
+              score: r.score,
+            })),
             count: results.length,
           }),
         );
@@ -75,7 +89,10 @@ export function createMem0Tools(provider: Mem0Provider, userId: string): ToolDef
         if (memories.length === 0) {
           return textResult(JSON.stringify({ result: 'No memories stored yet.' }));
         }
-        const lines = memories.map((m) => m.memory).filter(Boolean);
+        const lines = memories
+          .map((m) => m.memory)
+          .filter(Boolean)
+          .map(formatRecalledMemory);
         return textResult(JSON.stringify({ result: lines.join('\n'), count: lines.length }));
       } catch (err) {
         return textResult(
@@ -101,7 +118,7 @@ export function createMem0Tools(provider: Mem0Provider, userId: string): ToolDef
       if (!fact) return textResult(JSON.stringify({ error: 'Fact cannot be empty.' }));
 
       try {
-        const result = await provider.add([{ role: 'user', content: fact }], {
+        const result = await provider.add([{ role: 'user', content: redactMemoryText(fact) }], {
           userId,
           infer: false,
         });

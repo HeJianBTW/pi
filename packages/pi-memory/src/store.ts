@@ -438,8 +438,15 @@ async function readEntriesFile(p: string): Promise<string[]> {
 function sanitizeForSnapshot(entries: string[], filename: string): string[] {
   const out: string[] = [];
   for (const entry of entries) {
-    if (!entry || entry.startsWith('[BLOCKED:')) {
+    if (!entry) {
       out.push(entry);
+      continue;
+    }
+    if (entry.startsWith('[BLOCKED:')) {
+      out.push(
+        `[BLOCKED: ${filename} contained an untrusted blocked-looking entry. ` +
+          `Removed from system prompt; use memory_read to inspect the original.]`,
+      );
       continue;
     }
     const findings = scanForThreats(entry, 'strict');

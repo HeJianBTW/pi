@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test, vi } from 'vitest';
+import { beforeEach, describe, expect, it, test, vi } from 'vitest';
 
 const mockCreateMessage = vi.fn();
 const mockReplyMessage = vi.fn();
@@ -243,6 +243,53 @@ describe('Feishu adapter', () => {
       expect(onMessage).toHaveBeenCalled();
     });
     expect(mockRequest).not.toHaveBeenCalled();
+  });
+
+  it('rejects HTTP mode without event authentication', async () => {
+    const adapter = createFeishuAdapter({
+      type: 'feishu',
+      appId: 'cli_xxx',
+      appSecret: 'secret',
+      eventMode: 'http',
+      incoming: { port: 0 },
+    });
+
+    await expect(adapter.start?.(vi.fn())).rejects.toThrow(
+      'Feishu HTTP mode requires encryptKey for event signature verification',
+    );
+  });
+
+  it('rejects HTTP mode with only a verification token', async () => {
+    const adapter = createFeishuAdapter({
+      type: 'feishu',
+      appId: 'cli_xxx',
+      appSecret: 'secret',
+      eventMode: 'http',
+      verificationToken: 'verify-me',
+      incoming: { port: 0 },
+    });
+
+    await expect(adapter.start?.(vi.fn())).rejects.toThrow(
+      'Feishu HTTP mode requires encryptKey for event signature verification',
+    );
+  });
+
+  it('allows signed HTTP mode and binds to loopback by default', async () => {
+    const adapter = createFeishuAdapter({
+      type: 'feishu',
+      appId: 'cli_xxx',
+      appSecret: 'secret',
+      eventMode: 'http',
+      encryptKey: 'encrypt-me',
+      incoming: { port: 0 },
+    });
+
+    await adapter.start?.(vi.fn());
+    await adapter.stop?.();
+
+    expect(lark.adaptDefault).toHaveBeenCalledWith('/feishu/events', expect.anything(), {
+      autoChallenge: true,
+    });
   });
 
   test('strips a leading bot mention before forwarding websocket messages', async () => {

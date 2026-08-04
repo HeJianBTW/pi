@@ -46,7 +46,7 @@ export interface BrowserUseConfig {
   extraArgs?: string[];
 }
 
-const DEFAULT_PROFILE_DIR = join(homedir(), '.pi', 'browser-profile');
+export const DEFAULT_PROFILE_DIR = join(homedir(), '.pi', 'browser-profile');
 
 const DEFAULTS: Partial<BrowserUseConfig> = {
   sessionMode: 'persistent',

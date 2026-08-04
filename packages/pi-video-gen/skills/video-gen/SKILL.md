@@ -8,9 +8,10 @@ description: "Video creation and local composition: join existing clips or rende
 This skill orchestrates four published flows:
 
 - **C0 local concat** — `video_compose` joins compatible existing MP4 clips.
-- **Timeline local render** — `video_compose` turns images/screenshots and
-  existing video clips into a video with overlays, TTS, motion, transitions,
-  soft or burned subtitles, source audio, and optional BGM.
+- **Timeline render** — `video_compose` locally turns images/screenshots and
+  existing video clips into a video with overlays, motion, transitions, soft or
+  burned subtitles, source audio, and optional BGM. Narration is an optional
+  network feature.
 - **Single AI clip** — one paid `video_generate` call.
 - **Shot-book AI film** — author a shot book, generate frames with
   `image_generate`, then ONE paid `video_render` call renders and stitches.
@@ -27,7 +28,7 @@ pi-image-gen's active model.
    | Existing local mp4 clips to join | `video_compose` (C0 — lossless, local, no paid models) |
    | One AI-generated moving shot | `video_generate` |
    | Multi-shot film with keyframes | `video_render` |
-   | Promo/explainer from images, screenshots & clips | `video_compose` (TimelineSpec — mixed media + overlays + TTS + transitions, local render, near-zero cost) |
+   | Promo/explainer from images, screenshots & clips | `video_compose` (TimelineSpec — local mixed-media render; optional network TTS) |
 
 1. **Local flows stop here.** For C0 follow §A0; for Timeline follow §A1. Do not
    run the AI preflight, shot-book steps, or paid confirmation gates below.
@@ -94,8 +95,10 @@ pi-image-gen's active model.
 
 ## A1. Timeline compose (`video_compose` with `timeline-input.json`)
 
-Use for promos/explainers from still images and existing clips. Costs ~0
-(Edge TTS is free, render is local) — prefer it over AI video for this job type.
+Use for promos/explainers from still images and existing clips. Media rendering
+is local and uses no paid video model. If narration is requested, disclose that
+the explicit `edge-tts:<voice>` option sends narration text to Microsoft before
+using it.
 
 1. **Collect existing images/screenshots/clips first**, and use `image_generate`
    only for missing visual material. Keep all source media outside the job
@@ -107,7 +110,7 @@ Use for promos/explainers from still images and existing clips. Costs ~0
    {
      "title": "产品宣传片",
      "output": { "resolution": "1920x1080", "fps": 25, "codec": "h264" },
-     "voice": "edge-tts:zh-CN-YunyangNeural",   // default; free, no key
+     "voice": "edge-tts:zh-CN-YunyangNeural",   // explicit opt-in: narration text is sent to Microsoft
      "ttsFailureMode": "fail",                  // or "silent-subtitles" only after the user accepts that degradation
      "subtitles": { "mode": "burn", "fontSize": 36,
        "textColor": "#ffffff", "backgroundColor": "#000000", "backgroundOpacity": 0.55 },
@@ -134,15 +137,18 @@ Use for promos/explainers from still images and existing clips. Costs ~0
    ```
 2. **Chinese text NEVER comes from an image model** — titles/subtitles go in
    `overlay` and are rendered locally via SVG (no garbled CJK).
-3. **Cost confirmation is unnecessary** (local compute), but still show the
-   segment count and total planned duration before calling `video_compose`.
+3. **Paid-model confirmation is unnecessary** for the local media render, but
+   still show the segment count and total planned duration before calling
+   `video_compose`. Obtain explicit agreement before sending narration text to
+   Edge TTS.
 4. Every segment contains exactly one of `image` or `video`. Video segments
    are normalized to the output resolution/fps, may be trimmed/scaled, and
    mix their source audio with narration before optional BGM. Video source
    audio without a stream degrades to silence; `sourceAudio.muted: true` or
    `volume: 0` disables it. A video's numeric `durationSec` is its fixed trim
    window; narration that does not fit is rejected instead of extending it.
-5. Narration uses Edge TTS (free). Measured audio duration drives image
+5. Narration uses Edge TTS only with an explicit `edge-tts:<voice>` selection;
+   its text is sent to Microsoft. Measured audio duration drives image
    `durationSec: "auto"`; subtitles use each segment's actual video timing.
    `subtitles.mode` defaults to `"soft"` (`mov_text`); `"burn"` renders the
    configured font/color/background directly into each narrated segment.
@@ -270,12 +276,16 @@ Write `<outputDir>/<jobId>/render-input.json` (jobId: letters/digits/dash/unders
   "shots": [{
     "id": "s1",
     "videoPrompt": "<motion> + <audio cues>",
-    "firstFramePath": "/abs/path/from/assets.json.png",
-    "lastFramePath": "/abs/optional.png",
+    "firstFramePath": "<project>/path/from/assets.json.png",
+    "lastFramePath": "<project>/optional.png",
     "durationSec": 5
   }]
 }
 ```
+
+Every reference-frame path must resolve to a regular png/jpg/webp file inside
+the session cwd. Absolute paths are accepted only when they remain inside that
+approved project directory; symlinks and outside paths are rejected.
 
 Then call `video_render` with that path. Interrupted? Call it again with the
 same path — it resumes. If an ambiguous submit is reported, do not delete a

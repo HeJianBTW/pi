@@ -43,8 +43,12 @@ let proxyPid;
 
 try {
   socketPath = await waitForSocket(owner);
-  ({ daemonPid, leasePid, proxyPid } = await findDriverProcesses(socketPath));
-  if (!daemonPid || !leasePid || !proxyPid) {
+  try {
+    await waitFor(async () => {
+      ({ daemonPid, leasePid, proxyPid } = await findDriverProcesses(socketPath));
+      return Boolean(daemonPid && leasePid && proxyPid);
+    }, 5_000);
+  } catch {
     throw new Error(`Cua Driver processes not found for ${socketPath}`);
   }
 

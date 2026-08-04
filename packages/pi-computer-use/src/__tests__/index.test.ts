@@ -1,4 +1,7 @@
 import { EventEmitter } from 'node:events';
+import { mkdtemp, realpath, rename, rm, symlink } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import toolManifest from '../generated/cua-driver-tools.js';
 
@@ -202,7 +205,7 @@ describe('computerUseExtension', () => {
     lastTransport = undefined;
     closeCount = 0;
     notify.mockClear();
-    mockCtx.ui.confirm.mockClear();
+    mockCtx.ui.confirm.mockReset().mockResolvedValue(true);
   });
 
   afterEach(async () => {
@@ -747,6 +750,206 @@ describe('computerUseExtension', () => {
       'Allow computer use?',
       expect.stringContaining('com.apple.TextEdit'),
     );
+  });
+
+  it('prompts again when launch arguments change for the same app', async () => {
+    await start();
+    const launch = tools.get('computer_use_launch_app')!;
+    await launch.execute(
+      'first',
+      { bundle_id: 'com.apple.Safari', url: 'https://example.com/a' },
+      undefined,
+      undefined,
+      mockCtx,
+    );
+    await launch.execute(
+      'second',
+      { bundle_id: 'com.apple.Safari', url: 'https://example.com/b' },
+      undefined,
+      undefined,
+      mockCtx,
+    );
+    expect(mockCtx.ui.confirm).toHaveBeenCalledTimes(2);
+  });
+
+  it('requires confirmation and a cwd-contained output for trajectory recording', async () => {
+    let invoked = false;
+    let recordingArgs: Record<string, unknown> | undefined;
+    await start();
+    mockCallTool = (name, args) => {
+      if (name === 'start_recording') {
+        invoked = true;
+        recordingArgs = args;
+      }
+      return { content: [{ type: 'text', text: 'recording' }] };
+    };
+    mockCtx.ui.confirm.mockResolvedValueOnce(false);
+
+    await tools
+      .get('computer_use_start_recording')!
+      .execute('record', { output_dir: `${mockCtx.cwd}/recording` }, undefined, undefined, mockCtx);
+    expect(mockCtx.ui.confirm).toHaveBeenCalledOnce();
+    expect(invoked).toBe(false);
+
+    mockCtx.ui.confirm.mockClear();
+    await tools
+      .get('computer_use_start_recording')!
+      .execute('outside', { output_dir: '/var/tmp/recording' }, undefined, undefined, mockCtx);
+    expect(mockCtx.ui.confirm).not.toHaveBeenCalled();
+    expect(invoked).toBe(false);
+
+    mockCtx.ui.confirm.mockResolvedValueOnce(true);
+    await tools
+      .get('computer_use_start_recording')!
+      .execute('inside', { output_dir: `${mockCtx.cwd}/recording` }, undefined, undefined, mockCtx);
+    expect(mockCtx.ui.confirm).toHaveBeenCalledOnce();
+    expect(invoked).toBe(true);
+    expect(recordingArgs?.output_dir).toBe(join(await realpath(mockCtx.cwd), 'recording'));
+  });
+
+  it('rejects a recording output symlink that escapes cwd', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'pi-computer-use-recording-'));
+    const outside = await mkdtemp(join(tmpdir(), 'pi-computer-use-recording-outside-'));
+    const previousCwd = mockCtx.cwd;
+    try {
+      await symlink(outside, join(cwd, 'recording'), 'dir');
+      mockCtx.cwd = cwd;
+      let invoked = false;
+      await start();
+      mockCallTool = () => {
+        invoked = true;
+        return { content: [{ type: 'text', text: 'recording' }] };
+      };
+
+      await tools
+        .get('computer_use_start_recording')!
+        .execute('record', { output_dir: join(cwd, 'recording') }, undefined, undefined, mockCtx);
+
+      expect(mockCtx.ui.confirm).not.toHaveBeenCalled();
+      expect(invoked).toBe(false);
+    } finally {
+      mockCtx.cwd = previousCwd;
+      await rm(cwd, { recursive: true, force: true });
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  describe('recording output revalidation', () => {
+    let cwd: string;
+    let movedCwd: string;
+    let outside: string;
+    let previousCwd: string;
+
+    beforeEach(async () => {
+      cwd = await mkdtemp(join(tmpdir(), 'pi-computer-use-recording-'));
+      movedCwd = `${cwd}-moved`;
+      outside = await mkdtemp(join(tmpdir(), 'pi-computer-use-recording-outside-'));
+      previousCwd = mockCtx.cwd;
+      mockCtx.cwd = cwd;
+    });
+
+    afterEach(async () => {
+      mockCtx.cwd = previousCwd;
+      await rm(cwd, { recursive: true, force: true });
+      await rm(movedCwd, { recursive: true, force: true });
+      await rm(outside, { recursive: true, force: true });
+    });
+
+    it.each([
+      'output directory',
+      'workspace root',
+    ] as const)('rejects %s replacement during confirmation', async (replacement) => {
+      const outputDir = join(cwd, 'recording');
+      let invoked = false;
+      await start();
+      mockCallTool = () => {
+        invoked = true;
+        return { content: [{ type: 'text', text: 'recording' }] };
+      };
+      mockCtx.ui.confirm.mockImplementationOnce(async () => {
+        if (replacement === 'output directory') {
+          await symlink(outside, outputDir, 'dir');
+        } else {
+          await rename(cwd, movedCwd);
+          await symlink(outside, cwd, 'dir');
+        }
+        return true;
+      });
+
+      await tools
+        .get('computer_use_start_recording')!
+        .execute('record', { output_dir: outputDir }, undefined, undefined, mockCtx);
+
+      expect(mockCtx.ui.confirm).toHaveBeenCalledOnce();
+      expect(invoked).toBe(false);
+    });
+  });
+
+  it('keeps recording output containment enabled when confirmations are disabled', async () => {
+    let invoked = false;
+    await start({ confirmDangerousActions: false });
+    mockCallTool = () => {
+      invoked = true;
+      return { content: [{ type: 'text', text: 'recording' }] };
+    };
+
+    const result = (await tools
+      .get('computer_use_start_recording')!
+      .execute(
+        'outside',
+        { output_dir: '/var/tmp/recording' },
+        undefined,
+        undefined,
+        mockCtx,
+      )) as any;
+
+    expect(invoked).toBe(false);
+    expect(result.isError).toBe(true);
+  });
+
+  it('allows a dot-prefixed recording directory inside cwd', async () => {
+    let recordingArgs: Record<string, unknown> | undefined;
+    await start({ confirmDangerousActions: false });
+    mockCallTool = (_name, args) => {
+      recordingArgs = args;
+      return { content: [{ type: 'text', text: 'recording' }] };
+    };
+
+    await tools
+      .get('computer_use_start_recording')!
+      .execute(
+        'inside',
+        { output_dir: join(mockCtx.cwd, '..recording') },
+        undefined,
+        undefined,
+        mockCtx,
+      );
+
+    expect(mockCtx.ui.confirm).toHaveBeenCalledOnce();
+    expect(recordingArgs?.output_dir).toBe(join(await realpath(mockCtx.cwd), '..recording'));
+  });
+
+  it('still confirms recording when dangerous-action confirmations are disabled', async () => {
+    let invoked = false;
+    await start({ confirmDangerousActions: false });
+    mockCtx.ui.confirm.mockResolvedValueOnce(false);
+    mockCallTool = () => {
+      invoked = true;
+      return { content: [{ type: 'text', text: 'recording' }] };
+    };
+
+    await tools
+      .get('computer_use_start_recording')!
+      .execute(
+        'inside',
+        { output_dir: join(mockCtx.cwd, 'recording') },
+        undefined,
+        undefined,
+        mockCtx,
+      );
+
+    expect(mockCtx.ui.confirm).toHaveBeenCalledOnce();
+    expect(invoked).toBe(false);
   });
 
   it('does not invoke a high-risk tool when confirmation is declined', async () => {

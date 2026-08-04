@@ -16,9 +16,11 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import { getAgentDir } from '@earendil-works/pi-coding-agent';
 import {
+  canonicalizeSecurityPath,
   type SecurityAuditEvent,
   type SecurityConfig,
   type SecurityDecision,
+  type SecurityEvaluationResult,
   SecurityGate,
   securityEvaluationDetails,
 } from './index.js';
@@ -28,6 +30,28 @@ const SETTINGS_KEY = 'pi-security';
 const EXTENSION_STATUS_KEY = 'pi-security';
 const DEFAULT_PROFILE = 'auto-review';
 const DEFAULT_AUDIT_LIMIT = 200;
+const PATH_ARGUMENT_KEYS = new Set([
+  'path',
+  'paths',
+  'file',
+  'files',
+  'source',
+  'destination',
+  'target',
+  'file_path',
+  'file_paths',
+  'cwd',
+  'output_dir',
+  'directory',
+  'directories',
+  'image',
+  'images',
+  'image_path',
+  'firstFrame',
+  'lastFrame',
+  'referenceImages',
+]);
+const CAMEL_CASE_PATH_ARGUMENT_KEY = /(?:Path|Paths|Dir|Directory|Directories)$/;
 
 export type PiSecurityExtensionConfig = {
   enabled?: boolean;
@@ -40,8 +64,7 @@ export type PiSecurityExtensionConfig = {
 };
 
 export type PiSecuritySessionGrant = {
-  toolName: string;
-  reason: string;
+  signature: string;
 };
 
 export type PiSecurityExtensionState = {
@@ -191,8 +214,8 @@ function createGate(ctx: ExtensionContext, state: PiSecurityExtensionState): Sec
       configDir: getAgentDir(),
       projectTrusted: isProjectTrusted(ctx),
     }),
-    approvalHandler: async ({ toolCall, decision }) =>
-      resolveApproval(ctx, state, toolCall, decision),
+    approvalHandler: async ({ toolCall, decision, evaluation }) =>
+      resolveApproval(ctx, state, toolCall, decision, evaluation),
     auditSink: (event) => {
       state.auditLog.push(event);
       if (state.auditLog.length > state.config.auditLimit) {
@@ -207,8 +230,9 @@ async function resolveApproval(
   state: PiSecurityExtensionState,
   toolCall: ToolCallRequest,
   decision: Extract<SecurityDecision, { kind: 'ask' }>,
+  evaluation: SecurityEvaluationResult,
 ): Promise<SecurityDecision> {
-  if (hasSessionGrant(state, toolCall, decision)) {
+  if (hasSessionGrant(ctx, state, toolCall, decision, evaluation)) {
     return { kind: 'allow', reason: `Allowed by in-session grant: ${decision.reason}` };
   }
   if (!ctx.hasUI) {
@@ -233,7 +257,7 @@ async function resolveApproval(
     return { kind: 'allow', reason: `Approved by user: ${decision.reason}` };
   }
   if (choice === 'Allow similar for this session') {
-    state.grants.push({ toolName: toolCall.name, reason: decision.reason });
+    state.grants.push({ signature: grantSignature(ctx, toolCall, decision, evaluation) });
     return { kind: 'allow', reason: `Approved by user with session grant: ${decision.reason}` };
   }
   return denyByUser(decision);
@@ -328,13 +352,60 @@ function toJsonValue(value: unknown): JsonValue | undefined {
 }
 
 function hasSessionGrant(
+  ctx: ExtensionContext,
   state: PiSecurityExtensionState,
   toolCall: ToolCallRequest,
   decision: Extract<SecurityDecision, { kind: 'ask' }>,
+  evaluation: SecurityEvaluationResult,
 ): boolean {
-  return state.grants.some(
-    (grant) => grant.toolName === toolCall.name && grant.reason === decision.reason,
-  );
+  const signature = grantSignature(ctx, toolCall, decision, evaluation);
+  return state.grants.some((grant) => grant.signature === signature);
+}
+
+function grantSignature(
+  ctx: ExtensionContext,
+  toolCall: ToolCallRequest,
+  decision: Extract<SecurityDecision, { kind: 'ask' }>,
+  evaluation: SecurityEvaluationResult,
+): string {
+  const normalize = (value: JsonValue, key?: string): JsonValue => {
+    if (
+      typeof value === 'string' &&
+      (PATH_ARGUMENT_KEYS.has(key ?? '') || CAMEL_CASE_PATH_ARGUMENT_KEY.test(key ?? ''))
+    ) {
+      return canonicalizeSecurityPath(ctx.cwd, value);
+    }
+    if (Array.isArray(value)) return value.map((item) => normalize(item, key));
+    if (value && typeof value === 'object') {
+      const sorted: JsonObject = {};
+      for (const childKey of Object.keys(value).sort()) {
+        const child = value[childKey];
+        if (child !== undefined) sorted[childKey] = normalize(child, childKey);
+      }
+      return sorted;
+    }
+    return value;
+  };
+  return JSON.stringify({
+    tool: toolCall.name,
+    source: toolCall.source,
+    args: normalize(toolCall.args),
+    resources: evaluation.resources.map((resource) => ({
+      ...resource,
+      ...(resource.kind === 'file' && resource.target
+        ? { target: canonicalizeSecurityPath(ctx.cwd, resource.target) }
+        : {}),
+    })),
+    risk: {
+      level: evaluation.risk.level,
+      reasons: [...evaluation.risk.reasons].sort(),
+    },
+    matchedRules: [...evaluation.matchedRuleIds].sort(),
+    decision: {
+      reason: decision.reason,
+      ...(decision.prompt ? { prompt: decision.prompt } : {}),
+    },
+  });
 }
 
 function denyByUser(decision: Extract<SecurityDecision, { kind: 'ask' }>): SecurityDecision {

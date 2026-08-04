@@ -1,5 +1,5 @@
 /**
- * pi-memory-mem0 — Passive semantic memory extension powered by Mem0.
+ * pi-memory-mem0 — Explicit semantic memory extension powered by Mem0.
  *
  * Two modes:
  * - **platform**: Uses Mem0 Cloud API (needs MEM0_API_KEY)
@@ -12,7 +12,7 @@
 
 import { isProjectTrusted, loadPiSettings } from '@amaster.ai/pi-shared/settings';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
-import { Prefetch } from './prefetch.js';
+import { formatRecalledMemory, scopeMemoryUserId } from './privacy.js';
 import { createMem0Provider, type Mem0Provider } from './provider.js';
 import { createMem0Tools } from './tools.js';
 import type { Mem0ExtensionConfig } from './types.js';
@@ -40,12 +40,10 @@ function resolveUserId(configUserId?: string): string {
 
 export default function mem0Extension(pi: ExtensionAPI): void {
   let provider: Mem0Provider | undefined;
-  let prefetch: Prefetch | undefined;
   let userId = '';
-  let lastUserText = '';
-  let pendingWrite: Promise<void> = Promise.resolve();
 
   pi.on('session_start', async (_event, ctx) => {
+    provider = undefined;
     const config = loadConfig(ctx.cwd, isProjectTrusted(ctx));
     const mode = config.mode ?? 'platform';
 
@@ -92,68 +90,13 @@ export default function mem0Extension(pi: ExtensionAPI): void {
       return;
     }
 
-    userId = resolveUserId(config.userId);
-    prefetch = new Prefetch(provider, userId, {
-      topK: config.topK ?? 5,
-    });
+    userId = scopeMemoryUserId(resolveUserId(config.userId), ctx.cwd);
 
     ctx.ui.setStatus(STATUS_KEY, `mem0: ${mode}`);
 
     for (const tool of createMem0Tools(provider, userId)) {
       pi.registerTool(tool as never);
     }
-  });
-
-  pi.on('input', async (event) => {
-    if (!prefetch) return;
-    const text = (event as { text?: string }).text ?? '';
-    if (text) {
-      prefetch.queue(text);
-      lastUserText = text;
-    }
-  });
-
-  pi.on('turn_end', async (event) => {
-    if (!provider || !lastUserText) return;
-
-    const msg = event.message as { role?: string; content?: unknown };
-    const text = extractText(msg);
-    if (!text || msg.role !== 'assistant') return;
-
-    const userText = lastUserText;
-    lastUserText = '';
-    const activeProvider = provider;
-    pendingWrite = pendingWrite
-      .catch(() => {})
-      .then(async () => {
-        await activeProvider.add(
-          [
-            { role: 'user', content: userText },
-            { role: 'assistant', content: text },
-          ],
-          { userId },
-        );
-      })
-      .catch(() => {});
-  });
-
-  pi.on('before_agent_start', async (event) => {
-    if (!prefetch) return;
-
-    const recalled = await prefetch.consume();
-    if (!recalled) return;
-
-    return {
-      systemPrompt: event.systemPrompt ? `${event.systemPrompt}\n\n${recalled}` : recalled,
-    };
-  });
-
-  pi.on('session_shutdown', async () => {
-    await pendingWrite;
-    provider = undefined;
-    prefetch = undefined;
-    lastUserText = '';
-    pendingWrite = Promise.resolve();
   });
 
   pi.registerCommand('mem0', {
@@ -165,7 +108,7 @@ export default function mem0Extension(pi: ExtensionAPI): void {
       }
 
       const config = loadConfig(ctx.cwd, isProjectTrusted(ctx));
-      const userId = resolveUserId(config.userId);
+      const userId = scopeMemoryUserId(resolveUserId(config.userId), ctx.cwd);
       const parts = args.trim().split(/\s+/).filter(Boolean);
       const subcommand = parts[0]?.toLowerCase() ?? 'status';
       const rest = parts.slice(1).join(' ').trim();
@@ -184,7 +127,7 @@ export default function mem0Extension(pi: ExtensionAPI): void {
           if (results.length === 0) {
             ctx.ui.notify('No relevant memories found.', 'info');
           } else {
-            const lines = results.map((r, i) => `${i + 1}. ${r.memory}`);
+            const lines = results.map((r, i) => `${i + 1}. ${formatRecalledMemory(r.memory)}`);
             ctx.ui.notify(`Mem0 search results:\n${lines.join('\n')}`, 'info');
           }
           break;
@@ -194,7 +137,7 @@ export default function mem0Extension(pi: ExtensionAPI): void {
           if (all.length === 0) {
             ctx.ui.notify('No memories stored yet.', 'info');
           } else {
-            const lines = all.map((m, i) => `${i + 1}. ${m.memory}`);
+            const lines = all.map((m, i) => `${i + 1}. ${formatRecalledMemory(m.memory)}`);
             ctx.ui.notify(`Mem0 memories (${all.length}):\n${lines.join('\n')}`, 'info');
           }
           break;
@@ -204,15 +147,4 @@ export default function mem0Extension(pi: ExtensionAPI): void {
       }
     },
   });
-}
-
-function extractText(msg: { content?: unknown }): string {
-  if (typeof msg.content === 'string') return msg.content;
-  if (Array.isArray(msg.content)) {
-    return (msg.content as Array<{ type: string; text?: string }>)
-      .filter((c) => c.type === 'text' && c.text)
-      .map((c) => c.text!)
-      .join('\n');
-  }
-  return '';
 }

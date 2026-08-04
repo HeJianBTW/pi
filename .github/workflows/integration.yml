@@ -247,10 +247,15 @@ jobs:
             tools: workspace_list
             prompt: "Use workspace_list to fetch teamwork workspaces, then tell me the names of the workspaces. Call the tool exactly once."
             assert_pattern: "(workspace|name|id)"
+          # Exercise DeepSeek search and the existing Jina/local fetch path in one job.
           - extension: pi-web-access
-            tools: web_fetch
-            prompt: "Use web_fetch on https://www.baidu.com once. Tell me the page title in one sentence."
-            assert_pattern: "(baidu|百度|bing|google|search|title)"
+            provider: deepseek
+            tools: web_search,web_fetch
+            prompt: "Step 1 — use web_search exactly once with query='DeepSeek API documentation'. Step 2 — use web_fetch exactly once on https://example.com. Report the search provider and fetched page title in one sentence."
+            assert_pattern: "Example Domain"
+            assert_tool: web_search
+            assert_tool_pattern: "Web Search Results.*deepseek"
+            assert_tool_count: 1
           # Firecrawl provider E2E — exercises web_search (/v2/search) and
           # web_fetch (/v2/scrape) against the real Firecrawl API. Uses the
           # same pi-web-access extension but a distinct matrix `provider` key
@@ -298,6 +303,12 @@ jobs:
       PI_OFFLINE: '0'
 
     steps:
+      - name: Isolate temporary files
+        run: |
+          job_tmp="$RUNNER_TEMP/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-extension-${{ strategy.job-index }}"
+          mkdir -p "$job_tmp"
+          echo "TMPDIR=$job_tmp" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v4
       - name: Setup pi build environment
         uses: ./.github/actions/setup-pi-build
@@ -326,16 +337,23 @@ jobs:
           fi
           mkdir -p "$PI_CODING_AGENT_DIR"
 
-          # pi-web-access settings vary by matrix `provider`: the default
-          # entry only wires the summary model (fetch falls back to Jina),
-          # while the firecrawl entry configures Firecrawl as both the search
-          # and fetch provider so web_search (/v2/search) and web_fetch
-          # (/v2/scrape) hit the real API. The apiKey pulls FIRECRAWL_API_KEY
-          # from the environment at pi runtime via ${ENV_VAR} interpolation.
+          # pi-web-access settings vary by matrix `provider`: DeepSeek search
+          # reuses the integration gateway, while Firecrawl configures its own
+          # search and fetch API. Keys are expanded by pi at runtime.
           # (Single-quoted heredoc-var: ${FIRECRAWL_API_KEY} stays literal —
           # bash does not recursively expand a variable's contents, so pi's
           # own ${ENV_VAR} resolver sees the placeholder verbatim.)
-          if [ "${{ matrix.provider }}" = "firecrawl" ]; then
+          if [ "${{ matrix.provider }}" = "deepseek" ]; then
+            WEB_ACCESS_SETTINGS='{
+              "search": { "provider": "deepseek" },
+              "providers": {
+                "deepseek": {
+                  "baseUrl": "${PI_INTEGRATION_BASE_URL}",
+                  "apiKey": "${PI_INTEGRATION_API_KEY}"
+                }
+              }
+            }'
+          elif [ "${{ matrix.provider }}" = "firecrawl" ]; then
             WEB_ACCESS_SETTINGS='{
               "search": { "provider": "firecrawl" },
               "fetch": {
@@ -712,9 +730,14 @@ jobs:
           mkdir -p "$HOME/.local/bin"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           export PATH="$HOME/.local/bin:$PATH"
-          if ! command -v multica >/dev/null 2>&1; then
-            curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
-          fi
+          archive="${RUNNER_TEMP}/multica.tar.gz"
+          curl -fsSL \
+            https://github.com/multica-ai/multica/releases/download/v0.4.15/multica-cli-0.4.15-linux-amd64.tar.gz \
+            -o "$archive"
+          echo "a7e6db95d24b8fb679c0d46d8756e0a324d5231a249fd1393e9f15a17f80e2aa  $archive" |
+            sha256sum -c -
+          tar -xzf "$archive" -C "$HOME/.local/bin" multica
+          chmod 0755 "$HOME/.local/bin/multica"
           multica --version
           multica config set server_url https://multica.ai
           multica daemon start || true   # may already be running on this runner
@@ -736,6 +759,8 @@ jobs:
           matrix.extension != 'pi-video-gen' &&
           env.PI_INTEGRATION_BASE_URL != '' &&
           env.PI_INTEGRATION_API_KEY != ''
+        env:
+          EXTENSION_PROMPT: ${{ matrix.prompt }}
         run: |
           set -euo pipefail
           # The firecrawl matrix entry needs a real Firecrawl API key. Skip it
@@ -772,7 +797,7 @@ jobs:
               --tools '${{ matrix.tools }}' \
               --mode json \
               --goal '' \
-              -p '${{ matrix.prompt }}' 2>&1)"
+              -p "$EXTENSION_PROMPT" 2>&1)"
             rc=$?
           else
             output="$(pi \
@@ -783,7 +808,7 @@ jobs:
               --no-context-files \
               --tools '${{ matrix.tools }}' \
               --mode json \
-              -p '${{ matrix.prompt }}' 2>&1)"
+              -p "$EXTENSION_PROMPT" 2>&1)"
             rc=$?
           fi
           set -e
@@ -851,7 +876,7 @@ jobs:
             fi
             if ! jq -e -s \
               --arg tool '${{ matrix.assert_tool }}' \
-              --arg pattern '${{ matrix.assert_pattern }}' '
+              --arg pattern '${{ matrix.assert_tool_pattern || matrix.assert_pattern }}' '
                 any(.[];
                   .type == "tool_execution_end"
                   and .toolName == $tool
@@ -866,7 +891,19 @@ jobs:
                   )
                 )
               ' <<<"$output" >/dev/null; then
-              echo "::error::${{ matrix.assert_tool }} did not return '${{ matrix.assert_pattern }}' successfully"
+              echo "::error::${{ matrix.assert_tool }} did not return '${{ matrix.assert_tool_pattern || matrix.assert_pattern }}' successfully"
+              exit 1
+            fi
+          fi
+
+          if [ -n "${{ matrix.assert_tool_count }}" ]; then
+            if ! jq -e -s \
+              --arg tool '${{ matrix.assert_tool }}' \
+              --argjson expected_count '${{ matrix.assert_tool_count || 0 }}' '
+                ([.[] | select(.type == "tool_execution_start" and .toolName == $tool)] | length)
+                == $expected_count
+              ' <<<"$output" >/dev/null; then
+              echo "::error::${{ matrix.assert_tool }} was not called exactly ${{ matrix.assert_tool_count }} time(s)"
               exit 1
             fi
           fi

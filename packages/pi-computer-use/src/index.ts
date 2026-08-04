@@ -1,3 +1,5 @@
+import { lstat, realpath } from 'node:fs/promises';
+import path from 'node:path';
 import { isProjectTrusted } from '@amaster.ai/pi-shared/settings';
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
@@ -27,7 +29,46 @@ const HIGH_RISK_TOOLS = new Set([
   'install_ffmpeg',
   'kill_app',
   'replay_trajectory',
+  'start_recording',
 ]);
+
+function isInside(relativePath: string): boolean {
+  return (
+    relativePath === '' ||
+    (relativePath !== '..' &&
+      !relativePath.startsWith(`..${path.sep}`) &&
+      !path.isAbsolute(relativePath))
+  );
+}
+
+async function approvedRecordingDir(value: unknown, cwd: string): Promise<string | undefined> {
+  const root = path.resolve(cwd);
+  const outputDir = path.resolve(cwd, String(value ?? ''));
+  const lexicalRelative = path.relative(root, outputDir);
+  if (!isInside(lexicalRelative)) return undefined;
+
+  try {
+    const canonicalRoot = await realpath(root);
+    let existing = outputDir;
+    const suffix: string[] = [];
+    for (;;) {
+      const info = await lstat(existing).catch(() => undefined);
+      if (info) {
+        if (!info.isDirectory() && !info.isSymbolicLink()) return undefined;
+        if (existing === outputDir && info.isSymbolicLink()) return undefined;
+        const canonical = path.resolve(await realpath(existing), ...suffix);
+        const canonicalRelative = path.relative(canonicalRoot, canonical);
+        return isInside(canonicalRelative) ? canonical : undefined;
+      }
+      const parent = path.dirname(existing);
+      if (parent === existing) return undefined;
+      suffix.unshift(path.basename(existing));
+      existing = parent;
+    }
+  } catch {
+    return undefined;
+  }
+}
 
 function permissionHint(): string {
   switch (process.platform) {
@@ -67,7 +108,7 @@ export default function computerUseExtension(pi: ExtensionAPI): void {
   let client: CuaDriverClient | undefined;
   let sessionAbortController: AbortController | undefined;
   let macPermissionPromise: Promise<void> | undefined;
-  const approvedAppTargets = new Set<string>();
+  const approvedLaunchApprovalKeys = new Set<string>();
 
   async function ensureConnected(
     signal?: AbortSignal,
@@ -110,6 +151,7 @@ export default function computerUseExtension(pi: ExtensionAPI): void {
     params: Record<string, unknown>,
     ctx: ExtensionContext,
   ): Promise<boolean> {
+    const requestedRecordingDir = params.output_dir;
     if (toolName === 'launch_app' && config?.confirmAppLaunch !== false) {
       const target = String(
         params.bundle_id ??
@@ -120,22 +162,41 @@ export default function computerUseExtension(pi: ExtensionAPI): void {
           params.command ??
           'unknown app',
       );
-      if (approvedAppTargets.has(target)) return true;
+      const approvalKey = JSON.stringify(
+        Object.fromEntries(Object.entries(params).sort(([a], [b]) => a.localeCompare(b))),
+      );
+      if (approvedLaunchApprovalKeys.has(approvalKey)) return true;
       if (!ctx.hasUI) return false;
       const approved = await ctx.ui.confirm(
         'Allow computer use?',
         `Allow pi-computer-use to launch and control ${target} for this session?`,
       );
-      if (approved) approvedAppTargets.add(target);
+      if (approved) approvedLaunchApprovalKeys.add(approvalKey);
       return approved;
     }
 
-    if (HIGH_RISK_TOOLS.has(toolName) && config?.confirmDangerousActions !== false) {
+    if (toolName === 'start_recording') {
+      const outputDir = await approvedRecordingDir(requestedRecordingDir, ctx.cwd);
+      if (!outputDir) return false;
+      params.output_dir = outputDir;
+    }
+
+    if (
+      toolName === 'start_recording' ||
+      (HIGH_RISK_TOOLS.has(toolName) && config?.confirmDangerousActions !== false)
+    ) {
       if (!ctx.hasUI) return false;
-      return ctx.ui.confirm(
+      const approved = await ctx.ui.confirm(
         'Confirm high-risk computer action',
         `Allow ${toolName} with arguments ${JSON.stringify(params)}?`,
       );
+      if (!approved) return false;
+      if (toolName === 'start_recording') {
+        const outputDir = await approvedRecordingDir(requestedRecordingDir, ctx.cwd);
+        if (!outputDir || outputDir !== params.output_dir) return false;
+        params.output_dir = outputDir;
+      }
+      return true;
     }
 
     return true;
@@ -407,7 +468,7 @@ export default function computerUseExtension(pi: ExtensionAPI): void {
     client = undefined;
     sessionAbortController = new AbortController();
     macPermissionPromise = undefined;
-    approvedAppTargets.clear();
+    approvedLaunchApprovalKeys.clear();
 
     if (process.platform === 'darwin') {
       registerTools(toolManifest.tools);
@@ -456,7 +517,7 @@ export default function computerUseExtension(pi: ExtensionAPI): void {
     config = undefined;
     sessionAbortController = undefined;
     macPermissionPromise = undefined;
-    approvedAppTargets.clear();
+    approvedLaunchApprovalKeys.clear();
     sessionAbort?.abort(new Error('pi-computer-use: session shut down'));
     await Promise.allSettled([pendingPermission, closingClient?.close()]);
   });

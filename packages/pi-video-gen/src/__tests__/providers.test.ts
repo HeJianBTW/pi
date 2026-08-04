@@ -1,15 +1,23 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { httpStatusError, networkError, safeBasename, VideoGenError } from '../errors.js';
 import { arkAdapter } from '../providers/ark.js';
 import { pollTask, sanitizeProviderMessage } from '../providers/task.js';
 import type { RemoteTaskStatus, ResolvedProvider } from '../types.js';
 
+const { safeFetchMock } = vi.hoisted(() => ({ safeFetchMock: vi.fn() }));
+
+vi.mock('@amaster.ai/pi-shared', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  safeFetch: safeFetchMock,
+}));
+
 const suiteDir = join(tmpdir(), 'pi-video-gen-providers');
 afterEach(() => rmSync(suiteDir, { recursive: true, force: true }));
 beforeEach(() => {
+  safeFetchMock.mockReset();
   mkdirSync(suiteDir, { recursive: true });
   writeFileSync(join(suiteDir, 'frame.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
 });
@@ -197,18 +205,32 @@ describe('arkAdapter.downloadTo', () => {
 
   it('streams to disk with magic-byte validation and atomic rename', async () => {
     const dest = join(suiteDir, 'out.mp4');
+    const fetchImpl = mockFetch(mp4Response);
+    safeFetchMock.mockImplementation(fetchImpl);
     const meta = await arkAdapter.downloadTo(
       provider,
       handle,
       'https://cdn.example/v.mp4',
       dest,
-      mockFetch(mp4Response),
+      fetchImpl,
     );
     expect(meta.path).toBe(dest);
     expect(meta.bytes).toBe(116);
     expect(existsSync(dest)).toBe(true);
     expect(existsSync(`${dest}.tmp`)).toBe(false);
     expect(readFileSync(dest).subarray(4, 8).toString('ascii')).toBe('ftyp');
+  });
+
+  it('blocks a provider-returned loopback URL before download', async () => {
+    const dest = join(suiteDir, 'private.mp4');
+    const { safeFetch } =
+      await vi.importActual<typeof import('@amaster.ai/pi-shared')>('@amaster.ai/pi-shared');
+    safeFetchMock.mockImplementation(safeFetch);
+    const fetchImpl = vi.fn<typeof fetch>();
+    await expect(
+      arkAdapter.downloadTo(provider, handle, 'http://127.0.0.1/private.mp4', dest, fetchImpl),
+    ).rejects.toThrow(/public HTTP/i);
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it('refuses a pre-placed destination symlink (and never follows it)', async () => {
@@ -240,12 +262,14 @@ describe('arkAdapter.downloadTo', () => {
     const { symlinkSync } = await import('node:fs');
     symlinkSync(victim, `${dest}.tmp-${process.pid}-0`, 'file');
 
+    const fetchImpl = mockFetch(mp4Response);
+    safeFetchMock.mockImplementation(fetchImpl);
     const meta = await arkAdapter.downloadTo(
       provider,
       handle,
       'https://cdn.example/v.mp4',
       dest,
-      mockFetch(mp4Response),
+      fetchImpl,
     );
     expect(readFileSync(victim, 'utf-8')).toBe('precious'); // untouched
     expect(meta.bytes).toBe(116); // download still succeeded via the next counter
@@ -255,6 +279,7 @@ describe('arkAdapter.downloadTo', () => {
   it('rejects non-mp4 payloads and cleans up the temp file', async () => {
     const dest = join(suiteDir, 'bad.mp4');
     const html = mockFetch(() => new Response('<html>error</html>', { status: 200 }));
+    safeFetchMock.mockImplementation(html);
     await expect(
       arkAdapter.downloadTo(provider, handle, 'https://cdn.example/v.mp4', dest, html),
     ).rejects.toThrow(/not an mp4/);

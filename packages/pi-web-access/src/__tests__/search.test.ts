@@ -194,6 +194,56 @@ describe('search', () => {
     ]);
   });
 
+  it('rejects a provider response that exceeds the Formula call budget', async () => {
+    const settings: WebToolSettings = {
+      search: { provider: 'kimi' },
+      providers: { kimi: { apiKey: 'kimi-key' } },
+    };
+    const calls = Array.from({ length: 5 }, (_, index) => ({
+      id: `call_${index}`,
+      type: 'function' as const,
+      function: { name: 'web_search', arguments: `{"query":"${index}"}` },
+    }));
+    mockFetch
+      .mockResolvedValueOnce(okJson({ tools: KIMI_FORMULA_TOOLS }))
+      .mockResolvedValueOnce(kimiToolCalls(calls));
+
+    await expect(search({ query: 'test' }, settings)).rejects.toThrow(/tool-call budget/i);
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejects accumulated Formula context that exceeds the prompt-size budget', async () => {
+    const settings: WebToolSettings = {
+      search: { provider: 'kimi' },
+      providers: { kimi: { apiKey: 'kimi-key' } },
+    };
+    mockFetch.mockResolvedValueOnce(okJson({ tools: KIMI_FORMULA_TOOLS }));
+
+    await expect(search({ query: 'x'.repeat(1024 * 1024) }, settings)).rejects.toThrow(
+      /prompt-size budget/i,
+    );
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops before another request after the total elapsed-time budget', async () => {
+    const settings: WebToolSettings = {
+      search: { provider: 'kimi' },
+      providers: { kimi: { apiKey: 'kimi-key' } },
+    };
+    const now = vi
+      .spyOn(Date, 'now')
+      .mockReturnValueOnce(1_000)
+      .mockReturnValueOnce(1_000)
+      .mockReturnValueOnce(121_001);
+    mockFetch.mockResolvedValueOnce(okJson({ tools: KIMI_FORMULA_TOOLS }));
+    try {
+      await expect(search({ query: 'test' }, settings)).rejects.toThrow(/elapsed-time budget/i);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    } finally {
+      now.mockRestore();
+    }
+  });
+
   it('rejects an unsuccessful Formula web search', async () => {
     const settings: WebToolSettings = {
       search: { provider: 'kimi' },

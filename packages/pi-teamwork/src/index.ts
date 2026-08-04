@@ -117,15 +117,11 @@ export default function piTeamworkExtension(pi: ExtensionAPI): void {
 
       if (!installResult.installed) {
         ctx.ui.notify(
-          `multica CLI could not be installed: ${installResult.error ?? 'unknown error'}. Run "multica setup" manually.`,
+          `multica CLI is unavailable: ${installResult.error ?? 'unknown error'}. Run "multica setup" after installing it.`,
           'warning',
         );
         ctx.ui.setStatus(STATUS_KEY, 'teamwork: multica (not installed)');
         return;
-      }
-
-      if (!installResult.alreadyPresent) {
-        ctx.ui.notify('multica CLI was auto-installed successfully.', 'info');
       }
 
       if (!config.multica?.token && !config.multica?.serverUrl) {

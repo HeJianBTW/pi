@@ -339,10 +339,10 @@ The markdown URL is platform-shaped so any CommonMark host (desktop, TUI, CLI) k
 
 `image` is always an array — pass `["path"]` for a single image, `["a", "b"]` for multi-image conditioning. Each entry must be:
 
-- **Local file path** — absolute or relative (resolved against the session cwd).
-- **http(s) URL** — downloaded with the same fetch (and abort signal) used for the API call.
+- **Local file path** — a regular png/jpeg/gif/webp file inside the session cwd. Paths may be absolute or relative, but symlinks and paths outside cwd are rejected.
+- **Public http(s) URL** — private, loopback, link-local, metadata, credentialed, and unsafe redirect destinations are rejected.
 
-Base64 strings and `data:` URIs are intentionally rejected — tool arguments don't survive megabyte-sized strings cleanly. If you have raw image bytes, write them to a file first and pass the path.
+Base64 strings and `data:` URIs are intentionally rejected — tool arguments don't survive megabyte-sized strings cleanly. If you have raw image bytes, write them to a file under the session cwd and pass that path.
 
 **Iterating on a previous result:** pass the previous output path back. The next image is conditioned on the last one:
 

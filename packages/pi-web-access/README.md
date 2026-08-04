@@ -25,7 +25,7 @@ Fetch a URL and process its content with a prompt. Only registered when `fetch.p
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `url` | string | yes | The URL to fetch |
+| `url` | string | yes | Public HTTP(S) URL; private, loopback, link-local, metadata, credentialed, and unsafe redirect destinations are rejected |
 | `prompt` | string | yes | What information to extract or summarize |
 
 ### `x_search`

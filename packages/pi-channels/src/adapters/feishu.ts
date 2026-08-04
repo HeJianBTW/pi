@@ -525,7 +525,10 @@ export function createFeishuAdapter(
 
     if (server) return;
     const incoming = cfg.incoming ?? {};
-    const host = incoming.host ?? '0.0.0.0';
+    if (!optionalNonEmptyString(cfg.encryptKey)) {
+      throw new Error('Feishu HTTP mode requires encryptKey for event signature verification');
+    }
+    const host = incoming.host ?? '127.0.0.1';
     const port = incoming.port ?? 8787;
     const path = incoming.path ?? '/feishu/events';
     const dispatcher = new lark.EventDispatcher({

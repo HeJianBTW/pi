@@ -2,6 +2,7 @@ import { createWriteStream, existsSync } from 'node:fs';
 import { lstat, rename, unlink } from 'node:fs/promises';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
+import { safeFetch } from '@amaster.ai/pi-shared';
 import {
   RemoteTaskFailedError,
   RetryableProviderError,
@@ -170,8 +171,11 @@ export async function downloadFile(opts: {
 
   let res: Response;
   try {
-    res = await opts.fetchImpl(opts.url, { signal });
-  } catch {
+    res = await safeFetch(opts.url, { signal });
+  } catch (error) {
+    if (error instanceof Error && /public HTTP|redirect limit/i.test(error.message)) {
+      throw new VideoGenError(error.message, 'download: unsafe URL');
+    }
     throw new VideoGenError(
       'Downloading the finished video failed: network error. The video URL may have expired — rerun to regenerate.',
       'download: network error',

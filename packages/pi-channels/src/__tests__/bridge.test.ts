@@ -1,7 +1,13 @@
 import { EventEmitter } from 'node:events';
-import { beforeEach, describe, expect, test, vi } from 'vitest';
+import { mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { getPackageDir } from '@earendil-works/pi-coding-agent';
+import { beforeEach, describe, expect, it, test, vi } from 'vitest';
 
 const mockSpawn = vi.fn();
+const trustedRuntime = realpathSync.native(process.execPath);
+const trustedCli = realpathSync.native(join(getPackageDir(), 'dist', 'cli.js'));
 
 vi.mock('node:child_process', () => ({
   spawn: (...args: unknown[]) => mockSpawn(...args),
@@ -65,8 +71,9 @@ describe('ChatBridge', () => {
     });
 
     expect(mockSpawn).toHaveBeenCalledWith(
-      'pi',
+      trustedRuntime,
       [
+        trustedCli,
         '-p',
         '--offline',
         '--no-extensions',
@@ -84,6 +91,60 @@ describe('ChatBridge', () => {
         metadata: { messageId: 'om_1', threadId: 'omt_1' },
       });
     });
+  });
+
+  it('does not execute a project-local Pi binary discovered from cwd', async () => {
+    const cwd = join(tmpdir(), `pi-channels-bridge-${process.pid}`);
+    rmSync(cwd, { recursive: true, force: true });
+    try {
+      const localBin = join(cwd, 'node_modules', '.bin', 'pi');
+      mkdirSync(join(cwd, 'node_modules', '.bin'), { recursive: true });
+      writeFileSync(localBin, '#!/bin/sh\n');
+      mockSpawn.mockReturnValue(createChild('pong'));
+      const registry = {
+        getAdapter: vi.fn(() => ({ sendTyping: vi.fn(() => Promise.resolve()) })),
+        send: vi.fn(() => Promise.resolve({ ok: true })),
+      };
+      const bridge = new ChatBridge({ enabled: true }, cwd, registry as never);
+      bridge.start();
+
+      await bridge.handleMessage({ adapter: 'feishu', sender: 'oc_chat', text: 'ping' });
+      await vi.waitFor(() => expect(mockSpawn).toHaveBeenCalled());
+
+      expect(mockSpawn.mock.calls[0]?.[0]).toBe(trustedRuntime);
+      expect(mockSpawn.mock.calls[0]?.[1]?.[0]).toBe(trustedCli);
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects an explicit Pi binary inside a dot-prefixed workspace directory', async () => {
+    const cwd = join(tmpdir(), `pi-channels-bridge-explicit-${process.pid}`);
+    rmSync(cwd, { recursive: true, force: true });
+    try {
+      const localBin = join(cwd, '..trusted', 'pi');
+      mkdirSync(join(cwd, '..trusted'), { recursive: true });
+      writeFileSync(localBin, '#!/bin/sh\n');
+      mockSpawn.mockReturnValue(createChild('pong'));
+      const registry = {
+        getAdapter: vi.fn(() => ({ sendTyping: vi.fn(() => Promise.resolve()) })),
+        send: vi.fn(() => Promise.resolve({ ok: true })),
+      };
+      const bridge = new ChatBridge({ enabled: true, piBin: localBin }, cwd, registry as never);
+      bridge.start();
+
+      await bridge.handleMessage({ adapter: 'feishu', sender: 'oc_chat', text: 'ping' });
+      await vi.waitFor(() => expect(registry.send).toHaveBeenCalled());
+
+      expect(mockSpawn).not.toHaveBeenCalled();
+      expect(registry.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          text: expect.stringContaining('must be outside the workspace'),
+        }),
+      );
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
   });
 
   test('registers the bridge provider when anthropic-compatible env is configured', async () => {
@@ -106,8 +167,9 @@ describe('ChatBridge', () => {
     await new Promise((resolve) => setImmediate(resolve));
 
     expect(mockSpawn).toHaveBeenCalledWith(
-      'pi',
+      trustedRuntime,
       [
+        trustedCli,
         '-p',
         '--offline',
         '--no-extensions',

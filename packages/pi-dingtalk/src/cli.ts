@@ -1,4 +1,4 @@
-import { exec } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -11,9 +11,9 @@ const BIN_PATH = join(INSTALL_DIR, 'node_modules', '.bin', 'dws');
 let installAttempted = false;
 let cliAvailable: boolean | undefined;
 
-function execAsync(command: string): Promise<{ stdout: string; stderr: string }> {
+function execAsync(file: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    exec(command, (error, stdout, stderr) => {
+    execFile(file, args, (error, stdout, stderr) => {
       if (error) reject(error);
       else resolve({ stdout, stderr });
     });
@@ -28,7 +28,7 @@ function dwsBin(): string {
 export async function isDwsInstalled(): Promise<boolean> {
   if (cliAvailable !== undefined) return cliAvailable;
   try {
-    await execAsync(`"${dwsBin()}" --version`);
+    await execAsync(dwsBin(), ['--version']);
     cliAvailable = true;
     return true;
   } catch {
@@ -41,7 +41,7 @@ export async function installDws(): Promise<void> {
   if (installAttempted) return;
   installAttempted = true;
   mkdirSync(INSTALL_DIR, { recursive: true });
-  await execAsync(`npm install --prefix "${INSTALL_DIR}" ${NPM_PACKAGE}@latest`);
+  await execAsync('npm', ['install', '--prefix', INSTALL_DIR, `${NPM_PACKAGE}@latest`]);
   cliAvailable = undefined;
 }
 
@@ -57,9 +57,19 @@ export async function initDws(config: DingTalkConfig): Promise<void> {
     throw new Error('clientId and clientSecret are required');
   }
   const bin = dwsBin();
-  await execAsync(
-    `"${bin}" auth login --client-id "${clientId}" --client-secret "${clientSecret}" --yes`,
-  );
+  try {
+    await execAsync(bin, [
+      'auth',
+      'login',
+      '--client-id',
+      clientId,
+      '--client-secret',
+      clientSecret,
+      '--yes',
+    ]);
+  } catch {
+    throw new Error('dws auth login failed');
+  }
 }
 
 export async function getDwsSkillsDir(): Promise<string | undefined> {
@@ -73,7 +83,7 @@ export async function getDwsSkillsDir(): Promise<string | undefined> {
   if (existsSync(localSkills)) return localSkills;
 
   try {
-    const { stdout } = await execAsync('npm root -g');
+    const { stdout } = await execAsync('npm', ['root', '-g']);
     const skillsPath = join(stdout.trim(), 'dingtalk-workspace-cli', 'skills', 'multi');
     if (existsSync(skillsPath)) return skillsPath;
   } catch {

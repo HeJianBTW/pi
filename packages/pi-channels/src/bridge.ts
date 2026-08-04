@@ -1,8 +1,9 @@
 import { type ChildProcess, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { existsSync, mkdirSync, realpathSync } from 'node:fs';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { getPackageDir } from '@earendil-works/pi-coding-agent';
 import type { ChannelRegistry } from './registry.js';
 import type { BridgeConfig, IncomingMessage } from './types.js';
 
@@ -452,7 +453,20 @@ function runPrompt(options: {
     if (provider) args.push('--provider', provider);
     if (model) args.push('--model', model);
     args.push(formatBridgePrompt(options.prompt));
-    const command = resolvePiCommand(options.cwd, options.piBin);
+    let command: string;
+    let commandArgs: string[];
+    try {
+      const resolvedCommand = resolvePiCommand(options.piBin, options.cwd);
+      command = resolvedCommand.command;
+      commandArgs = [...resolvedCommand.argsPrefix, ...args];
+    } catch (error) {
+      resolve({
+        ok: false,
+        response: '',
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return;
+    }
 
     if (process.env.DEBUG?.includes('pi-channels')) {
       console.error('[pi-channels] bridge_run_prompt', {
@@ -471,7 +485,7 @@ function runPrompt(options: {
 
     let child: ChildProcess;
     try {
-      child = spawn(command, args, {
+      child = spawn(command, commandArgs, {
         cwd: options.cwd,
         stdio: ['ignore', 'pipe', 'pipe'],
         env: { ...process.env, ...(options.env ?? {}) },
@@ -568,31 +582,32 @@ function resolveBridgeProviderExtensionPath(): string {
   return join(dirname(fileURLToPath(import.meta.url)), 'bridge-provider.js');
 }
 
-function resolvePiCommand(cwd: string, configured: string): string {
+function resolvePiCommand(
+  configured: string,
+  cwd: string,
+): { command: string; argsPrefix: string[] } {
   const explicit = trimToNull(configured) ?? trimToNull(process.env.PI_CHANNELS_PI_BIN);
-  if (explicit) return explicit;
-
-  for (const candidate of discoverPiBins(cwd)) {
-    if (existsSync(candidate)) return candidate;
+  if (explicit) {
+    if (!isAbsolute(explicit)) {
+      throw new Error('Channel bridge Pi binary must be an absolute path.');
+    }
+    const command = realpathSync.native(explicit);
+    const canonicalCwd = existsSync(cwd) ? realpathSync.native(cwd) : resolve(cwd);
+    const pathFromCwd = relative(canonicalCwd, command);
+    const insideWorkspace =
+      pathFromCwd === '' ||
+      (pathFromCwd !== '..' && !pathFromCwd.startsWith(`..${sep}`) && !isAbsolute(pathFromCwd));
+    if (insideWorkspace) {
+      throw new Error('Channel bridge Pi binary must be outside the workspace.');
+    }
+    return { command, argsPrefix: [] };
   }
-  return 'pi';
-}
 
-function discoverPiBins(cwd: string): string[] {
-  const bins: string[] = [];
-  let current = resolve(cwd);
-  while (true) {
-    bins.push(join(current, 'node_modules', '.bin', piBinName()));
-    bins.push(join(current, '.pi', 'npm', 'node_modules', '.bin', piBinName()));
-    const parent = dirname(current);
-    if (parent === current) break;
-    current = parent;
-  }
-  return bins;
-}
-
-function piBinName(): string {
-  return process.platform === 'win32' ? 'pi.cmd' : 'pi';
+  const cliPath = realpathSync.native(join(getPackageDir(), 'dist', 'cli.js'));
+  return {
+    command: realpathSync.native(process.execPath),
+    argsPrefix: [cliPath],
+  };
 }
 
 function trimToNull(value: string | undefined): string | null {

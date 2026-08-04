@@ -274,7 +274,7 @@ export default function piChannelsExtension(pi: ExtensionAPI): void {
       method: Type.Optional(Type.String({ description: 'Webhook HTTP method override.' })),
       contentType: Type.Optional(Type.String({ description: 'Webhook Content-Type override.' })),
     }) as never,
-    async execute(_toolCallId: string, rawParams: unknown) {
+    async execute(_toolCallId: string, rawParams: unknown, signal: AbortSignal) {
       const params = rawParams as NotifyParams;
       if (
         params.action === 'list' ||
@@ -338,7 +338,7 @@ export default function piChannelsExtension(pi: ExtensionAPI): void {
       if (params.action === 'test') message.source = 'channel:test';
       else if (params.source !== undefined) message.source = params.source;
       if (rawBody !== undefined) message.rawBody = rawBody;
-      const result = await registry.send(message);
+      const result = await registry.send(message, signal);
       return textToolResult(
         result.ok
           ? `Sent via "${adapterName.value}"${params.recipient ? ` to ${params.recipient}` : ''}.`

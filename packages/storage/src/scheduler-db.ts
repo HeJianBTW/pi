@@ -168,6 +168,7 @@ function scheduledTaskWhere(
     deletedAt: null,
     ...(scope.tenantId ? { tenantId: scope.tenantId } : {}),
     ...(scope.userId ? { userId: scope.userId } : {}),
+    ...(scope.sessionId ? { sessionId: scope.sessionId } : {}),
     ...extra,
   };
 }

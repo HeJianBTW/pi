@@ -1316,33 +1316,15 @@ function applyTelemetryRedaction(
 
 function stripTelemetryPayloads(event: RuntimeTelemetryEvent): RuntimeTelemetryEvent {
   if (isLlmGenerationEvent(event)) {
-    const { input: _input, output: _output, ...rest } = event;
+    const { input: _input, output: _output, error: _error, ...rest } = event;
     return rest as RuntimeTelemetryEvent;
   }
   if (isToolEvent(event)) {
-    const { args: _args, details, ...rest } = event;
-    return {
-      ...rest,
-      ...(details ? { details: redactJsonObjectPayload(details) } : {}),
-    } as RuntimeTelemetryEvent;
+    const { args: _args, details: _details, error: _error, ...rest } = event;
+    return rest as RuntimeTelemetryEvent;
   }
-  const { details, ...rest } = event;
-  return {
-    ...rest,
-    ...(details ? { details: redactJsonObjectPayload(details) } : {}),
-  } as RuntimeTelemetryEvent;
-}
-
-function redactJsonObjectPayload(input: JsonObject): JsonObject {
-  const {
-    input: _input,
-    output: _output,
-    args: _args,
-    content: _content,
-    code: _code,
-    ...rest
-  } = input;
-  return rest;
+  const { details: _details, error: _error, ...rest } = event;
+  return rest as RuntimeTelemetryEvent;
 }
 
 function isToolEvent(event: RuntimeTelemetryEvent): event is RuntimeToolEvent {

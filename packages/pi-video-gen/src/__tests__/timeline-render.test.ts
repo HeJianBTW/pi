@@ -229,6 +229,23 @@ function toneAmplitude(videoPath: string, frequency: number): number {
 describe('timeline pipeline (C1–C4)', () => {
   let cwd: string;
 
+  it('requires explicit Edge TTS opt-in before sending narration text', async () => {
+    const image = await makeImage(cwd, 'tts-opt-in.png', { r: 1, g: 2, b: 3 });
+    const jobDir = join(cwd, '.video-gen', 'tts-opt-in');
+    mkdirSync(jobDir, { recursive: true });
+    const specPath = join(jobDir, 'timeline-input.json');
+    writeFileSync(
+      specPath,
+      JSON.stringify({
+        segments: [{ id: 's1', image, durationSec: 1, narration: 'private narration' }],
+      }),
+    );
+    const { tts: _tts, ...withoutInjectedTts } = baseOpts(cwd);
+    await expect(
+      runTimeline({ timelineSpecPath: specPath, ...withoutInjectedTts }),
+    ).rejects.toThrow(/explicit Edge TTS opt-in/i);
+  });
+
   beforeEach(() => {
     cwd = join(suiteDir, `run-${Math.random().toString(36).slice(2, 8)}`);
     mkdirSync(cwd, { recursive: true });
@@ -236,6 +253,47 @@ describe('timeline pipeline (C1–C4)', () => {
 
   afterEach(() => {
     rmSync(cwd, { recursive: true, force: true });
+  });
+
+  it('rejects timeline media outside the project directory', async () => {
+    const outside = `${cwd}-outside`;
+    try {
+      const image = await makeImage(outside, 'private.png', { r: 1, g: 2, b: 3 });
+      const jobDir = join(cwd, '.video-gen', 'outside-media');
+      mkdirSync(jobDir, { recursive: true });
+      const specPath = join(jobDir, 'timeline-input.json');
+      writeFileSync(specPath, JSON.stringify({ segments: [{ id: 's1', image, durationSec: 1 }] }));
+
+      await expect(runTimeline({ timelineSpecPath: specPath, ...baseOpts(cwd) })).rejects.toThrow(
+        /inside the approved project directory/i,
+      );
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects timeline media through a parent symlink', async () => {
+    const outside = `${cwd}-outside`;
+    try {
+      await makeImage(outside, 'private.png', { r: 1, g: 2, b: 3 });
+      const link = join(cwd, 'linked-media');
+      symlinkSync(outside, link, 'dir');
+      const jobDir = join(cwd, '.video-gen', 'linked-media');
+      mkdirSync(jobDir, { recursive: true });
+      const specPath = join(jobDir, 'timeline-input.json');
+      writeFileSync(
+        specPath,
+        JSON.stringify({
+          segments: [{ id: 's1', image: join(link, 'private.png'), durationSec: 1 }],
+        }),
+      );
+
+      await expect(runTimeline({ timelineSpecPath: specPath, ...baseOpts(cwd) })).rejects.toThrow(
+        /inside the approved project directory/i,
+      );
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
   });
 
   it('renders a text overlay PNG via sharp', async () => {

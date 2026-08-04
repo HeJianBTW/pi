@@ -1,7 +1,6 @@
-import { COPYFILE_EXCL } from 'node:constants';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { copyFile, readFile, rename } from 'node:fs/promises';
+import { open, readFile, rename } from 'node:fs/promises';
 import { extname, join, resolve } from 'node:path';
 import { isProjectTrusted } from '@amaster.ai/pi-shared/settings';
 import { StringEnum } from '@earendil-works/pi-ai';
@@ -29,6 +28,7 @@ import {
   toLogSummary,
 } from './errors.js';
 import { resolveFfmpeg, resolveFfprobe, resolveGplFfmpeg } from './ffmpeg.js';
+import { readApprovedFrame } from './frame-input.js';
 import {
   ActiveJobs,
   assertSafeId,
@@ -124,7 +124,7 @@ function buildGenerateParams(caps: VideoModelCapabilities | null) {
     firstFrame: Type.Optional(
       Type.String({
         description:
-          'Path to a first-frame reference image (png/jpg/webp), absolute or relative to the session cwd.',
+          'Path to a regular png/jpg/webp first-frame image inside the session cwd. The path may be absolute or relative; symlinks and paths outside cwd are rejected.',
       }),
     ),
     ...(caps?.supportsFirstLastFrame
@@ -132,7 +132,7 @@ function buildGenerateParams(caps: VideoModelCapabilities | null) {
           lastFrame: Type.Optional(
             Type.String({
               description:
-                'Path to a last-frame reference image for first+last-frame interpolation.',
+                'Path to a regular png/jpg/webp last-frame image inside the session cwd for first+last-frame interpolation.',
             }),
           ),
         }
@@ -183,7 +183,9 @@ export default function piVideoGenExtension(pi: ExtensionAPI): void {
     jobDir: string,
     sourcePath: string,
     label: string,
+    cwd: string,
   ): Promise<{ rel: string; hash: string }> => {
+    const bytes = await readApprovedFrame(sourcePath, cwd);
     const ext = extname(sourcePath) || '.png';
     const rel = join('assets', `${label}${ext}`);
     const dest = join(jobDir, rel);
@@ -192,7 +194,12 @@ export default function piVideoGenExtension(pi: ExtensionAPI): void {
     for (let i = 0; ; i++) {
       const candidate = `${dest}.tmp-${process.pid}-${i}`;
       try {
-        await copyFile(sourcePath, candidate, COPYFILE_EXCL);
+        const file = await open(candidate, 'wx');
+        try {
+          await file.writeFile(bytes);
+        } finally {
+          await file.close();
+        }
         tmp = candidate;
         break;
       } catch (error) {
@@ -407,19 +414,24 @@ export default function piVideoGenExtension(pi: ExtensionAPI): void {
       const frameHashes: Record<string, string> = {};
       try {
         if (params.firstFramePath) {
-          const snap = await snapshotFrame(jobDir, params.firstFramePath, 'first_frame');
+          const snap = await snapshotFrame(jobDir, params.firstFramePath, 'first_frame', ctx.cwd);
           frameHashes[snap.rel] = snap.hash;
           params.firstFramePath = join(jobDir, snap.rel);
         }
         if (params.lastFramePath) {
-          const snap = await snapshotFrame(jobDir, params.lastFramePath, 'last_frame');
+          const snap = await snapshotFrame(jobDir, params.lastFramePath, 'last_frame', ctx.cwd);
           frameHashes[snap.rel] = snap.hash;
           params.lastFramePath = join(jobDir, snap.rel);
         }
         if (params.referenceImagePaths?.length) {
           const frozenRefs: string[] = [];
           for (let i = 0; i < params.referenceImagePaths.length; i++) {
-            const snap = await snapshotFrame(jobDir, params.referenceImagePaths[i]!, `ref_${i}`);
+            const snap = await snapshotFrame(
+              jobDir,
+              params.referenceImagePaths[i]!,
+              `ref_${i}`,
+              ctx.cwd,
+            );
             frameHashes[snap.rel] = snap.hash;
             frozenRefs.push(join(jobDir, snap.rel));
           }
@@ -427,7 +439,7 @@ export default function piVideoGenExtension(pi: ExtensionAPI): void {
         }
       } catch {
         return errResult(
-          'A reference frame is not readable. Use the absolute path returned by image_generate, or an existing png/jpg/webp file.',
+          'A reference frame is not readable. Use an image_generate result inside the session cwd, or an existing png/jpg/webp file under cwd.',
         );
       }
 
@@ -784,6 +796,7 @@ export default function piVideoGenExtension(pi: ExtensionAPI): void {
         'For timeline: each segment contains exactly one image or video. Video uses numeric durationSec with optional trimStartSec, fit, and sourceAudio; image may use auto duration and motion.',
         'Reuse existing images/screenshots/clips first and generate only missing visuals with image_generate. Put Chinese titles in overlay and use subtitles.mode "burn" when narration subtitles must appear directly in the frames.',
         'Timeline TTS failures stop by default. Set ttsFailureMode "silent-subtitles" in timeline-input.json only after the user explicitly accepts silent audio with preserved subtitles.',
+        'Narration is not fully local: require an explicit voice such as "edge-tts:zh-CN-YunyangNeural" only after disclosing that narration text is sent to Microsoft Edge TTS.',
         'Local compute — no paid-model confirmation needed, but tell the user the segment/clip count and planned duration before calling.',
         'The spec is immutable per job directory: rerunning the same path resumes identical input; changing input means a NEW job directory.',
       ],
