@@ -8,12 +8,24 @@ export type DnsLookup = (hostname: string) => Promise<Array<{ address: string; f
 
 const defaultLookup: DnsLookup = async (hostname) =>
   nodeLookup(hostname, { all: true, verbatim: true });
-const localUseAddresses = new BlockList();
-localUseAddresses.addSubnet('64:ff9b:1::', 48, 'ipv6');
 const wellKnownNat64Addresses = new BlockList();
 wellKnownNat64Addresses.addSubnet('64:ff9b::', 96, 'ipv6');
-const sixToFourAddresses = new BlockList();
-sixToFourAddresses.addSubnet('2002::', 16, 'ipv6');
+const globalIpv6Addresses = new BlockList();
+globalIpv6Addresses.addSubnet('2000::', 3, 'ipv6');
+const nonGlobalIpv6Addresses = new BlockList();
+nonGlobalIpv6Addresses.addSubnet('2001::', 23, 'ipv6');
+nonGlobalIpv6Addresses.addSubnet('2001:db8::', 32, 'ipv6');
+nonGlobalIpv6Addresses.addSubnet('2002::', 16, 'ipv6');
+nonGlobalIpv6Addresses.addSubnet('3fff::', 20, 'ipv6');
+// IANA marks 2001::/23 non-global except for these more-specific allocations.
+const globalIetfProtocolAddresses = new BlockList();
+globalIetfProtocolAddresses.addAddress('2001:1::1', 'ipv6');
+globalIetfProtocolAddresses.addAddress('2001:1::2', 'ipv6');
+globalIetfProtocolAddresses.addAddress('2001:1::3', 'ipv6');
+globalIetfProtocolAddresses.addSubnet('2001:3::', 32, 'ipv6');
+globalIetfProtocolAddresses.addSubnet('2001:4:112::', 48, 'ipv6');
+globalIetfProtocolAddresses.addSubnet('2001:20::', 28, 'ipv6');
+globalIetfProtocolAddresses.addSubnet('2001:30::', 28, 'ipv6');
 
 function isPublicIpv4(address: string): boolean {
   const octets = address.split('.').map(Number);
@@ -29,7 +41,10 @@ function isPublicIpv4(address: string): boolean {
     (a === 172 && b >= 16 && b <= 31) ||
     (a === 192 && b === 168) ||
     (a === 192 && b === 0 && c === 0) ||
-    (a === 198 && (b === 18 || b === 19))
+    (a === 192 && b === 0 && c === 2) ||
+    (a === 192 && b === 88 && c === 99) ||
+    (a === 198 && (b === 18 || b === 19 || (b === 51 && c === 100))) ||
+    (a === 203 && b === 0 && c === 113)
   ) {
     return false;
   }
@@ -64,22 +79,13 @@ function isPublicIp(address: string): boolean {
   const family = isIP(normalized);
   if (family === 4) return isPublicIpv4(normalized);
   if (family !== 6) return false;
-  if (localUseAddresses.check(normalized, 'ipv6') || sixToFourAddresses.check(normalized, 'ipv6')) {
-    return false;
-  }
-  if (
-    normalized === '::' ||
-    normalized === '::1' ||
-    normalized.startsWith('fc') ||
-    normalized.startsWith('fd') ||
-    /^fe[89ab]/.test(normalized) ||
-    /^fe[c-f]/.test(normalized) ||
-    normalized.startsWith('ff')
-  ) {
-    return false;
-  }
   const embeddedIpv4 = mappedIpv4(normalized) ?? nat64Ipv4(normalized);
-  return embeddedIpv4 ? isPublicIpv4(embeddedIpv4) : true;
+  if (embeddedIpv4) return isPublicIpv4(embeddedIpv4);
+  if (!globalIpv6Addresses.check(normalized, 'ipv6')) return false;
+  return (
+    globalIetfProtocolAddresses.check(normalized, 'ipv6') ||
+    !nonGlobalIpv6Addresses.check(normalized, 'ipv6')
+  );
 }
 
 /**

@@ -9,7 +9,16 @@ describe('network', () => {
     'http://0.0.0.0/private',
     'http://169.254.169.254/latest/meta-data',
     'http://10.0.0.1/private',
+    'http://192.0.2.1/documentation',
+    'http://198.51.100.1/documentation',
+    'http://203.0.113.1/documentation',
     'http://[::1]/private',
+    'http://[::c0a8:101]/ipv4-compatible-private',
+    'http://[100::1]/discard-only',
+    'http://[2001:2::1]/benchmarking',
+    'http://[2001:db8::1]/documentation',
+    'http://[3fff::1]/documentation',
+    'http://[5f00::1]/segment-routing',
     'http://[fec0::1]/private',
     'http://[64:ff9b:1::a00:1]/private',
     'http://[64:ff9b::a9fe:a9fe]/latest/meta-data',
@@ -49,6 +58,12 @@ describe('network', () => {
     await expect(
       assertPublicHttpUrl('http://[64:ff9b::5db8:d822]/path', publicLookup),
     ).resolves.toMatchObject({ hostname: '[64:ff9b::5db8:d822]' });
+    await expect(
+      assertPublicHttpUrl('https://[2606:4700:4700::1111]/path', publicLookup),
+    ).resolves.toMatchObject({ hostname: '[2606:4700:4700::1111]' });
+    await expect(
+      assertPublicHttpUrl('https://[2001:3::1]/path', publicLookup),
+    ).resolves.toMatchObject({ hostname: '[2001:3::1]' });
   });
 
   it('does not let a wrapped global fetch bypass DNS validation', async () => {
