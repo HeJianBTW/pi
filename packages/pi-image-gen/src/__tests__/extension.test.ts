@@ -12,6 +12,13 @@ import piImageGenExtension, {
 } from '../index.js';
 import type { ImageGenSettings } from '../types.js';
 
+const { safeFetchMock } = vi.hoisted(() => ({ safeFetchMock: vi.fn() }));
+
+vi.mock('@amaster.ai/pi-shared', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  safeFetch: safeFetchMock,
+}));
+
 type ToolDef = {
   name: string;
   promptSnippet?: string;
@@ -290,6 +297,7 @@ describe('image_generate execute error surfaces are sanitized', () => {
   beforeEach(() => {
     tmpDirs.length = 0;
     realFetch = globalThis.fetch;
+    safeFetchMock.mockReset().mockImplementation((input, init) => globalThis.fetch(input, init));
     // Stub (don't assign) so it's auto-reverted after each test — a bare
     // process.env write would leak into other tests sharing this worker.
     vi.stubEnv('OPENAI_API_KEY', 'sk-test');

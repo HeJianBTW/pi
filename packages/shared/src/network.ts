@@ -8,7 +8,6 @@ export type DnsLookup = (hostname: string) => Promise<Array<{ address: string; f
 
 const defaultLookup: DnsLookup = async (hostname) =>
   nodeLookup(hostname, { all: true, verbatim: true });
-const platformFetch = globalThis.fetch;
 const localUseAddresses = new BlockList();
 localUseAddresses.addSubnet('64:ff9b:1::', 48, 'ipv6');
 
@@ -110,26 +109,16 @@ export async function safeFetch(
   value: string | URL,
   init: RequestInit = {},
   options: {
-    fetchImpl?: typeof fetch;
     lookup?: DnsLookup;
     maxRedirects?: number;
   } = {},
 ): Promise<Response> {
-  const fetchImpl =
-    options.fetchImpl ?? (globalThis.fetch !== platformFetch ? globalThis.fetch : undefined);
-  // Custom fetch implementations are a test seam and may use synthetic
-  // hostnames. Literal IP/localhost checks still apply; production's native
-  // fetch always performs the DNS-address check.
-  const lookup =
-    options.lookup ??
-    (fetchImpl ? async () => [{ address: '93.184.216.34', family: 4 }] : defaultLookup);
+  const lookup = options.lookup ?? defaultLookup;
   const maxRedirects = options.maxRedirects ?? 5;
   let resolved = await resolvePublicHttpUrl(value, lookup);
 
   for (let redirects = 0; ; redirects++) {
-    const response = fetchImpl
-      ? await fetchImpl(resolved.url.toString(), { ...init, redirect: 'manual' })
-      : await pinnedFetch(resolved.url, resolved.addresses[0]!, init);
+    const response = await pinnedFetch(resolved.url, resolved.addresses[0]!, init);
     if (![301, 302, 303, 307, 308].includes(response.status)) return response;
     const location = response.headers.get('location');
     if (!location || redirects >= maxRedirects) {

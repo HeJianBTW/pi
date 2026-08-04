@@ -2,6 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { webFetch } from '../fetch.js';
 import type { WebToolSettings } from '../types.js';
 
+const { safeFetchMock } = vi.hoisted(() => ({ safeFetchMock: vi.fn() }));
+
+vi.mock('@amaster.ai/pi-shared', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  safeFetch: safeFetchMock,
+}));
+
 const mockFetch = vi.fn();
 const publicLookup = async () => [{ address: '93.184.216.34', family: 4 }];
 
@@ -13,6 +20,10 @@ describe('webFetch', () => {
   beforeEach(() => {
     originalEnv = { ...process.env };
     mockFetch.mockReset();
+    safeFetchMock.mockReset();
+    safeFetchMock.mockImplementation((input, init) =>
+      globalThis.fetch(new URL(input).toString(), init),
+    );
   });
 
   afterEach(() => {
@@ -143,6 +154,9 @@ describe('webFetch', () => {
   });
 
   it('blocks loopback URLs before either fetch path runs', async () => {
+    const { safeFetch } =
+      await vi.importActual<typeof import('@amaster.ai/pi-shared')>('@amaster.ai/pi-shared');
+    safeFetchMock.mockImplementation(safeFetch);
     await expect(webFetch({ url: 'http://127.0.0.1/private' }, {})).rejects.toThrow(/public HTTP/i);
     expect(mockFetch).not.toHaveBeenCalled();
   });

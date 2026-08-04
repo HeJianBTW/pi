@@ -7,6 +7,13 @@ import { generateImage } from '../generate.js';
 import { MAX_BASE64_IMAGE_CHARS } from '../image-input.js';
 import type { ImageGenSettings } from '../types.js';
 
+const { safeFetchMock } = vi.hoisted(() => ({ safeFetchMock: vi.fn() }));
+
+vi.mock('@amaster.ai/pi-shared', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  safeFetch: safeFetchMock,
+}));
+
 const PNG_BYTES = Buffer.from(
   '89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d49444154789c63000100000005000115c46f250000000049454e44ae426082',
   'hex',
@@ -31,6 +38,7 @@ describe('generateImage', () => {
 
   beforeEach(() => {
     tmpDirs.length = 0;
+    safeFetchMock.mockReset();
   });
 
   afterEach(() => {
@@ -108,6 +116,7 @@ describe('generateImage', () => {
         headers: { 'content-type': 'image/png' },
       });
     }) as typeof fetch;
+    safeFetchMock.mockImplementation(fetchImpl);
 
     const result = await generateImage({ prompt: 'house' }, { cwd, settings, fetchImpl });
     expect(result.provider).toBe('myprov (custom)');
@@ -142,6 +151,7 @@ describe('generateImage', () => {
         { status: 403 },
       );
     }) as typeof fetch;
+    safeFetchMock.mockImplementation(fetchImpl);
 
     await expect(generateImage({ prompt: 'house' }, { cwd, settings, fetchImpl })).rejects.toThrow(
       /403/,
@@ -326,6 +336,7 @@ describe('generateImage', () => {
       ctrl.abort();
       throw new DOMException('stop now', 'AbortError');
     }) as typeof fetch;
+    safeFetchMock.mockImplementation(fetchImpl);
 
     await expect(
       generateImage(
@@ -363,6 +374,7 @@ describe('generateImage', () => {
       mkdirSync(firstPath);
       throw new Error('download failed token=secret');
     }) as typeof fetch;
+    safeFetchMock.mockImplementation(fetchImpl);
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     try {
@@ -608,6 +620,7 @@ describe('generateImage', () => {
       }
       return fetchImpl(input, init);
     }) as typeof fetch;
+    safeFetchMock.mockImplementation(wrappedFetch);
 
     const result = await generateImage(
       { prompt: 'x' },

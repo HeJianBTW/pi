@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import {
+  matchesScheduledTaskScope,
   normalizeScheduledTask,
   type ScheduledTask,
   type ScheduledTaskStore,
@@ -18,13 +19,13 @@ export class JsonScheduledTaskStore implements ScheduledTaskStore {
 
   async list(scope: TaskSchedulerScope = {}): Promise<ScheduledTask[]> {
     await this.load();
-    return [...this.tasks.values()].filter((task) => matchesScope(task, scope));
+    return [...this.tasks.values()].filter((task) => matchesScheduledTaskScope(task, scope));
   }
 
   async get(taskId: string, scope: TaskSchedulerScope = {}): Promise<ScheduledTask | undefined> {
     await this.load();
     const task = this.tasks.get(taskId);
-    return task && matchesScope(task, scope) ? task : undefined;
+    return task && matchesScheduledTaskScope(task, scope) ? task : undefined;
   }
 
   async create(task: ScheduledTask): Promise<ScheduledTask> {
@@ -43,7 +44,7 @@ export class JsonScheduledTaskStore implements ScheduledTaskStore {
     const normalized = normalizeScheduledTask(task);
     const updated = await this.updateState(() => {
       const existing = this.tasks.get(taskId);
-      if (!existing || !matchesScope(existing, scope)) {
+      if (!existing || !matchesScheduledTaskScope(existing, scope)) {
         return false;
       }
       this.tasks.set(taskId, normalized);
@@ -58,7 +59,7 @@ export class JsonScheduledTaskStore implements ScheduledTaskStore {
   async delete(taskId: string, scope: TaskSchedulerScope = {}): Promise<boolean> {
     return await this.updateState(() => {
       const existing = this.tasks.get(taskId);
-      if (!existing || !matchesScope(existing, scope)) {
+      if (!existing || !matchesScheduledTaskScope(existing, scope)) {
         return false;
       }
       return this.tasks.delete(taskId);
@@ -92,14 +93,6 @@ export class JsonScheduledTaskStore implements ScheduledTaskStore {
     this.writeTail = pending.catch(() => undefined);
     return await pending;
   }
-}
-
-function matchesScope(task: ScheduledTask, scope: TaskSchedulerScope): boolean {
-  return (
-    (scope.tenantId === undefined || task.tenantId === scope.tenantId) &&
-    (scope.userId === undefined || task.userId === scope.userId) &&
-    (scope.sessionId === undefined || task.sessionId === scope.sessionId)
-  );
 }
 
 export class FileSchedulerLock implements SchedulerLock {

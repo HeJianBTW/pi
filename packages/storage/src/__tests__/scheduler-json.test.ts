@@ -2,17 +2,8 @@ import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { ScheduledTask } from '@amaster.ai/pi-task-scheduler';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { JsonScheduledTaskStore } from '../scheduler-json.js';
-
-vi.mock('@amaster.ai/pi-task-scheduler', () => ({
-  normalizeScheduledTask: (task: ScheduledTask): ScheduledTask => ({
-    ...task,
-    enabled: typeof task.enabled === 'boolean' ? task.enabled : true,
-    runCount: Number.isFinite(task.runCount) ? task.runCount : 0,
-    runHistory: Array.isArray(task.runHistory) ? task.runHistory : [],
-  }),
-}));
 
 const TEST_DIR = path.join(tmpdir(), 'pi-storage-scheduler-json-test');
 const filePath = path.join(TEST_DIR, 'tasks.json');

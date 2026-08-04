@@ -35,18 +35,19 @@ describe('network', () => {
     ).resolves.toMatchObject({ hostname: '[::ffff:5db8:d822]' });
   });
 
-  it('revalidates every redirect before following it', async () => {
-    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValueOnce(
-      new Response(null, {
-        status: 302,
-        headers: { location: 'http://169.254.169.254/latest/meta-data' },
-      }),
-    );
+  it('does not let a wrapped global fetch bypass DNS validation', async () => {
+    const originalFetch = globalThis.fetch;
+    const wrappedFetch = vi.fn<typeof fetch>().mockResolvedValue(new Response('unsafe'));
+    globalThis.fetch = wrappedFetch;
 
-    await expect(
-      safeFetch('https://example.com/start', {}, { fetchImpl, lookup: publicLookup }),
-    ).rejects.toThrow(/public HTTP/i);
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    try {
+      await expect(safeFetch('https://does-not-resolve.invalid/private')).rejects.toThrow(
+        /public HTTP/i,
+      );
+      expect(wrappedFetch).not.toHaveBeenCalled();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   it('cancels and rejects a response body that exceeds the byte ceiling', async () => {

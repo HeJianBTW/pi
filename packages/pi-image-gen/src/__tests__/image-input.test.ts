@@ -1,7 +1,8 @@
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { safeFetch } from '@amaster.ai/pi-shared';
+import { afterEach, describe, expect, it } from 'vitest';
 import {
   classifyImageOutput,
   MAX_IMAGE_BYTES,
@@ -115,11 +116,9 @@ describe('resolveImageInputs', () => {
   });
 
   it('blocks loopback image URLs before fetch', async () => {
-    const fetchImpl = vi.fn<typeof fetch>();
     await expect(
-      resolveImageInputs(['http://127.0.0.1/private.png'], '/tmp', fetchImpl),
+      resolveImageInputs(['http://127.0.0.1/private.png'], '/tmp', safeFetch),
     ).rejects.toThrow(/public HTTP/i);
-    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it('rejects and cancels a remote image that exceeds the byte ceiling', async () => {

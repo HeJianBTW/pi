@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  matchesScheduledTaskScope,
   PersistentTaskScheduler,
   resolveScheduledTaskDefinition,
   type ScheduledTask,
@@ -250,12 +251,12 @@ class MemoryScheduledTaskStore implements ScheduledTaskStore {
   readonly tasks = new Map<string, ScheduledTask>();
 
   async list(scope: TaskSchedulerScope = {}): Promise<ScheduledTask[]> {
-    return [...this.tasks.values()].filter((task) => matchesScope(task, scope));
+    return [...this.tasks.values()].filter((task) => matchesScheduledTaskScope(task, scope));
   }
 
   async get(taskId: string, scope: TaskSchedulerScope = {}): Promise<ScheduledTask | undefined> {
     const task = this.tasks.get(taskId);
-    return task && matchesScope(task, scope) ? task : undefined;
+    return task && matchesScheduledTaskScope(task, scope) ? task : undefined;
   }
 
   async create(task: ScheduledTask): Promise<ScheduledTask> {
@@ -306,14 +307,6 @@ class MemorySchedulerLock implements SchedulerLock {
   holderPid(): number | undefined {
     return this.locked ? process.pid : undefined;
   }
-}
-
-function matchesScope(task: ScheduledTask, scope: TaskSchedulerScope): boolean {
-  return (
-    (!scope.tenantId || task.tenantId === scope.tenantId) &&
-    (!scope.userId || task.userId === scope.userId) &&
-    (!scope.sessionId || task.sessionId === scope.sessionId)
-  );
 }
 
 async function waitFor(assertion: () => boolean | Promise<boolean>): Promise<void> {

@@ -1,9 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChannelRegistry } from '../registry.js';
 
+const { safeFetchMock } = vi.hoisted(() => ({ safeFetchMock: vi.fn() }));
+
+vi.mock('@amaster.ai/pi-shared', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  safeFetch: safeFetchMock,
+}));
+
 describe('ChannelRegistry', () => {
   beforeEach(() => {
     vi.unstubAllGlobals();
+    safeFetchMock.mockReset();
+    safeFetchMock.mockImplementation((input, init) => globalThis.fetch(input, init));
   });
 
   it('does not forward webhook credentials to a recipient outside configured routes', async () => {
@@ -50,6 +59,9 @@ describe('ChannelRegistry', () => {
   });
 
   it('rejects a private webhook destination even when the adapter has no credentials', async () => {
+    const { safeFetch } =
+      await vi.importActual<typeof import('@amaster.ai/pi-shared')>('@amaster.ai/pi-shared');
+    safeFetchMock.mockImplementation(safeFetch);
     const fetchMock = vi.fn(async () => new Response('', { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
     const registry = new ChannelRegistry();

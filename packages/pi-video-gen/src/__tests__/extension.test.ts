@@ -4,6 +4,13 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import piVideoGenExtension from '../index.js';
 
+const { safeFetchMock } = vi.hoisted(() => ({ safeFetchMock: vi.fn() }));
+
+vi.mock('@amaster.ai/pi-shared', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  safeFetch: safeFetchMock,
+}));
+
 const suiteDir = join(tmpdir(), 'pi-video-gen-extension');
 
 type ToolDef = {
@@ -65,6 +72,7 @@ describe('pi-video-gen extension', () => {
     commands.clear();
     handlers.clear();
     mockPi.appendEntry.mockClear();
+    safeFetchMock.mockReset().mockImplementation((input, init) => globalThis.fetch(input, init));
     cwd = join(suiteDir, `proj-${Math.random().toString(36).slice(2, 8)}`);
     home = join(suiteDir, `home-${Math.random().toString(36).slice(2, 8)}`);
     mkdirSync(cwd, { recursive: true });

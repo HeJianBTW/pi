@@ -1,7 +1,7 @@
 import { constants } from 'node:fs';
 import { lstat, open, realpath } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
-import { readResponseBytes, safeFetch } from '@amaster.ai/pi-shared';
+import { readResponseBytes } from '@amaster.ai/pi-shared';
 import { describeDownloadError, ImageGenError, throwDownloadHttpError } from './errors.js';
 import type { ResolvedImageInput } from './types.js';
 
@@ -21,7 +21,7 @@ export const MAX_GENERATED_IMAGES = 10;
 export async function resolveImageInputs(
   raw: string[] | undefined,
   cwd: string,
-  fetchImpl: typeof fetch,
+  fetchImpl: (input: string | URL, init?: RequestInit) => Promise<Response>,
   signal?: AbortSignal,
 ): Promise<ResolvedImageInput[]> {
   if (!raw || raw.length === 0) return [];
@@ -37,7 +37,7 @@ async function resolveOne(
   value: string,
   inputLabel: string,
   cwd: string,
-  fetchImpl: typeof fetch,
+  fetchImpl: (input: string | URL, init?: RequestInit) => Promise<Response>,
   signal?: AbortSignal,
 ): Promise<ResolvedImageInput> {
   const trimmed = value.trim();
@@ -74,11 +74,7 @@ async function resolveOne(
     // plain-Error path. describeDownloadError redacts the URL and stays body-free.
     let res: Response;
     try {
-      res = await safeFetch(
-        trimmed,
-        { signal: signal ?? null },
-        fetchImpl === globalThis.fetch ? {} : { fetchImpl },
-      );
+      res = await fetchImpl(trimmed, { signal: signal ?? null });
     } catch (error) {
       if (error instanceof Error && /public HTTP|redirect limit/i.test(error.message)) {
         throw new ImageGenError(error.message, `${logLabel} rejected (unsafe URL)`);

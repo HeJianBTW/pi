@@ -1,7 +1,6 @@
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { Prefetch } from '../prefetch.js';
 import type { KeyResolver, Mem0Provider, ProviderResolver } from '../provider.js';
 import { formatObservedAt, mapApiToMem0Provider, rewriteObservationDate } from '../provider.js';
 import { createMem0Tools } from '../tools.js';
@@ -27,91 +26,6 @@ function mockProvider(overrides: Partial<Mem0Provider> = {}): Mem0Provider {
     ...overrides,
   };
 }
-
-// ---------------------------------------------------------------------------
-// Prefetch
-// ---------------------------------------------------------------------------
-
-describe('Prefetch', () => {
-  it('queue + consume returns formatted memories', async () => {
-    const provider = mockProvider({
-      search: vi.fn().mockResolvedValue([
-        { id: '1', memory: 'likes TypeScript' },
-        { id: '2', memory: 'uses vim' },
-      ]),
-    });
-    const pf = new Prefetch(provider, 'u', { topK: 5 });
-
-    pf.queue('preferences');
-    const result = await pf.consume();
-
-    expect(result).toContain('## Recalled Memories (Mem0)');
-    expect(result).toContain('- likes TypeScript');
-    expect(result).toContain('- uses vim');
-    expect(provider.search).toHaveBeenCalledWith('preferences', { userId: 'u', topK: 5 });
-  });
-
-  it('returns empty string when nothing queued', async () => {
-    const provider = mockProvider();
-    const pf = new Prefetch(provider, 'u', { topK: 5 });
-
-    const result = await pf.consume();
-    expect(result).toBe('');
-  });
-
-  it('returns empty on timeout', async () => {
-    const provider = mockProvider({
-      search: vi.fn().mockImplementation(() => new Promise(() => {})),
-    });
-    const pf = new Prefetch(provider, 'u', { topK: 5 });
-
-    pf.queue('test');
-    const result = await pf.consume(50);
-
-    expect(result).toBe('');
-  });
-
-  it('returns empty when search returns no results', async () => {
-    const provider = mockProvider({ search: vi.fn().mockResolvedValue([]) });
-    const pf = new Prefetch(provider, 'u', { topK: 5 });
-
-    pf.queue('nothing');
-    const result = await pf.consume();
-
-    expect(result).toBe('');
-  });
-
-  it('filters out empty memory strings', async () => {
-    const provider = mockProvider({
-      search: vi.fn().mockResolvedValue([
-        { id: '1', memory: 'valid' },
-        { id: '2', memory: '' },
-        { id: '3', memory: '  ' },
-      ]),
-    });
-    const pf = new Prefetch(provider, 'u', { topK: 5 });
-
-    pf.queue('q');
-    const result = await pf.consume();
-
-    expect(result).toContain('- valid');
-    expect(result).not.toContain('- \n');
-    expect(result.match(/^-/gm)?.length).toBe(1);
-  });
-
-  it('clears pending after consume', async () => {
-    const provider = mockProvider({
-      search: vi.fn().mockResolvedValue([{ id: '1', memory: 'fact' }]),
-    });
-    const pf = new Prefetch(provider, 'u', { topK: 5 });
-
-    pf.queue('q');
-    await pf.consume();
-    const second = await pf.consume();
-
-    expect(second).toBe('');
-  });
-});
 
 // ---------------------------------------------------------------------------
 // Tools

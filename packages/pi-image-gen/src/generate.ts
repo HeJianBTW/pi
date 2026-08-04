@@ -66,7 +66,7 @@ export async function generateImage(
   if ('error' in resolved) throw new ImageGenError(resolved.error, 'model did not resolve');
 
   const adapter = getAdapter(resolved.provider.api);
-  const inputs = await resolveImageInputs(params.image, options.cwd, fetchImpl, options.signal);
+  const inputs = await resolveImageInputs(params.image, options.cwd, safeFetch, options.signal);
   const raws = await adapter.generate(
     resolved.provider,
     resolved.remoteId,
@@ -103,7 +103,7 @@ export async function generateImage(
       // multi-image materialize/write would keep writing files and return success.
       if (options.signal?.aborted) throw cancelledError('image generation');
       const raw = raws[i]!;
-      const fetched = await materialize(raw, fetchImpl, options.signal);
+      const fetched = await materialize(raw, options.signal);
       if (options.signal?.aborted) throw cancelledError('image generation');
       const ext = MIME_TO_EXT[fetched.mimeType] ?? 'png';
       const suffix = raws.length > 1 ? `-${i + 1}` : '';
@@ -230,7 +230,6 @@ async function writeUnique(
 
 async function materialize(
   raw: RawImageResult,
-  fetchImpl: typeof fetch,
   signal?: AbortSignal,
 ): Promise<{ bytes: Uint8Array; mimeType: string }> {
   if (raw.data.kind === 'base64') {
@@ -265,11 +264,7 @@ async function materialize(
   // redacts the URL (dropping ?token=…) and interpolates no raw fetch text.
   let res: Response;
   try {
-    res = await safeFetch(
-      raw.data.url,
-      { signal: signal ?? null },
-      fetchImpl === globalThis.fetch ? {} : { fetchImpl },
-    );
+    res = await safeFetch(raw.data.url, { signal: signal ?? null });
   } catch (error) {
     if (error instanceof Error && /public HTTP|redirect limit/i.test(error.message)) {
       throw new ImageGenError(error.message, 'generated image rejected (unsafe URL)');

@@ -230,7 +230,7 @@ export class PersistentTaskScheduler implements TaskScheduler {
   }
 
   async create(input: ScheduledTaskCreateInput): Promise<ScheduledTask> {
-    if (!matchesScope(input, this.scope)) {
+    if (!matchesScheduledTaskScope(input, this.scope)) {
       throw new Error('Scheduled task is outside this scheduler scope.');
     }
     const now = new Date().toISOString();
@@ -618,7 +618,7 @@ export class PersistentTaskScheduler implements TaskScheduler {
   }
 }
 
-function matchesScope(
+export function matchesScheduledTaskScope(
   task: Pick<ScheduledTask, 'tenantId' | 'userId' | 'sessionId'>,
   scope: TaskSchedulerScope,
 ): boolean {

@@ -1,5 +1,12 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
+const { safeFetchMock } = vi.hoisted(() => ({ safeFetchMock: vi.fn() }));
+
+vi.mock('@amaster.ai/pi-shared', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  safeFetch: safeFetchMock,
+}));
+
 vi.mock('../config.js', () => ({
   loadChannelConfig: vi.fn(() => ({
     adapters: {
@@ -86,6 +93,8 @@ describe('piChannelsExtension', () => {
     vi.mocked(configModule.updateLocalChannelConfig).mockClear();
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
+    safeFetchMock.mockReset();
+    safeFetchMock.mockImplementation((input, init) => globalThis.fetch(input, init));
   });
 
   test('registers lifecycle handlers, events, command, and notify tool', () => {

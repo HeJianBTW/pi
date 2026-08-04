@@ -2,6 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { webFetch } from '../fetch.js';
 import type { WebToolSettings } from '../types.js';
 
+const { safeFetchMock } = vi.hoisted(() => ({ safeFetchMock: vi.fn() }));
+
+vi.mock('@amaster.ai/pi-shared', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  safeFetch: safeFetchMock,
+}));
+
 const mockFetch = vi.fn();
 const publicLookup = async () => [{ address: '93.184.216.34', family: 4 }];
 vi.stubGlobal('fetch', mockFetch);
@@ -12,6 +19,10 @@ describe('webFetch - all providers', () => {
   beforeEach(() => {
     originalEnv = { ...process.env };
     mockFetch.mockReset();
+    safeFetchMock.mockReset();
+    safeFetchMock.mockImplementation((input, init) =>
+      globalThis.fetch(new URL(input).toString(), init),
+    );
   });
 
   afterEach(() => {

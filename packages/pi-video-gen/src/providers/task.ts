@@ -171,11 +171,7 @@ export async function downloadFile(opts: {
 
   let res: Response;
   try {
-    res = await safeFetch(
-      opts.url,
-      { signal },
-      opts.fetchImpl === globalThis.fetch ? {} : { fetchImpl: opts.fetchImpl },
-    );
+    res = await safeFetch(opts.url, { signal });
   } catch (error) {
     if (error instanceof Error && /public HTTP|redirect limit/i.test(error.message)) {
       throw new VideoGenError(error.message, 'download: unsafe URL');
