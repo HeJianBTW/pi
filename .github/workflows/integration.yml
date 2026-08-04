@@ -294,7 +294,6 @@ jobs:
             assert_pattern: "(VISUAL CHECK 7391.*(blue|#1457d9)|(blue|#1457d9).*VISUAL CHECK 7391)"
             assert_visual_analysis: true
     env:
-      TMPDIR: ${{ runner.temp }}
       PI_INTEGRATION_BASE_URL: ${{ secrets.PI_INTEGRATION_BASE_URL }}
       PI_INTEGRATION_API_KEY: ${{ secrets.PI_INTEGRATION_API_KEY }}
       PI_INTEGRATION_MULTICA_TOKEN: ${{ secrets.PI_INTEGRATION_MULTICA_TOKEN }}
@@ -303,6 +302,12 @@ jobs:
       PI_OFFLINE: '0'
 
     steps:
+      - name: Isolate temporary files
+        run: |
+          job_tmp="$RUNNER_TEMP/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-extension-${{ strategy.job-index }}"
+          mkdir -p "$job_tmp"
+          echo "TMPDIR=$job_tmp" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@v4
       - name: Setup pi build environment
         uses: ./.github/actions/setup-pi-build

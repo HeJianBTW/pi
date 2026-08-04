@@ -23,10 +23,14 @@ jobs:
       - linux
       - x64
     timeout-minutes: 45
-    env:
-      TMPDIR: ${{ runner.temp }}
 
     steps:
+      - name: Isolate temporary files
+        run: |
+          job_tmp="$RUNNER_TEMP/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-pr-check"
+          mkdir -p "$job_tmp"
+          echo "TMPDIR=$job_tmp" >> "$GITHUB_ENV"
+
       - name: Checkout source
         uses: actions/checkout@v4
 
