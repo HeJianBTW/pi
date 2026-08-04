@@ -27,27 +27,21 @@ export async function initMulticaProvider(
   exec: ExecFn,
 ): Promise<InitMulticaResult> {
   const binary = config.binary?.trim() || 'multica';
-  const autoInstall = config.autoInstall === true;
-
-  let installResult: InstallResult = { installed: true, alreadyPresent: true };
-
-  if (autoInstall) {
-    let available = false;
-    try {
-      available = (await exec(binary, ['--version'])).code === 0;
-    } catch {
-      available = false;
-    }
-    installResult = available
-      ? { installed: true, alreadyPresent: true }
-      : {
-          installed: false,
-          alreadyPresent: false,
-          error: 'automatic installation is disabled; install a pinned multica release manually',
-        };
-    if (!installResult.installed) {
-      return { adapter: new MulticaAdapter(config, exec), installResult };
-    }
+  let available = false;
+  try {
+    available = (await exec(binary, ['--version'])).code === 0;
+  } catch {
+    available = false;
+  }
+  const installResult: InstallResult = available
+    ? { installed: true, alreadyPresent: true }
+    : {
+        installed: false,
+        alreadyPresent: false,
+        error: 'install a pinned multica release manually',
+      };
+  if (!installResult.installed) {
+    return { adapter: new MulticaAdapter(config, exec), installResult };
   }
 
   if (config.serverUrl) {

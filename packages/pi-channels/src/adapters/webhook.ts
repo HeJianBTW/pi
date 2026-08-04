@@ -6,6 +6,8 @@ import type {
   ChannelPayloadMode,
 } from '../types.js';
 
+const WEBHOOK_TIMEOUT_MS = 30_000;
+
 export function createWebhookAdapter(config: AdapterConfig): ChannelAdapter {
   const defaultMethod = typeof config.method === 'string' ? config.method : 'POST';
   const defaultContentType =
@@ -24,7 +26,7 @@ export function createWebhookAdapter(config: AdapterConfig): ChannelAdapter {
 
   return {
     direction: 'outgoing',
-    async send(message: ChannelMessage): Promise<void> {
+    async send(message: ChannelMessage, signal?: AbortSignal): Promise<void> {
       const payloadMode = message.payloadMode ?? defaultPayloadMode;
       const method =
         payloadMode === 'raw' ? (message.webhook?.method ?? defaultMethod) : defaultMethod;
@@ -67,12 +69,16 @@ export function createWebhookAdapter(config: AdapterConfig): ChannelAdapter {
           method,
           headers: requestHeaders,
           ...(body === undefined ? {} : { body }),
+          signal: AbortSignal.any([
+            AbortSignal.timeout(WEBHOOK_TIMEOUT_MS),
+            ...(signal ? [signal] : []),
+          ]),
         },
         { maxRedirects: 0 },
       );
+      await response.body?.cancel().catch(() => {});
       if (!response.ok) {
-        const text = await response.text().catch(() => '');
-        throw new Error(`Webhook error ${response.status}: ${text || response.statusText}`);
+        throw new Error(`Webhook request failed with HTTP ${response.status}.`);
       }
     },
   };

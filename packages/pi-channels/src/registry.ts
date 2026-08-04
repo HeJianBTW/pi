@@ -165,7 +165,7 @@ export class ChannelRegistry {
     return this.adapters.delete(name);
   }
 
-  async send(message: ChannelMessage): Promise<SendResult> {
+  async send(message: ChannelMessage, signal?: AbortSignal): Promise<SendResult> {
     const resolved = this.resolve(message.adapter, message.recipient);
     const allowedWebhookRecipients = this.credentialedWebhookRecipients.get(resolved.adapter);
     if (allowedWebhookRecipients && !allowedWebhookRecipients.has(resolved.recipient)) {
@@ -199,7 +199,9 @@ export class ChannelRegistry {
         adapter: resolved.adapter,
         source: message.source,
       });
-      await adapter.send({ ...message, adapter: resolved.adapter, recipient: resolved.recipient });
+      const outbound = { ...message, adapter: resolved.adapter, recipient: resolved.recipient };
+      if (signal) await adapter.send(outbound, signal);
+      else await adapter.send(outbound);
       this.log?.('message_send_ok', {
         adapter: resolved.adapter,
         source: message.source,
@@ -247,7 +249,7 @@ export class ChannelRegistry {
         name,
         type: 'route',
         adapter: route.adapter,
-        target: `${route.adapter} -> ${route.recipient}`,
+        target: `${route.adapter} -> ${recipientForDisplay(route.recipient)}`,
         ...(route.name ? { label: route.name } : {}),
       });
     }
@@ -286,6 +288,18 @@ export class ChannelRegistry {
       ),
     );
   }
+}
+
+function recipientForDisplay(recipient: string): string {
+  try {
+    const url = new URL(recipient);
+    if (url.protocol === 'http:' || url.protocol === 'https:') {
+      return `${url.origin}/[redacted]`;
+    }
+  } catch {
+    // Non-URL channel recipients are safe to display as configured.
+  }
+  return recipient;
 }
 
 export function errorMessage(error: unknown): string {

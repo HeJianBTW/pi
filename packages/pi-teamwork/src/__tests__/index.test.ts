@@ -2010,6 +2010,19 @@ describe('MulticaAdapter', () => {
 });
 
 describe('initMulticaProvider', () => {
+  it('reports a missing CLI without requiring the deprecated autoInstall flag', async () => {
+    const calls: string[][] = [];
+    const exec: ExecFn = async (_cmd, args) => {
+      calls.push(args);
+      return { stdout: '', stderr: '', code: args[0] === '--version' ? 127 : 0 };
+    };
+
+    const { installResult } = await initMulticaProvider({}, exec);
+
+    expect(installResult).toMatchObject({ installed: false, alreadyPresent: false });
+    expect(calls).toEqual([['--version']]);
+  });
+
   it('calls login when token is provided', async () => {
     const calls: string[][] = [];
     const exec: ExecFn = async (_cmd, args) => {
@@ -2017,8 +2030,9 @@ describe('initMulticaProvider', () => {
       return { stdout: '', stderr: '', code: 0 };
     };
     await initMulticaProvider({ token: 'my-token' }, exec);
-    expect(calls[0]).toEqual(['daemon', 'start']);
-    expect(calls[1]).toEqual(['login', '--token', 'my-token']);
+    expect(calls[0]).toEqual(['--version']);
+    expect(calls[1]).toEqual(['daemon', 'start']);
+    expect(calls[2]).toEqual(['login', '--token', 'my-token']);
   });
 
   it('skips login when no token', async () => {
@@ -2028,7 +2042,7 @@ describe('initMulticaProvider', () => {
       return { stdout: '', stderr: '', code: 0 };
     };
     await initMulticaProvider({}, exec);
-    expect(calls).toEqual([['daemon', 'start']]);
+    expect(calls).toEqual([['--version'], ['daemon', 'start']]);
   });
 
   it('continues even if login fails', async () => {
@@ -2058,17 +2072,17 @@ describe('initMulticaProvider', () => {
     expect(adapter.name).toBe('multica');
   });
 
-  it('skips install when autoInstall is false', async () => {
+  it('probes without installing when autoInstall is false', async () => {
     const calls: string[][] = [];
     const exec: ExecFn = async (_cmd, args) => {
       calls.push(args);
       return { stdout: '', stderr: '', code: 0 };
     };
     await initMulticaProvider({ autoInstall: false }, exec);
-    expect(calls[0]).toEqual(['daemon', 'start']);
+    expect(calls).toEqual([['--version'], ['daemon', 'start']]);
   });
 
-  it('does not install Multica unless autoInstall is explicitly enabled', async () => {
+  it('never installs Multica during provider initialization', async () => {
     const calls: { cmd: string; args: string[] }[] = [];
     const exec: ExecFn = async (cmd, args) => {
       calls.push({ cmd, args });
@@ -2077,7 +2091,10 @@ describe('initMulticaProvider', () => {
 
     await initMulticaProvider({}, exec);
 
-    expect(calls).toEqual([{ cmd: 'multica', args: ['daemon', 'start'] }]);
+    expect(calls).toEqual([
+      { cmd: 'multica', args: ['--version'] },
+      { cmd: 'multica', args: ['daemon', 'start'] },
+    ]);
   });
 
   it('sets server_url and app_url via config when serverUrl and appUrl are configured', async () => {

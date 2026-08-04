@@ -33,7 +33,11 @@ const DEFAULT_AUDIT_LIMIT = 200;
 const PATH_ARGUMENT_KEYS = new Set([
   'path',
   'paths',
+  'file',
   'files',
+  'source',
+  'destination',
+  'target',
   'file_path',
   'file_paths',
   'cwd',

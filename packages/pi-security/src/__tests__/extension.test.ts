@@ -133,6 +133,21 @@ describe('pi security extension', () => {
       toolName: 'mcp__cua__set_cursor_style',
       input: { image_path: 'linked/cursor.png' },
     },
+    {
+      label: 'filesystem move path aliases',
+      toolName: 'mcp__filesystem__move_file',
+      input: { source: 'linked/source.txt', destination: 'linked/destination.txt' },
+    },
+    {
+      label: 'singular file path alias',
+      toolName: 'mcp__filesystem__upload_file',
+      input: { file: 'linked/upload.txt' },
+    },
+    {
+      label: 'target path alias',
+      toolName: 'mcp__filesystem__copy_file',
+      input: { target: 'linked/copy.txt' },
+    },
   ])('does not reuse a session grant when a $label symlink is retargeted', async (testCase) => {
     const cwd = await mkdtemp(join(tmpdir(), 'pi-security-grant-array-'));
     const firstTarget = await mkdtemp(join(tmpdir(), 'pi-security-target-array-a-'));

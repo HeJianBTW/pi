@@ -87,6 +87,44 @@ describe('ChannelRegistry', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('bounds webhook sends and propagates caller cancellation', async () => {
+    safeFetchMock.mockResolvedValue(new Response('', { status: 200 }));
+    const registry = new ChannelRegistry();
+    await registry.loadConfig(
+      {
+        adapters: { webhook: { type: 'webhook' } },
+        routes: { ops: { adapter: 'webhook', recipient: 'https://example.test/hook' } },
+      },
+      '/workspace',
+    );
+    const controller = new AbortController();
+
+    await registry.send({ adapter: 'ops', recipient: '', text: 'hello' }, controller.signal);
+
+    const init = safeFetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+    expect(init.signal?.aborted).toBe(false);
+    controller.abort();
+    expect(init.signal?.aborted).toBe(true);
+  });
+
+  it('does not return webhook response bodies to callers', async () => {
+    safeFetchMock.mockResolvedValue(
+      new Response('remote response contains secret material', { status: 500 }),
+    );
+    const registry = new ChannelRegistry();
+    await registry.loadConfig({ adapters: { webhook: { type: 'webhook' } } }, '/workspace');
+
+    const result = await registry.send({
+      adapter: 'webhook',
+      recipient: 'https://example.test/hook',
+      text: 'hello',
+    });
+
+    expect(result).toEqual({ ok: false, error: 'Webhook request failed with HTTP 500.' });
+    expect(JSON.stringify(result)).not.toContain('secret material');
+  });
+
   it('logs bounded metadata without message text or raw adapter errors', async () => {
     const log = vi.fn();
     const registry = new ChannelRegistry();

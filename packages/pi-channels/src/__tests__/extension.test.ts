@@ -122,8 +122,33 @@ describe('piChannelsExtension', () => {
     };
 
     expect(result.content[0]!.text).toContain('webhook adapter');
-    expect(result.content[0]!.text).toContain('ops route -> webhook -> https://example.test/hook');
+    expect(result.content[0]!.text).toContain(
+      'ops route -> webhook -> https://example.test/[redacted]',
+    );
     expect(ctx.ui.setStatus).toHaveBeenCalledWith('pi-channels', 'channels: 1');
+  });
+
+  test('notify list does not expose webhook path or query credentials', async () => {
+    vi.mocked(configModule.loadChannelConfig).mockReturnValueOnce({
+      adapters: { webhook: { type: 'webhook' } },
+      routes: {
+        ops: {
+          adapter: 'webhook',
+          recipient: 'https://example.test/hooks/path-secret?token=query-secret',
+        },
+      },
+      bridge: { enabled: false },
+    });
+    piChannelsExtension(mockPi as never);
+    await handlers.get('session_start')?.({}, mockCtx());
+
+    const result = (await tools.get('notify')?.execute('call-1', {
+      action: 'list-routes',
+    })) as { content: Array<{ text: string }> };
+
+    expect(result.content[0]!.text).toContain('https://example.test/[redacted]');
+    expect(result.content[0]!.text).not.toContain('path-secret');
+    expect(result.content[0]!.text).not.toContain('query-secret');
   });
 
   test('notify supports route and adapter list action aliases', async () => {
@@ -138,7 +163,7 @@ describe('piChannelsExtension', () => {
     })) as { content: Array<{ text: string }> };
 
     expect(routeResult.content[0]!.text).toContain(
-      'ops route -> webhook -> https://example.test/hook',
+      'ops route -> webhook -> https://example.test/[redacted]',
     );
     expect(routeResult.content[0]!.text).not.toContain('webhook adapter');
     expect(adapterResult.content[0]!.text).toContain('webhook adapter');

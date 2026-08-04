@@ -57,15 +57,19 @@ export async function initDws(config: DingTalkConfig): Promise<void> {
     throw new Error('clientId and clientSecret are required');
   }
   const bin = dwsBin();
-  await execAsync(bin, [
-    'auth',
-    'login',
-    '--client-id',
-    clientId,
-    '--client-secret',
-    clientSecret,
-    '--yes',
-  ]);
+  try {
+    await execAsync(bin, [
+      'auth',
+      'login',
+      '--client-id',
+      clientId,
+      '--client-secret',
+      clientSecret,
+      '--yes',
+    ]);
+  } catch {
+    throw new Error('dws auth login failed');
+  }
 }
 
 export async function getDwsSkillsDir(): Promise<string | undefined> {

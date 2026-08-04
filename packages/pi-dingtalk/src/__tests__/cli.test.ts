@@ -46,4 +46,19 @@ describe('initDws', () => {
       expect.any(Function),
     );
   });
+
+  it('does not expose credentials when login fails', async () => {
+    mockExecFile.mockImplementation(
+      (
+        _file: string,
+        args: string[],
+        callback: (error: Error | null, stdout: string, stderr: string) => void,
+      ) => callback(new Error(`Command failed: dws ${args.join(' ')}`), '', ''),
+    );
+
+    const result = initDws({ clientId: 'client-id', clientSecret: 'client-secret' });
+
+    await expect(result).rejects.toThrow('dws auth login failed');
+    await expect(result).rejects.not.toThrow('client-secret');
+  });
 });
