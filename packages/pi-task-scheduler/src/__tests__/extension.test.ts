@@ -50,14 +50,14 @@ function createMockPi() {
   };
 }
 
-function createMockCtx(cwd = '/tmp') {
+function createMockCtx(cwd = '/tmp', sessionId = 'test-session-1') {
   return {
     cwd,
     ui: {
       setStatus: vi.fn(),
       notify: vi.fn(),
     },
-    sessionManager: { getSessionId: () => 'test-session-1' },
+    sessionManager: { getSessionId: () => sessionId },
     model: { id: 'test-model' },
   };
 }
@@ -104,10 +104,13 @@ class MemLock implements SchedulerLock {
   }
 }
 
-async function setupExtension(injectedConfig?: Record<string, unknown>) {
+async function setupExtension(
+  injectedConfig?: Record<string, unknown>,
+  sessionId = 'test-session-1',
+) {
   const { default: taskSchedulerExtension } = await import('../extension.js');
   const pi = createMockPi();
-  const ctx = createMockCtx();
+  const ctx = createMockCtx('/tmp', sessionId);
 
   taskSchedulerExtension(pi as any, injectedConfig as any);
 
@@ -136,6 +139,84 @@ describe('extension — default file storage mode', () => {
     const { ctx } = await setupExtension({ dataDir: '/tmp/pi-test-ext' });
 
     expect(ctx.ui.setStatus).toHaveBeenCalledWith('pi-scheduler', 'scheduler: active');
+  });
+
+  it('keeps concurrent session files independent', async () => {
+    const { mkdtemp, rm, writeFile } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const dataDir = await mkdtemp(join(tmpdir(), 'pi-task-scheduler-sessions-'));
+    const started: Array<Awaited<ReturnType<typeof setupExtension>>> = [];
+
+    try {
+      const now = new Date().toISOString();
+      await writeFile(
+        join(dataDir, 'tasks.json'),
+        JSON.stringify([
+          {
+            id: 'legacy-a',
+            sessionId: 'session-a',
+            prompt: 'legacy session-a task',
+            type: 'interval',
+            schedule: '1h',
+            intervalSeconds: 3_600,
+            enabled: false,
+            model: { provider: 'test', model: 'test-model' },
+            toolPolicyProfile: 'default',
+            createdAt: now,
+            updatedAt: now,
+            runCount: 0,
+          },
+        ]),
+      );
+      const sessionA = await setupExtension({ dataDir }, 'session-a');
+      const sessionB = await setupExtension({ dataDir }, 'session-b');
+      started.push(sessionA, sessionB);
+
+      await sessionA.pi.tools
+        .get('scheduler_create')!
+        .execute(
+          'create-a',
+          { type: 'interval', schedule: '1h', prompt: 'session-a task', enabled: false },
+          undefined,
+          undefined,
+          createMockCtx('/tmp', 'session-a'),
+        );
+      await sessionB.pi.tools
+        .get('scheduler_create')!
+        .execute(
+          'create-b',
+          { type: 'interval', schedule: '1h', prompt: 'session-b task', enabled: false },
+          undefined,
+          undefined,
+          createMockCtx('/tmp', 'session-b'),
+        );
+
+      for (const instance of started.splice(0)) {
+        for (const handler of instance.pi.eventHandlers.session_shutdown ?? []) {
+          await handler({}, instance.ctx);
+        }
+      }
+
+      const restartedA = await setupExtension({ dataDir }, 'session-a');
+      started.push(restartedA);
+      const result = (await restartedA.pi.tools
+        .get('scheduler_list')!
+        .execute('list-a', {}, undefined, undefined, createMockCtx('/tmp', 'session-a'))) as {
+        content: Array<{ text: string }>;
+      };
+
+      expect(result.content[0]!.text).toContain('session-a task');
+      expect(result.content[0]!.text).toContain('legacy session-a task');
+      expect(result.content[0]!.text).not.toContain('session-b task');
+    } finally {
+      for (const instance of started) {
+        for (const handler of instance.pi.eventHandlers.session_shutdown ?? []) {
+          await handler({}, instance.ctx);
+        }
+      }
+      await rm(dataDir, { recursive: true, force: true });
+    }
   });
 
   it('scheduler_list returns empty when no tasks', async () => {

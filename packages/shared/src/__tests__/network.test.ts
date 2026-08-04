@@ -12,6 +12,7 @@ describe('network', () => {
     'http://[::1]/private',
     'http://[fec0::1]/private',
     'http://[64:ff9b:1::a00:1]/private',
+    'http://[64:ff9b::a9fe:a9fe]/latest/meta-data',
     'http://[::ffff:127.0.0.1]/private',
     'http://[::ffff:169.254.169.254]/latest/meta-data',
     'file:///etc/passwd',
@@ -26,6 +27,15 @@ describe('network', () => {
     ).rejects.toThrow(/public HTTP/i);
   });
 
+  it('rejects a hostname when DNS64 embeds a private IPv4 address', async () => {
+    const privateNat64Lookup: DnsLookup = async () => [
+      { address: '64:ff9b::a9fe:a9fe', family: 6 },
+    ];
+    await expect(
+      assertPublicHttpUrl('https://internal.example/path', privateNat64Lookup),
+    ).rejects.toThrow(/public HTTP/i);
+  });
+
   it('allows a public HTTP URL', async () => {
     await expect(
       assertPublicHttpUrl('https://example.com/path', publicLookup),
@@ -33,6 +43,9 @@ describe('network', () => {
     await expect(
       assertPublicHttpUrl('http://[::ffff:93.184.216.34]/path', publicLookup),
     ).resolves.toMatchObject({ hostname: '[::ffff:5db8:d822]' });
+    await expect(
+      assertPublicHttpUrl('http://[64:ff9b::5db8:d822]/path', publicLookup),
+    ).resolves.toMatchObject({ hostname: '[64:ff9b::5db8:d822]' });
   });
 
   it('does not let a wrapped global fetch bypass DNS validation', async () => {

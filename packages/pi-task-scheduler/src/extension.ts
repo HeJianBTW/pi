@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { isProjectTrusted, loadPiSettings, resolveHome } from '@amaster.ai/pi-shared/settings';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
@@ -51,6 +53,10 @@ function loadSettings(cwd: string, projectTrusted = false): PiSchedulerExtension
   }
 }
 
+function sessionStorageKey(sessionId: string): string {
+  return createHash('sha256').update(sessionId).digest('hex');
+}
+
 export default function taskSchedulerExtension(
   pi: ExtensionAPI,
   injectedConfig?: PiSchedulerExtensionConfig,
@@ -67,10 +73,22 @@ export default function taskSchedulerExtension(
         scheduler = config.scheduler;
         ownsScheduler = false;
       } else {
-        const store =
-          config.store ?? new JsonScheduledTaskStore(path.join(config.dataDir, 'tasks.json'));
+        const sessionId = ctx.sessionManager.getSessionId();
+        const storageKey = sessionStorageKey(sessionId);
+        const sessionStorePath = path.join(config.dataDir, `tasks-${storageKey}.json`);
+        const store = config.store ?? new JsonScheduledTaskStore(sessionStorePath);
+        if (!config.store && !existsSync(sessionStorePath)) {
+          const legacyStorePath = path.join(config.dataDir, 'tasks.json');
+          if (existsSync(legacyStorePath)) {
+            const legacyStore = new JsonScheduledTaskStore(legacyStorePath);
+            for (const task of await legacyStore.list({ sessionId })) {
+              await store.create(task);
+            }
+          }
+        }
         const lock =
-          config.lock ?? new FileSchedulerLock(path.join(config.dataDir, 'scheduler.lock'));
+          config.lock ??
+          new FileSchedulerLock(path.join(config.dataDir, `scheduler-${storageKey}.lock`));
 
         const runner: ScheduledTaskRunner = async (task) => {
           if (ctx.sessionManager.getSessionId() !== task.sessionId) {
@@ -83,7 +101,7 @@ export default function taskSchedulerExtension(
           store,
           lock,
           runner,
-          scope: { sessionId: ctx.sessionManager.getSessionId() },
+          scope: { sessionId },
         });
         await instance.start();
         scheduler = instance;

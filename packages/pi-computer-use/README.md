@@ -56,7 +56,7 @@ interpolation is supported in user and agent settings, but not in project settin
 | `binaryPath` | `string` | — | Custom driver path when `mode` is `"path"` |
 | `extraArgs` | `string[]` | — | Additional arguments appended to `cua-driver mcp` |
 | `confirmAppLaunch` | `boolean` | `true` | Ask once per app target before `launch_app` |
-| `confirmDangerousActions` | `boolean` | `true` | Confirm high-risk tools such as `kill_app` and `replay_trajectory` |
+| `confirmDangerousActions` | `boolean` | `true` | Confirm high-risk tools such as `kill_app` and `replay_trajectory`; recording always requires confirmation |
 | `visionModel` | `{ provider, model }` | — | Register `computer_use_analyze_screenshot` |
 
 In non-interactive modes, confirmation-required tools return an error unless the

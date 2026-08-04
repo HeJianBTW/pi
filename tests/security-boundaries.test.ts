@@ -23,4 +23,14 @@ describe('security-sensitive workflows', () => {
     expect(workflow).toContain('a7e6db95d24b8fb679c0d46d8756e0a324d5231a249fd1393e9f15a17f80e2aa');
     expect(workflow).toContain('sha256sum -c');
   });
+
+  it('passes matrix prompts through the environment and enforces requested tool counts', () => {
+    const workflow = read('.github/workflows/integration.yml');
+
+    expect(workflow).toContain('EXTENSION_PROMPT: ${{ matrix.prompt }}');
+    expect(workflow).toContain('-p "$EXTENSION_PROMPT"');
+    expect(workflow).not.toContain("-p '${{ matrix.prompt }}'");
+    expect(workflow).toContain('assert_tool_count: 1');
+    expect(workflow).toContain('--argjson expected_count');
+  });
 });

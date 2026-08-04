@@ -10,6 +10,8 @@ const defaultLookup: DnsLookup = async (hostname) =>
   nodeLookup(hostname, { all: true, verbatim: true });
 const localUseAddresses = new BlockList();
 localUseAddresses.addSubnet('64:ff9b:1::', 48, 'ipv6');
+const wellKnownNat64Addresses = new BlockList();
+wellKnownNat64Addresses.addSubnet('64:ff9b::', 96, 'ipv6');
 
 function isPublicIpv4(address: string): boolean {
   const octets = address.split('.').map(Number);
@@ -41,6 +43,20 @@ function mappedIpv4(address: string): string | undefined {
   return [value >>> 24, (value >>> 16) & 255, (value >>> 8) & 255, value & 255].join('.');
 }
 
+function nat64Ipv4(address: string): string | undefined {
+  if (!wellKnownNat64Addresses.check(address, 'ipv6')) return undefined;
+  let canonical: string;
+  try {
+    canonical = new URL(`http://[${address}]/`).hostname.slice(1, -1);
+  } catch {
+    return undefined;
+  }
+  const hex = /^64:ff9b::([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(canonical);
+  if (!hex) return undefined;
+  const value = Number.parseInt(hex[1]!, 16) * 65_536 + Number.parseInt(hex[2]!, 16);
+  return [value >>> 24, (value >>> 16) & 255, (value >>> 8) & 255, value & 255].join('.');
+}
+
 function isPublicIp(address: string): boolean {
   const normalized = address.toLowerCase().replace(/^\[|\]$/g, '');
   const family = isIP(normalized);
@@ -58,8 +74,8 @@ function isPublicIp(address: string): boolean {
   ) {
     return false;
   }
-  const mapped = mappedIpv4(normalized);
-  return mapped ? isPublicIpv4(mapped) : true;
+  const embeddedIpv4 = mappedIpv4(normalized) ?? nat64Ipv4(normalized);
+  return embeddedIpv4 ? isPublicIpv4(embeddedIpv4) : true;
 }
 
 /**

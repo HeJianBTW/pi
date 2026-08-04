@@ -108,7 +108,7 @@ export default function computerUseExtension(pi: ExtensionAPI): void {
   let client: CuaDriverClient | undefined;
   let sessionAbortController: AbortController | undefined;
   let macPermissionPromise: Promise<void> | undefined;
-  const approvedAppTargets = new Set<string>();
+  const approvedLaunchApprovalKeys = new Set<string>();
 
   async function ensureConnected(
     signal?: AbortSignal,
@@ -164,13 +164,13 @@ export default function computerUseExtension(pi: ExtensionAPI): void {
       const approvalKey = JSON.stringify(
         Object.fromEntries(Object.entries(params).sort(([a], [b]) => a.localeCompare(b))),
       );
-      if (approvedAppTargets.has(approvalKey)) return true;
+      if (approvedLaunchApprovalKeys.has(approvalKey)) return true;
       if (!ctx.hasUI) return false;
       const approved = await ctx.ui.confirm(
         'Allow computer use?',
         `Allow pi-computer-use to launch and control ${target} for this session?`,
       );
-      if (approved) approvedAppTargets.add(approvalKey);
+      if (approved) approvedLaunchApprovalKeys.add(approvalKey);
       return approved;
     }
 
@@ -180,7 +180,10 @@ export default function computerUseExtension(pi: ExtensionAPI): void {
       params.output_dir = outputDir;
     }
 
-    if (HIGH_RISK_TOOLS.has(toolName) && config?.confirmDangerousActions !== false) {
+    if (
+      toolName === 'start_recording' ||
+      (HIGH_RISK_TOOLS.has(toolName) && config?.confirmDangerousActions !== false)
+    ) {
       if (!ctx.hasUI) return false;
       return ctx.ui.confirm(
         'Confirm high-risk computer action',
@@ -457,7 +460,7 @@ export default function computerUseExtension(pi: ExtensionAPI): void {
     client = undefined;
     sessionAbortController = new AbortController();
     macPermissionPromise = undefined;
-    approvedAppTargets.clear();
+    approvedLaunchApprovalKeys.clear();
 
     if (process.platform === 'darwin') {
       registerTools(toolManifest.tools);
@@ -506,7 +509,7 @@ export default function computerUseExtension(pi: ExtensionAPI): void {
     config = undefined;
     sessionAbortController = undefined;
     macPermissionPromise = undefined;
-    approvedAppTargets.clear();
+    approvedLaunchApprovalKeys.clear();
     sessionAbort?.abort(new Error('pi-computer-use: session shut down'));
     await Promise.allSettled([pendingPermission, closingClient?.close()]);
   });

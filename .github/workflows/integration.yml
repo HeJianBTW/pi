@@ -255,6 +255,7 @@ jobs:
             assert_pattern: "Example Domain"
             assert_tool: web_search
             assert_tool_pattern: "Web Search Results.*deepseek"
+            assert_tool_count: 1
           # Firecrawl provider E2E — exercises web_search (/v2/search) and
           # web_fetch (/v2/scrape) against the real Firecrawl API. Uses the
           # same pi-web-access extension but a distinct matrix `provider` key
@@ -758,6 +759,8 @@ jobs:
           matrix.extension != 'pi-video-gen' &&
           env.PI_INTEGRATION_BASE_URL != '' &&
           env.PI_INTEGRATION_API_KEY != ''
+        env:
+          EXTENSION_PROMPT: ${{ matrix.prompt }}
         run: |
           set -euo pipefail
           # The firecrawl matrix entry needs a real Firecrawl API key. Skip it
@@ -794,7 +797,7 @@ jobs:
               --tools '${{ matrix.tools }}' \
               --mode json \
               --goal '' \
-              -p '${{ matrix.prompt }}' 2>&1)"
+              -p "$EXTENSION_PROMPT" 2>&1)"
             rc=$?
           else
             output="$(pi \
@@ -805,7 +808,7 @@ jobs:
               --no-context-files \
               --tools '${{ matrix.tools }}' \
               --mode json \
-              -p '${{ matrix.prompt }}' 2>&1)"
+              -p "$EXTENSION_PROMPT" 2>&1)"
             rc=$?
           fi
           set -e
@@ -889,6 +892,18 @@ jobs:
                 )
               ' <<<"$output" >/dev/null; then
               echo "::error::${{ matrix.assert_tool }} did not return '${{ matrix.assert_tool_pattern || matrix.assert_pattern }}' successfully"
+              exit 1
+            fi
+          fi
+
+          if [ -n "${{ matrix.assert_tool_count }}" ]; then
+            if ! jq -e -s \
+              --arg tool '${{ matrix.assert_tool }}' \
+              --argjson expected_count '${{ matrix.assert_tool_count || 0 }}' '
+                ([.[] | select(.type == "tool_execution_start" and .toolName == $tool)] | length)
+                == $expected_count
+              ' <<<"$output" >/dev/null; then
+              echo "::error::${{ matrix.assert_tool }} was not called exactly ${{ matrix.assert_tool_count }} time(s)"
               exit 1
             fi
           fi

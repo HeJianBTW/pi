@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { AmasterAdapter, initAmasterProvider } from '../adapters/amaster.js';
 import { initMulticaProvider, MulticaAdapter } from '../adapters/multica.js';
-import { ensureMulticaBinary } from '../adapters/multica-installer.js';
 import piTeamworkExtension from '../index.js';
 import type { ExecFn } from '../types.js';
 
@@ -2154,6 +2153,16 @@ describe('initMulticaProvider', () => {
     vi.unstubAllGlobals();
   });
 
+  it('reports the CLI as unavailable when the version check throws', async () => {
+    const exec: ExecFn = async () => {
+      throw new Error('command not found');
+    };
+
+    const { installResult } = await initMulticaProvider({ autoInstall: true }, exec);
+
+    expect(installResult).toMatchObject({ installed: false, alreadyPresent: false });
+  });
+
   it('does not run setup or login when install fails', async () => {
     const originalPlatform = process.platform;
     vi.stubGlobal('process', { ...process, platform: 'darwin' });
@@ -2186,63 +2195,5 @@ describe('initMulticaProvider', () => {
     };
     await initMulticaProvider({ binary: '/opt/multica', token: 'tk', autoInstall: false }, exec);
     expect(cmds.every((c) => c === '/opt/multica')).toBe(true);
-  });
-});
-
-describe('ensureMulticaBinary', () => {
-  it('returns alreadyPresent when binary exists', async () => {
-    const exec: ExecFn = async () => ({ stdout: 'multica 1.0.0', stderr: '', code: 0 });
-    const result = await ensureMulticaBinary('multica', exec);
-    expect(result).toEqual({ installed: true, alreadyPresent: true });
-  });
-
-  it('does not execute a mutable installer when the binary is missing', async () => {
-    const calls: { cmd: string; args: string[] }[] = [];
-    const exec: ExecFn = async (cmd, args) => {
-      calls.push({ cmd, args });
-      return { stdout: '', stderr: '', code: 127 };
-    };
-
-    const result = await ensureMulticaBinary('multica', exec);
-    expect(result).toEqual({
-      installed: false,
-      alreadyPresent: false,
-      error: 'automatic installation is disabled; install a pinned multica release manually',
-    });
-    expect(calls).toEqual([{ cmd: 'multica', args: ['--version'] }]);
-  });
-
-  it('handles exec throwing an exception', async () => {
-    let callCount = 0;
-    const exec: ExecFn = async () => {
-      callCount++;
-      if (callCount === 1) throw new Error('command not found');
-      throw new Error('still not found');
-    };
-
-    const result = await ensureMulticaBinary('multica', exec);
-    expect(result.installed).toBe(false);
-    expect(result.alreadyPresent).toBe(false);
-  });
-
-  it('uses custom binary name for version check', async () => {
-    const cmds: string[] = [];
-    const exec: ExecFn = async (cmd) => {
-      cmds.push(cmd);
-      return { stdout: 'multica 2.0', stderr: '', code: 0 };
-    };
-    await ensureMulticaBinary('/custom/path/multica', exec);
-    expect(cmds[0]).toBe('/custom/path/multica');
-  });
-
-  it('does not attempt install when binary already exists', async () => {
-    const calls: { cmd: string; args: string[] }[] = [];
-    const exec: ExecFn = async (cmd, args) => {
-      calls.push({ cmd, args });
-      return { stdout: 'multica 1.0.0', stderr: '', code: 0 };
-    };
-    await ensureMulticaBinary('multica', exec);
-    expect(calls).toHaveLength(1);
-    expect(calls[0]!.args).toEqual(['--version']);
   });
 });

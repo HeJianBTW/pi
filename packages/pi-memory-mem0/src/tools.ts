@@ -2,7 +2,7 @@
  * LLM-callable tools for Mem0: search, profile (get all), and save (verbatim store).
  */
 
-import { type AgentToolResult, truncateHead } from '@earendil-works/pi-coding-agent';
+import { type AgentToolResult, truncateHead, truncateLine } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
 import { formatRecalledMemory, redactMemoryText } from './privacy.js';
 import type { Mem0Provider } from './provider.js';
@@ -27,21 +27,13 @@ function textResult(text: string): AgentToolResult<unknown> {
   const output = result.truncated
     ? JSON.stringify({
         truncated: true,
-        preview: truncateUtf8Head(text, 20 * 1024),
+        preview: truncateLine(text, 4_000).text,
       })
     : result.content;
   return {
     content: [{ type: 'text' as const, text: output }],
     details: undefined,
   };
-}
-
-function truncateUtf8Head(value: string, maxBytes: number): string {
-  const bytes = Buffer.from(value, 'utf8');
-  if (bytes.length <= maxBytes) return value;
-  let end = maxBytes;
-  while (end > 0 && (bytes[end]! & 0xc0) === 0x80) end--;
-  return bytes.subarray(0, end).toString('utf8');
 }
 
 export function createMem0Tools(provider: Mem0Provider, userId: string): ToolDefinition[] {

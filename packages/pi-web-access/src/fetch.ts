@@ -81,8 +81,7 @@ async function fetchWithFallback(
   timeoutMs: number,
   lookup?: DnsLookup,
 ): Promise<FetchResponse> {
-  if (lookup) await assertPublicHttpUrl(url, lookup);
-  else await assertPublicHttpUrl(url);
+  await assertPublicHttpUrl(url, lookup);
   try {
     return await fetchViaJina(url, timeoutMs);
   } catch {

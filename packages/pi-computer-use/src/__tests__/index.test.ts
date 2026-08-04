@@ -205,7 +205,7 @@ describe('computerUseExtension', () => {
     lastTransport = undefined;
     closeCount = 0;
     notify.mockClear();
-    mockCtx.ui.confirm.mockClear();
+    mockCtx.ui.confirm.mockReset().mockResolvedValue(true);
   });
 
   afterEach(async () => {
@@ -874,7 +874,31 @@ describe('computerUseExtension', () => {
         mockCtx,
       );
 
+    expect(mockCtx.ui.confirm).toHaveBeenCalledOnce();
     expect(recordingArgs?.output_dir).toBe(join(await realpath(mockCtx.cwd), '..recording'));
+  });
+
+  it('still confirms recording when dangerous-action confirmations are disabled', async () => {
+    let invoked = false;
+    await start({ confirmDangerousActions: false });
+    mockCtx.ui.confirm.mockResolvedValueOnce(false);
+    mockCallTool = () => {
+      invoked = true;
+      return { content: [{ type: 'text', text: 'recording' }] };
+    };
+
+    await tools
+      .get('computer_use_start_recording')!
+      .execute(
+        'inside',
+        { output_dir: join(mockCtx.cwd, 'recording') },
+        undefined,
+        undefined,
+        mockCtx,
+      );
+
+    expect(mockCtx.ui.confirm).toHaveBeenCalledOnce();
+    expect(invoked).toBe(false);
   });
 
   it('does not invoke a high-risk tool when confirmation is declined', async () => {

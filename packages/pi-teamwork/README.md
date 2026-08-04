@@ -137,7 +137,6 @@ src/
 ├── types.ts              # TeamworkProvider interface + shared types
 └── adapters/
     ├── multica.ts        # Multica CLI adapter + initialization
-    ├── multica-installer.ts  # Auto-detect & install multica CLI
     └── amaster.ts        # AMaster Employee CLI adapter
 ```
 
