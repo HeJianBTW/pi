@@ -151,6 +151,7 @@ export default function computerUseExtension(pi: ExtensionAPI): void {
     params: Record<string, unknown>,
     ctx: ExtensionContext,
   ): Promise<boolean> {
+    const requestedRecordingDir = params.output_dir;
     if (toolName === 'launch_app' && config?.confirmAppLaunch !== false) {
       const target = String(
         params.bundle_id ??
@@ -175,7 +176,7 @@ export default function computerUseExtension(pi: ExtensionAPI): void {
     }
 
     if (toolName === 'start_recording') {
-      const outputDir = await approvedRecordingDir(params.output_dir, ctx.cwd);
+      const outputDir = await approvedRecordingDir(requestedRecordingDir, ctx.cwd);
       if (!outputDir) return false;
       params.output_dir = outputDir;
     }
@@ -185,10 +186,17 @@ export default function computerUseExtension(pi: ExtensionAPI): void {
       (HIGH_RISK_TOOLS.has(toolName) && config?.confirmDangerousActions !== false)
     ) {
       if (!ctx.hasUI) return false;
-      return ctx.ui.confirm(
+      const approved = await ctx.ui.confirm(
         'Confirm high-risk computer action',
         `Allow ${toolName} with arguments ${JSON.stringify(params)}?`,
       );
+      if (!approved) return false;
+      if (toolName === 'start_recording') {
+        const outputDir = await approvedRecordingDir(requestedRecordingDir, ctx.cwd);
+        if (!outputDir || outputDir !== params.output_dir) return false;
+        params.output_dir = outputDir;
+      }
+      return true;
     }
 
     return true;

@@ -12,6 +12,8 @@ const localUseAddresses = new BlockList();
 localUseAddresses.addSubnet('64:ff9b:1::', 48, 'ipv6');
 const wellKnownNat64Addresses = new BlockList();
 wellKnownNat64Addresses.addSubnet('64:ff9b::', 96, 'ipv6');
+const sixToFourAddresses = new BlockList();
+sixToFourAddresses.addSubnet('2002::', 16, 'ipv6');
 
 function isPublicIpv4(address: string): boolean {
   const octets = address.split('.').map(Number);
@@ -62,7 +64,9 @@ function isPublicIp(address: string): boolean {
   const family = isIP(normalized);
   if (family === 4) return isPublicIpv4(normalized);
   if (family !== 6) return false;
-  if (localUseAddresses.check(normalized, 'ipv6')) return false;
+  if (localUseAddresses.check(normalized, 'ipv6') || sixToFourAddresses.check(normalized, 'ipv6')) {
+    return false;
+  }
   if (
     normalized === '::' ||
     normalized === '::1' ||

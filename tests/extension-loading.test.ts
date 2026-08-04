@@ -25,6 +25,10 @@ vi.mock('@earendil-works/pi-ai', () => ({
   complete: vi.fn().mockResolvedValue({ text: 'mock' }),
 }));
 
+vi.mock('../packages/pi-browser-use/src/profile.js', () => ({
+  prepareBrowserProfile: vi.fn(),
+}));
+
 vi.mock('node:fs', async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return { ...actual, existsSync: vi.fn().mockReturnValue(true) };

@@ -24,6 +24,7 @@ import {
   resolveConfig,
   type VisionModelConfig,
 } from './config.js';
+import { prepareBrowserProfile } from './profile.js';
 import {
   augmentToolDescription,
   extractTextContent,
@@ -569,6 +570,7 @@ export default function browserUseExtension(pi: ExtensionAPI): void {
         projectTrusted: isProjectTrusted(ctx),
       }),
     );
+    prepareBrowserProfile(config);
     client = new DevToolsClient(config);
     await registerUpstreamTools();
     if (config.visionModel) {

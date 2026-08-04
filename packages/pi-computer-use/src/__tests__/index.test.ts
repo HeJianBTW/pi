@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { mkdtemp, realpath, rm, symlink } from 'node:fs/promises';
+import { mkdtemp, realpath, rename, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -832,6 +832,57 @@ describe('computerUseExtension', () => {
       await rm(cwd, { recursive: true, force: true });
       await rm(outside, { recursive: true, force: true });
     }
+  });
+
+  describe('recording output revalidation', () => {
+    let cwd: string;
+    let movedCwd: string;
+    let outside: string;
+    let previousCwd: string;
+
+    beforeEach(async () => {
+      cwd = await mkdtemp(join(tmpdir(), 'pi-computer-use-recording-'));
+      movedCwd = `${cwd}-moved`;
+      outside = await mkdtemp(join(tmpdir(), 'pi-computer-use-recording-outside-'));
+      previousCwd = mockCtx.cwd;
+      mockCtx.cwd = cwd;
+    });
+
+    afterEach(async () => {
+      mockCtx.cwd = previousCwd;
+      await rm(cwd, { recursive: true, force: true });
+      await rm(movedCwd, { recursive: true, force: true });
+      await rm(outside, { recursive: true, force: true });
+    });
+
+    it.each([
+      'output directory',
+      'workspace root',
+    ] as const)('rejects %s replacement during confirmation', async (replacement) => {
+      const outputDir = join(cwd, 'recording');
+      let invoked = false;
+      await start();
+      mockCallTool = () => {
+        invoked = true;
+        return { content: [{ type: 'text', text: 'recording' }] };
+      };
+      mockCtx.ui.confirm.mockImplementationOnce(async () => {
+        if (replacement === 'output directory') {
+          await symlink(outside, outputDir, 'dir');
+        } else {
+          await rename(cwd, movedCwd);
+          await symlink(outside, cwd, 'dir');
+        }
+        return true;
+      });
+
+      await tools
+        .get('computer_use_start_recording')!
+        .execute('record', { output_dir: outputDir }, undefined, undefined, mockCtx);
+
+      expect(mockCtx.ui.confirm).toHaveBeenCalledOnce();
+      expect(invoked).toBe(false);
+    });
   });
 
   it('keeps recording output containment enabled when confirmations are disabled', async () => {
