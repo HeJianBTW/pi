@@ -247,10 +247,14 @@ jobs:
             tools: workspace_list
             prompt: "Use workspace_list to fetch teamwork workspaces, then tell me the names of the workspaces. Call the tool exactly once."
             assert_pattern: "(workspace|name|id)"
+          # Exercise DeepSeek search and the existing Jina/local fetch path in one job.
           - extension: pi-web-access
-            tools: web_fetch
-            prompt: "Use web_fetch on https://www.baidu.com once. Tell me the page title in one sentence."
-            assert_pattern: "(baidu|百度|bing|google|search|title)"
+            provider: deepseek
+            tools: web_search,web_fetch
+            prompt: "Step 1 — use web_search exactly once with query='DeepSeek API documentation'. Step 2 — use web_fetch exactly once on https://example.com. Report the search provider and fetched page title in one sentence."
+            assert_pattern: "Example Domain"
+            assert_tool: web_search
+            assert_tool_pattern: "Web Search Results.*deepseek"
           # Firecrawl provider E2E — exercises web_search (/v2/search) and
           # web_fetch (/v2/scrape) against the real Firecrawl API. Uses the
           # same pi-web-access extension but a distinct matrix `provider` key
@@ -290,6 +294,7 @@ jobs:
             assert_pattern: "(VISUAL CHECK 7391.*(blue|#1457d9)|(blue|#1457d9).*VISUAL CHECK 7391)"
             assert_visual_analysis: true
     env:
+      TMPDIR: ${{ runner.temp }}
       PI_INTEGRATION_BASE_URL: ${{ secrets.PI_INTEGRATION_BASE_URL }}
       PI_INTEGRATION_API_KEY: ${{ secrets.PI_INTEGRATION_API_KEY }}
       PI_INTEGRATION_MULTICA_TOKEN: ${{ secrets.PI_INTEGRATION_MULTICA_TOKEN }}
@@ -326,16 +331,23 @@ jobs:
           fi
           mkdir -p "$PI_CODING_AGENT_DIR"
 
-          # pi-web-access settings vary by matrix `provider`: the default
-          # entry only wires the summary model (fetch falls back to Jina),
-          # while the firecrawl entry configures Firecrawl as both the search
-          # and fetch provider so web_search (/v2/search) and web_fetch
-          # (/v2/scrape) hit the real API. The apiKey pulls FIRECRAWL_API_KEY
-          # from the environment at pi runtime via ${ENV_VAR} interpolation.
+          # pi-web-access settings vary by matrix `provider`: DeepSeek search
+          # reuses the integration gateway, while Firecrawl configures its own
+          # search and fetch API. Keys are expanded by pi at runtime.
           # (Single-quoted heredoc-var: ${FIRECRAWL_API_KEY} stays literal —
           # bash does not recursively expand a variable's contents, so pi's
           # own ${ENV_VAR} resolver sees the placeholder verbatim.)
-          if [ "${{ matrix.provider }}" = "firecrawl" ]; then
+          if [ "${{ matrix.provider }}" = "deepseek" ]; then
+            WEB_ACCESS_SETTINGS='{
+              "search": { "provider": "deepseek" },
+              "providers": {
+                "deepseek": {
+                  "baseUrl": "${PI_INTEGRATION_BASE_URL}",
+                  "apiKey": "${PI_INTEGRATION_API_KEY}"
+                }
+              }
+            }'
+          elif [ "${{ matrix.provider }}" = "firecrawl" ]; then
             WEB_ACCESS_SETTINGS='{
               "search": { "provider": "firecrawl" },
               "fetch": {
@@ -856,7 +868,7 @@ jobs:
             fi
             if ! jq -e -s \
               --arg tool '${{ matrix.assert_tool }}' \
-              --arg pattern '${{ matrix.assert_pattern }}' '
+              --arg pattern '${{ matrix.assert_tool_pattern || matrix.assert_pattern }}' '
                 any(.[];
                   .type == "tool_execution_end"
                   and .toolName == $tool
@@ -871,7 +883,7 @@ jobs:
                   )
                 )
               ' <<<"$output" >/dev/null; then
-              echo "::error::${{ matrix.assert_tool }} did not return '${{ matrix.assert_pattern }}' successfully"
+              echo "::error::${{ matrix.assert_tool }} did not return '${{ matrix.assert_tool_pattern || matrix.assert_pattern }}' successfully"
               exit 1
             fi
           fi

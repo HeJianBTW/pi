@@ -55,6 +55,8 @@ jobs:
       - instance-hnpsq9go
       - linux
       - x64
+    env:
+      TMPDIR: ${{ runner.temp }}
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-pi-build
