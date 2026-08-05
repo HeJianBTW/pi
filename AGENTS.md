@@ -351,6 +351,22 @@ Rules:
 
 ---
 
+## Code Review Rules
+
+### Trust and configuration boundaries
+
+- Flag extension changes that read project settings or policies without first establishing project trust, expand environment variables from project-controlled settings, or bypass `@amaster.ai/pi-shared/settings` with hardcoded Pi paths. Safe path: pass `projectTrusted: isProjectTrusted(ctx)` and ignore project configuration when trust is absent or declined.
+
+### External I/O and model-visible output
+
+- Flag network or child-process paths that drop caller cancellation, return unbounded external data, or expose raw errors, response bodies, stack traces, credentials, or user content through tool results or logs. Safe path: propagate the provided `AbortSignal`, bound both `content` and `details`, return sanitized `isError` results for expected failures, and log only non-sensitive diagnostics to stderr.
+
+### Public extension contracts
+
+- Flag breaking changes to public tool or command names and parameters, settings keys, persisted session data, or documented lifecycle behavior unless compatibility is preserved or the break is explicitly intentional. Safe path: keep the existing contract or provide a migration, and update the corresponding tests, README, `promptSnippet`, and `promptGuidelines` together.
+
+---
+
 ## Adding a New Package
 
 Minimal checklist:
