@@ -16,7 +16,7 @@ permissions:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
-  PI_REVIEW_MODEL: ds-v4-flash
+  PI_REVIEW_MODEL: deepseek-v4-flash
   PI_OFFLINE: '1'
   PI_SUBAGENT_MAX_DEPTH: '1'
   PI_SUBAGENT_MAX_SPAWNS_PER_SESSION: '2'
