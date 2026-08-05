@@ -211,6 +211,7 @@ jobs:
             await combinePiReviewTranscript({
               transcriptPath: process.env.PI_REVIEW_TRANSCRIPT,
               reviewPath: process.env.PI_REVIEW_OUTPUT,
+              core,
             });
 
       - name: Publish review comment
