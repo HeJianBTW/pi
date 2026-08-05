@@ -53,7 +53,10 @@ jobs:
           set -euo pipefail
           echo "PI_CODING_AGENT_DIR=$RUNNER_TEMP/pi-review-agent" >> "$GITHUB_ENV"
           echo "PI_REVIEW_CONTEXT=$RUNNER_TEMP/pi-review-context.md" >> "$GITHUB_ENV"
-          echo "PI_REVIEW_OUTPUT=$RUNNER_TEMP/pi-review-output.md" >> "$GITHUB_ENV"
+          echo "PI_REVIEW_COORDINATOR_OUTPUT=$RUNNER_TEMP/pi-review-coordinator-output.md" >> "$GITHUB_ENV"
+          echo "PI_REVIEW_STANDARDS_OUTPUT=$RUNNER_TEMP/pi-review-standards-output.json" >> "$GITHUB_ENV"
+          echo "PI_REVIEW_SPEC_OUTPUT=$RUNNER_TEMP/pi-review-spec-output.json" >> "$GITHUB_ENV"
+          echo "PI_REVIEW_OUTPUT=$RUNNER_TEMP/pi-review-output.json" >> "$GITHUB_ENV"
           mkdir -p "$RUNNER_TEMP/pi-review-agent/agents" "$RUNNER_TEMP/pi-review-skills"
 
       - name: Verify review credentials
@@ -141,6 +144,7 @@ jobs:
           extensions, credentials, network access, or repository changes. Return only concrete findings with
           severity, file and changed-line references, evidence, and the smallest viable fix. Never include
           praise, compliant code, process narration, or speculative concerns.
+          Return only one JSON object in the requested findings shape, without Markdown fences or prose.
           AGENT
 
       - name: Prepare untrusted PR data for review
@@ -181,7 +185,7 @@ jobs:
             --mode text \
             -p \
             < "$PI_REVIEW_CONTEXT" \
-            > "$PI_REVIEW_OUTPUT" 2> "$RUNNER_TEMP/pi-review-stderr.log"
+            > "$PI_REVIEW_COORDINATOR_OUTPUT" 2> "$RUNNER_TEMP/pi-review-stderr.log"
           rc=$?
           set -e
           if [ "$rc" -ne 0 ]; then
@@ -189,15 +193,28 @@ jobs:
             echo '--- Pi stderr (last 200 lines) ---'
             tail -n 200 "$RUNNER_TEMP/pi-review-stderr.log"
             exit "$rc"
-          elif [ ! -s "$PI_REVIEW_OUTPUT" ]; then
-            echo '::error::Pi review returned no output'
+          elif [ ! -s "$PI_REVIEW_COORDINATOR_OUTPUT" ]; then
+            echo '::error::Pi review coordinator returned no output'
             exit 1
           fi
+
+      - name: Combine axis review outputs
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { pathToFileURL } = require('node:url');
+            const scriptUrl = pathToFileURL(`${process.env.GITHUB_WORKSPACE}/.github/scripts/publish-pi-review.mjs`);
+            const { combinePiReviewOutputs } = await import(scriptUrl.href);
+            await combinePiReviewOutputs({
+              standardsPath: process.env.PI_REVIEW_STANDARDS_OUTPUT,
+              specPath: process.env.PI_REVIEW_SPEC_OUTPUT,
+              reviewPath: process.env.PI_REVIEW_OUTPUT,
+            });
 
       - name: Publish review comment
         uses: actions/github-script@v7
         env:
-          REVIEW_PATH: ${{ runner.temp }}/pi-review-output.md
+          REVIEW_PATH: ${{ runner.temp }}/pi-review-output.json
         with:
           script: |
             const { pathToFileURL } = require('node:url');
