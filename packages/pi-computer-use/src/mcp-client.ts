@@ -11,6 +11,12 @@ import {
   StdioClientTransport,
 } from '@modelcontextprotocol/sdk/client/stdio.js';
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
+import { AjvJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/ajv';
+import type {
+  JsonSchemaType,
+  JsonSchemaValidator,
+  jsonSchemaValidator,
+} from '@modelcontextprotocol/sdk/validation/index.js';
 import type { ComputerUseConfig } from './config.js';
 import type { McpToolResult } from './tool-result.js';
 
@@ -136,6 +142,67 @@ export type ConnectionState =
   | 'failed'
   | 'closing';
 
+/** schemars emits these non-standard `format` values for Rust integer types; ajv warns on each. */
+const INTEGER_FORMAT_BOUNDS: Record<string, { minimum?: number; maximum?: number }> = {
+  int8: { minimum: -128, maximum: 127 },
+  int16: { minimum: -32_768, maximum: 32_767 },
+  int32: { minimum: -2_147_483_648, maximum: 2_147_483_647 },
+  int64: {},
+  uint8: { minimum: 0, maximum: 255 },
+  uint16: { minimum: 0, maximum: 65_535 },
+  uint32: { minimum: 0, maximum: 4_294_967_295 },
+  uint64: { minimum: 0 },
+};
+
+/** Schema keys whose values are instance data, not subschemas — never rewrite inside them. */
+const NON_SCHEMA_KEYS = new Set(['const', 'default', 'enum', 'examples']);
+
+/**
+ * Returns a copy of the schema with schemars' non-standard integer `format`
+ * annotations ("uint64", ...) replaced by standard constraints ajv can enforce.
+ * The input schema is not modified.
+ */
+export function sanitizeSchemaFormats<T>(schema: T): T {
+  return sanitizeSchemaNode(schema) as T;
+}
+
+function sanitizeSchemaNode(node: unknown): unknown {
+  if (Array.isArray(node)) return node.map(sanitizeSchemaNode);
+  if (node === null || typeof node !== 'object') return node;
+
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(node)) {
+    result[key] = NON_SCHEMA_KEYS.has(key) ? value : sanitizeSchemaNode(value);
+  }
+
+  const format = result.format;
+  if (typeof format !== 'string') return result;
+  const bounds = INTEGER_FORMAT_BOUNDS[format];
+  if (!bounds) return result;
+
+  delete result.format;
+  result.type ??= 'integer';
+  if (bounds.minimum !== undefined && result.minimum === undefined) {
+    result.minimum = bounds.minimum;
+  }
+  if (bounds.maximum !== undefined && result.maximum === undefined) {
+    result.maximum = bounds.maximum;
+  }
+  return result;
+}
+
+/**
+ * Wraps the SDK's default ajv validator, sanitizing non-standard integer formats
+ * before compilation so ajv stays silent and the integer bounds stay enforced.
+ */
+export class SanitizingJsonSchemaValidator implements jsonSchemaValidator {
+  private readonly inner = new AjvJsonSchemaValidator();
+
+  getValidator<T>(schema: JsonSchemaType): JsonSchemaValidator<T> {
+    return this.inner.getValidator<T>(sanitizeSchemaFormats(schema));
+  }
+}
+
 /** Owns the Cua Driver daemon and its stdio MCP proxy as one adapter. */
 export class CuaDriverClient {
   private client: Client | null = null;
@@ -196,7 +263,10 @@ export class CuaDriverClient {
         env,
         stderr: 'pipe',
       });
-      client = new Client({ name: 'pi-computer-use', version: '0.2.0' }, { capabilities: {} });
+      client = new Client(
+        { name: 'pi-computer-use', version: '0.2.0' },
+        { capabilities: {}, jsonSchemaValidator: new SanitizingJsonSchemaValidator() },
+      );
       this.client = client;
 
       transport.onerror = (error: Error) => {

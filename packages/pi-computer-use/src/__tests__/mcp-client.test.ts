@@ -1,5 +1,11 @@
-import { describe, expect, it } from 'vitest';
-import { resolveBundledTarget, resolveDriverLayout, resolveUnixSocketPath } from '../mcp-client.js';
+import { describe, expect, it, vi } from 'vitest';
+import {
+  resolveBundledTarget,
+  resolveDriverLayout,
+  resolveUnixSocketPath,
+  SanitizingJsonSchemaValidator,
+  sanitizeSchemaFormats,
+} from '../mcp-client.js';
 
 describe('CuaDriverClient', () => {
   it.each([
@@ -39,5 +45,91 @@ describe('CuaDriverClient', () => {
       '/tmp/pi-cua-123-deadbeef.sock',
     );
     expect(Buffer.byteLength(resolveUnixSocketPath('/tmp', '123-deadbeef'))).toBeLessThan(91);
+  });
+});
+
+describe('sanitizeSchemaFormats', () => {
+  it('rewrites uint64 format to standard integer constraints', () => {
+    expect(sanitizeSchemaFormats({ type: 'integer', format: 'uint64' })).toEqual({
+      type: 'integer',
+      minimum: 0,
+    });
+  });
+
+  it('rewrites uint32 with an explicit maximum', () => {
+    expect(sanitizeSchemaFormats({ format: 'uint32' })).toEqual({
+      type: 'integer',
+      minimum: 0,
+      maximum: 4_294_967_295,
+    });
+  });
+
+  it('rewrites nested schemas in the verify_state shape', () => {
+    const schema = {
+      type: 'object',
+      properties: {
+        elapsed_ms: { type: 'integer', format: 'uint64' },
+        predicates: {
+          type: 'array',
+          items: { type: 'object', properties: { index: { format: 'uint64' } } },
+        },
+        delivery: { type: 'object', properties: { delivered_count: { format: 'uint32' } } },
+      },
+    };
+
+    const sanitized = sanitizeSchemaFormats(schema);
+    expect(sanitized.properties.elapsed_ms).toEqual({ type: 'integer', minimum: 0 });
+    expect(sanitized.properties.predicates.items.properties.index).toEqual({
+      type: 'integer',
+      minimum: 0,
+    });
+    expect(sanitized.properties.delivery.properties.delivered_count).toEqual({
+      type: 'integer',
+      minimum: 0,
+      maximum: 4_294_967_295,
+    });
+  });
+
+  it('leaves standard formats untouched', () => {
+    const schema = { type: 'string', format: 'date-time' };
+    expect(sanitizeSchemaFormats(schema)).toEqual(schema);
+  });
+
+  it('does not override existing bounds', () => {
+    expect(sanitizeSchemaFormats({ format: 'uint32', minimum: 1, maximum: 10 })).toEqual({
+      type: 'integer',
+      minimum: 1,
+      maximum: 10,
+    });
+  });
+
+  it('does not mutate the input schema', () => {
+    const schema = { properties: { samples: { format: 'uint64' } } };
+    sanitizeSchemaFormats(schema);
+    expect(schema).toEqual({ properties: { samples: { format: 'uint64' } } });
+  });
+});
+
+describe('SanitizingJsonSchemaValidator', () => {
+  it('compiles non-standard formats without ajv warnings and keeps validating', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const validate = new SanitizingJsonSchemaValidator().getValidator({
+        type: 'object',
+        properties: { elapsed_ms: { type: 'integer', format: 'uint64' } },
+      });
+
+      expect(warn).not.toHaveBeenCalled();
+      expect(error).not.toHaveBeenCalled();
+      expect(log).not.toHaveBeenCalled();
+      expect(validate({ elapsed_ms: 5 }).valid).toBe(true);
+      expect(validate({ elapsed_ms: -1 }).valid).toBe(false);
+    } finally {
+      warn.mockRestore();
+      error.mockRestore();
+      log.mockRestore();
+    }
   });
 });
