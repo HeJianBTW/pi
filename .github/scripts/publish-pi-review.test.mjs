@@ -1,9 +1,16 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { test } from 'vitest';
-import { commentableLines, parseReviewOutput, publishPiReview, summaryBody } from './publish-pi-review.mjs';
+import {
+  commentableLines,
+  parseReviewOutput,
+  preparePiReview,
+  publishPiReview,
+  reviewLocationIndex,
+  summaryBody,
+} from './publish-pi-review.mjs';
 
 const finding = {
   severity: 'P1',
@@ -16,9 +23,10 @@ const finding = {
   fix: 'Move cleanup into a finally block.',
 };
 
-test('parses strict findings JSON and rejects prose', () => {
+test('parses findings JSON wrapped in model prose', () => {
   assert.deepEqual(parseReviewOutput(`\`\`\`json\n${JSON.stringify({ findings: [finding] })}\n\`\`\``), [finding]);
-  assert.throws(() => parseReviewOutput(`Review complete.\n${JSON.stringify({ findings: [] })}`), SyntaxError);
+  assert.deepEqual(parseReviewOutput(`Both reviews completed.\n${JSON.stringify({ findings: [] })}\nReview complete.`), []);
+  assert.throws(() => parseReviewOutput('Both reviews completed without structured output.'), /valid JSON object/);
   assert.throws(
     () => parseReviewOutput(JSON.stringify({ findings: [finding, { ...finding, title: 'Another defect' }] })),
     /multiple findings for the same axis and changed line/,
@@ -32,6 +40,74 @@ test('collects only added and removed diff lines', () => {
     'src/example.ts\u0000RIGHT\u000011',
     'src/example.ts\u0000RIGHT\u000012',
   ]);
+});
+
+test('gives the reviewer exact changed-line coordinates', () => {
+  const patch = [
+    '@@ -36,6 +36,8 @@',
+    ' ',
+    ' Traces are scoped to user input boundaries.',
+    ' ',
+    '+Langfuse traces include correlation metadata.',
+    '+',
+    ' ## Configuration',
+  ].join('\n');
+  assert.equal(
+    reviewLocationIndex([{ filename: 'packages/pi-telemetry/README.md', patch }]),
+    'packages/pi-telemetry/README.md\tRIGHT\t39\npackages/pi-telemetry/README.md\tRIGHT\t40',
+  );
+});
+
+test('prepares the review prompt outside the workflow', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'pi-review-context-'));
+  const contextPath = path.join(directory, 'context.md');
+  await writeFile(path.join(directory, 'AGENTS.md'), '# Review rules');
+  const listFiles = () => {};
+  const listCommits = () => {};
+  const github = {
+    request: async () => ({ data: 'diff --git a/src/example.ts b/src/example.ts' }),
+    paginate: async (method) => {
+      if (method === listFiles) {
+        return [{ filename: 'src/example.ts', patch: '@@ -10 +10,2 @@\n old\n+new' }];
+      }
+      if (method === listCommits) return [];
+      throw new Error('Unexpected pagination method');
+    },
+    rest: {
+      pulls: { listFiles, listCommits },
+      issues: { get: async () => { throw new Error('Unexpected issue lookup'); } },
+    },
+  };
+  try {
+    await preparePiReview({
+      github,
+      context: {
+        repo: { owner: 'owner', repo: 'repo' },
+        payload: {
+          pull_request: {
+            number: 123,
+            title: 'Test review preparation',
+            body: '',
+            base: { sha: 'base123' },
+            head: { sha: 'head123' },
+          },
+        },
+      },
+      core: { warning: () => {} },
+      contextPath,
+      workspace: directory,
+    });
+    const prompt = await readFile(contextPath, 'utf8');
+    assert.match(prompt, /# Allowed changed-line locations/);
+    assert.match(prompt, /src\/example\.ts\tRIGHT\t11/);
+    assert.match(prompt, /Copy path, side, and line exactly from this list/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+
+  const workflow = await readFile(new URL('../workflows/pi-review.yml', import.meta.url), 'utf8');
+  assert.match(workflow, /preparePiReview\(\{ github, context, core/);
+  assert.doesNotMatch(workflow, /const diffResponse =/);
 });
 
 test('publishes inline findings, keeps the summary concise, and fails only for P0/P1', async () => {
@@ -84,6 +160,11 @@ test('publishes inline findings, keeps the summary concise, and fails only for P
     },
   };
   const failures = [];
+  const warnings = [];
+  const core = {
+    setFailed: (message) => failures.push(message),
+    warning: (message) => warnings.push(message),
+  };
   try {
     await publishPiReview({
       github,
@@ -91,11 +172,14 @@ test('publishes inline findings, keeps the summary concise, and fails only for P
         repo: { owner: 'owner', repo: 'repo' },
         payload: { pull_request: { number: 123, head: { sha: 'abc123' } } },
       },
-      core: { setFailed: (message) => failures.push(message) },
+      core,
       reviewPath,
     });
     await writeFile(reviewPath, JSON.stringify({
-      findings: [{ ...finding, severity: 'P2', title: 'Cleanup can be skipped' }],
+      findings: [
+        { ...finding, severity: 'P2', title: 'Cleanup can be skipped' },
+        { ...finding, severity: 'P0', line: 12, title: 'Invalid model location' },
+      ],
     }));
     await publishPiReview({
       github,
@@ -103,7 +187,7 @@ test('publishes inline findings, keeps the summary concise, and fails only for P
         repo: { owner: 'owner', repo: 'repo' },
         payload: { pull_request: { number: 123, head: { sha: 'def456' } } },
       },
-      core: { setFailed: (message) => failures.push(message) },
+      core,
       reviewPath,
     });
     await writeFile(reviewPath, JSON.stringify({ findings: [] }));
@@ -113,7 +197,7 @@ test('publishes inline findings, keeps the summary concise, and fails only for P
         repo: { owner: 'owner', repo: 'repo' },
         payload: { pull_request: { number: 123, head: { sha: 'def456' } } },
       },
-      core: { setFailed: (message) => failures.push(message) },
+      core,
       reviewPath,
     });
   } finally {
@@ -128,7 +212,12 @@ test('publishes inline findings, keeps the summary concise, and fails only for P
   assert.equal(calls.filter(([name]) => name === 'createComment').length, 1);
   assert.equal(calls.filter(([name]) => name === 'updateComment').length, 2);
   assert.equal(reviewComments.length, 0);
-  assert.deepEqual(failures, ['Pi review found 1 blocking P0/P1 finding(s)']);
+  assert.deepEqual(failures, [
+    'Pi review found 1 blocking P0/P1 finding(s)',
+    'Pi review found 1 blocking P0/P1 finding(s)',
+  ]);
+  assert.deepEqual(warnings, ['Summary-only Pi review finding outside changed lines: src/example.ts:12 (RIGHT)']);
+  assert.match(calls.find(([name]) => name === 'updateComment')[1].body, /Invalid model location/);
   const summary = summaryBody(
     [
       finding,
