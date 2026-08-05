@@ -184,7 +184,8 @@ jobs:
             --mode json \
             -p \
             < "$PI_REVIEW_CONTEXT" \
-            > "$PI_REVIEW_TRANSCRIPT" 2> "$RUNNER_TEMP/pi-review-stderr.log"
+            2> "$RUNNER_TEMP/pi-review-stderr.log" \
+            | grep -F '"type":"tool_execution_end"' > "$PI_REVIEW_TRANSCRIPT"
           rc=$?
           set -e
           if [ "$rc" -ne 0 ]; then
