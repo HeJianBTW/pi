@@ -202,6 +202,8 @@ export default function telemetryExtension(pi: ExtensionAPI): void {
     nonEmptyEnv('PI_SUBAGENT_CHILD_AGENT') ??
     nonEmptyEnv('PI_TELEMETRY_SUBAGENT_NAME') ??
     nonEmptyEnv('PI_TELEMETRY_SUBAGENT_AGENT');
+  const taskRunId = nonEmptyEnv('PI_TELEMETRY_TASK_RUN_ID');
+  const runtimeCorrelation = taskRunId ? { taskRunId } : {};
   const isSubagent = Boolean(inheritedTraceId && ownerPid && ownerPid !== String(process.pid));
 
   let exporter: RuntimeEventExporter = new NoopRuntimeEventExporter();
@@ -265,6 +267,7 @@ export default function telemetryExtension(pi: ExtensionAPI): void {
         await exporter.publish({
           id: randomUUID(),
           traceId: currentTraceId,
+          ...runtimeCorrelation,
           type: 'subagent_started',
           sessionId,
           ...(parentSessionId ? { parentSessionId } : {}),
@@ -276,6 +279,7 @@ export default function telemetryExtension(pi: ExtensionAPI): void {
         await exporter.publish({
           id: randomUUID(),
           traceId: currentTraceId,
+          ...runtimeCorrelation,
           type: 'chat_turn_started',
           sessionId,
           createdAt: new Date(event.timestamp).toISOString(),
@@ -300,6 +304,7 @@ export default function telemetryExtension(pi: ExtensionAPI): void {
       await exporter.publish({
         id: randomUUID(),
         traceId: currentTraceId,
+        ...runtimeCorrelation,
         type: 'subagent_completed',
         sessionId,
         ...(parentSessionId ? { parentSessionId } : {}),
@@ -312,6 +317,7 @@ export default function telemetryExtension(pi: ExtensionAPI): void {
       await exporter.publish({
         id: randomUUID(),
         traceId: currentTraceId,
+        ...runtimeCorrelation,
         type: 'chat_turn_completed',
         sessionId,
         createdAt: new Date(now).toISOString(),
@@ -327,6 +333,7 @@ export default function telemetryExtension(pi: ExtensionAPI): void {
     await exporter.publish({
       id: randomUUID(),
       traceId: currentTraceId,
+      ...runtimeCorrelation,
       sessionId: localSessionId,
       conversationId: localSessionId,
       ...(isSubagent
@@ -347,6 +354,7 @@ export default function telemetryExtension(pi: ExtensionAPI): void {
     await exporter.publish({
       id: randomUUID(),
       traceId: currentTraceId,
+      ...runtimeCorrelation,
       sessionId: localSessionId,
       conversationId: localSessionId,
       ...(isSubagent
@@ -371,6 +379,7 @@ export default function telemetryExtension(pi: ExtensionAPI): void {
     await exporter.publish({
       id: randomUUID(),
       traceId: currentTraceId,
+      ...runtimeCorrelation,
       sessionId: localSessionId,
       conversationId: localSessionId,
       ...(isSubagent
@@ -391,6 +400,7 @@ export default function telemetryExtension(pi: ExtensionAPI): void {
     await exporter.publish({
       id: randomUUID(),
       traceId: currentTraceId,
+      ...runtimeCorrelation,
       sessionId: localSessionId,
       conversationId: localSessionId,
       ...(isSubagent
@@ -420,6 +430,7 @@ export default function telemetryExtension(pi: ExtensionAPI): void {
     await exporter.publish({
       id: randomUUID(),
       traceId: currentTraceId,
+      ...runtimeCorrelation,
       sessionId: localSessionId,
       conversationId: localSessionId,
       ...(isSubagent
@@ -445,6 +456,7 @@ export default function telemetryExtension(pi: ExtensionAPI): void {
     await exporter.publish({
       id: randomUUID(),
       traceId: currentTraceId,
+      ...runtimeCorrelation,
       type: 'chat_turn_steered',
       sessionId,
       createdAt: new Date().toISOString(),
@@ -471,6 +483,7 @@ export default function telemetryExtension(pi: ExtensionAPI): void {
     await exporter.publish({
       id: randomUUID(),
       traceId: currentTraceId,
+      ...runtimeCorrelation,
       type: 'chat_turn_steered',
       sessionId,
       createdAt: new Date().toISOString(),
