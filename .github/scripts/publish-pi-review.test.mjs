@@ -23,9 +23,10 @@ const finding = {
   fix: 'Move cleanup into a finally block.',
 };
 
-test('parses strict findings JSON and rejects prose', () => {
+test('parses findings JSON wrapped in model prose', () => {
   assert.deepEqual(parseReviewOutput(`\`\`\`json\n${JSON.stringify({ findings: [finding] })}\n\`\`\``), [finding]);
-  assert.throws(() => parseReviewOutput(`Review complete.\n${JSON.stringify({ findings: [] })}`), SyntaxError);
+  assert.deepEqual(parseReviewOutput(`Both reviews completed.\n${JSON.stringify({ findings: [] })}\nReview complete.`), []);
+  assert.throws(() => parseReviewOutput('Both reviews completed without structured output.'), /valid JSON object/);
   assert.throws(
     () => parseReviewOutput(JSON.stringify({ findings: [finding, { ...finding, title: 'Another defect' }] })),
     /multiple findings for the same axis and changed line/,

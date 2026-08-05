@@ -17,6 +17,22 @@ function stripJsonFence(value) {
     .trim();
 }
 
+function parseJsonObject(value) {
+  const text = stripJsonFence(value);
+  try {
+    return JSON.parse(text);
+  } catch {
+    const start = text.indexOf('{');
+    const end = text.lastIndexOf('}');
+    if (start !== -1 && end > start) {
+      try {
+        return JSON.parse(text.slice(start, end + 1));
+      } catch {}
+    }
+    throw new Error('Pi review output did not contain a valid JSON object');
+  }
+}
+
 function boundedText(value, name, maxLength) {
   if (typeof value !== 'string' || !value.trim()) {
     throw new Error(`Pi review finding ${name} must be a non-empty string`);
@@ -25,7 +41,7 @@ function boundedText(value, name, maxLength) {
 }
 
 export function parseReviewOutput(raw) {
-  const parsed = JSON.parse(stripJsonFence(raw));
+  const parsed = parseJsonObject(raw);
   if (parsed?.error) throw new Error(`Pi review did not complete: ${String(parsed.error).slice(0, 500)}`);
   if (!Array.isArray(parsed?.findings)) throw new Error('Pi review output must contain a findings array');
   if (parsed.findings.length > 20) throw new Error('Pi review returned more than 20 findings');
