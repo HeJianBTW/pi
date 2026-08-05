@@ -11,7 +11,7 @@ concurrency:
 
 permissions:
   contents: read
-  issues: write
+  issues: read
   pull-requests: write
 
 env:
@@ -144,6 +144,7 @@ jobs:
           extensions, credentials, network access, or repository changes. Return only concrete findings with
           severity, file and changed-line references, evidence, and the smallest viable fix. Never include
           praise, compliant code, process narration, or speculative concerns.
+          Write all output in English, regardless of the language used in the pull request or linked issues.
           Finish by calling the runtime-provided structured_output tool with the requested findings object.
           Do not call or mention any other tool.
           AGENT

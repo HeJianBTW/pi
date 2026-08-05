@@ -196,51 +196,22 @@ test('prepares the review prompt outside the workflow', async () => {
   assert.doesNotMatch(workflow, /const diffResponse =/);
 });
 
-test('publishes inline findings, keeps the summary concise, and fails only for P0/P1', async () => {
+test('posts one new review per run with the full summary and current findings', async () => {
   const directory = await mkdtemp(path.join(tmpdir(), 'pi-review-'));
   const reviewPath = path.join(directory, 'review.json');
   await writeFile(reviewPath, JSON.stringify({ findings: [finding] }));
   const calls = [];
-  const reviewComments = [];
-  const issueComments = [];
   const listFiles = () => {};
-  const listReviewComments = () => {};
-  const listComments = () => {};
   const github = {
     paginate: async (method) => {
       if (method === listFiles) return [{ filename: 'src/example.ts', patch: '@@ -10 +10,2 @@\n old\n+new' }];
-      if (method === listReviewComments) return [...reviewComments];
-      if (method === listComments) return [...issueComments];
       throw new Error('Unexpected pagination method');
     },
     rest: {
       pulls: {
         listFiles,
-        listReviewComments,
-        updateReviewComment: async (args) => {
-          calls.push(['updateReviewComment', args]);
-          reviewComments.find((comment) => comment.id === args.comment_id).body = args.body;
-        },
-        deleteReviewComment: async (args) => {
-          calls.push(['deleteReviewComment', args]);
-          reviewComments.splice(reviewComments.findIndex((comment) => comment.id === args.comment_id), 1);
-        },
         createReview: async (args) => {
           calls.push(['createReview', args]);
-          for (const comment of args.comments) {
-            reviewComments.push({ id: reviewComments.length + 1, user: { type: 'Bot' }, body: comment.body });
-          }
-        },
-      },
-      issues: {
-        listComments,
-        updateComment: async (args) => {
-          calls.push(['updateComment', args]);
-          issueComments.find((comment) => comment.id === args.comment_id).body = args.body;
-        },
-        createComment: async (args) => {
-          calls.push(['createComment', args]);
-          issueComments.push({ id: issueComments.length + 1, user: { type: 'Bot' }, body: args.body });
         },
       },
     },
@@ -251,59 +222,68 @@ test('publishes inline findings, keeps the summary concise, and fails only for P
     setFailed: (message) => failures.push(message),
     warning: (message) => warnings.push(message),
   };
+  const publish = (sha) => publishPiReview({
+    github,
+    context: {
+      repo: { owner: 'owner', repo: 'repo' },
+      payload: { pull_request: { number: 123, head: { sha } } },
+    },
+    core,
+    reviewPath,
+  });
   try {
-    await publishPiReview({
-      github,
-      context: {
-        repo: { owner: 'owner', repo: 'repo' },
-        payload: { pull_request: { number: 123, head: { sha: 'abc123' } } },
-      },
-      core,
-      reviewPath,
-    });
+    await publish('abc123');
     await writeFile(reviewPath, JSON.stringify({
       findings: [
         { ...finding, severity: 'P2', title: 'Cleanup can be skipped' },
         { ...finding, severity: 'P0', line: 12, title: 'Invalid model location' },
       ],
     }));
-    await publishPiReview({
-      github,
-      context: {
-        repo: { owner: 'owner', repo: 'repo' },
-        payload: { pull_request: { number: 123, head: { sha: 'def456' } } },
-      },
-      core,
-      reviewPath,
-    });
+    await publish('def456');
     await writeFile(reviewPath, JSON.stringify({ findings: [] }));
-    await publishPiReview({
-      github,
-      context: {
-        repo: { owner: 'owner', repo: 'repo' },
-        payload: { pull_request: { number: 123, head: { sha: 'def456' } } },
-      },
-      core,
-      reviewPath,
-    });
+    await publish('def456');
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
 
+  // Every run creates exactly one brand-new review. History is never touched:
+  // the mock has no review-comment list/update/delete or issue-comment APIs,
+  // so any such call would throw.
   const reviews = calls.filter(([name]) => name === 'createReview');
-  assert.equal(reviews.length, 1);
-  assert.ok(reviews[0][1].body);
-  assert.equal(calls.filter(([name]) => name === 'updateReviewComment').length, 1);
-  assert.equal(calls.filter(([name]) => name === 'deleteReviewComment').length, 1);
-  assert.equal(calls.filter(([name]) => name === 'createComment').length, 1);
-  assert.equal(calls.filter(([name]) => name === 'updateComment').length, 2);
-  assert.equal(reviewComments.length, 0);
+  assert.equal(reviews.length, 3);
+  const [first, second, third] = reviews.map(([, args]) => args);
+
+  assert.equal(first.commit_id, 'abc123');
+  assert.equal(first.event, 'COMMENT');
+  assert.equal(first.comments.length, 1);
+  assert.equal(first.comments[0].path, 'src/example.ts');
+  assert.equal(first.comments[0].line, 11);
+  assert.equal(first.comments[0].side, 'RIGHT');
+  assert.match(first.comments[0].body, /\*\*\[P1\] Unchecked failure path\*\* · Standards/);
+  assert.match(first.body, /^<!-- pi-code-review -->\n## Standards/);
+  assert.match(first.body, /Unchecked failure path/);
+  assert.match(first.body, /\*\*Summary:\*\* Standards: 1 finding, highest P1; Spec: no findings\./);
+
+  assert.equal(second.commit_id, 'def456');
+  assert.equal(second.comments.length, 1);
+  assert.match(second.comments[0].body, /\*\*\[P2\] Cleanup can be skipped\*\*/);
+  // Findings outside changed lines stay summary-only: no inline comment, but
+  // still present in the review body.
+  assert.match(second.body, /Invalid model location/);
+  assert.match(second.body, /\*\*Summary:\*\* Standards: 2 findings, highest P0; Spec: no findings\./);
+
+  // A findings-free run still posts its review, with no inline comments.
+  assert.equal(third.comments.length, 0);
+  assert.equal(
+    third.body,
+    '<!-- pi-code-review -->\n## Standards\n\nNo actionable findings.\n\n## Spec\n\nNo actionable findings.\n\n**Summary:** Standards: no findings; Spec: no findings.',
+  );
+
   assert.deepEqual(failures, [
     'Pi review found 1 blocking P0/P1 finding(s)',
     'Pi review found 1 blocking P0/P1 finding(s)',
   ]);
   assert.deepEqual(warnings, ['Summary-only Pi review finding outside changed lines: src/example.ts:12 (RIGHT)']);
-  assert.match(calls.find(([name]) => name === 'updateComment')[1].body, /Invalid model location/);
   const summary = summaryBody(
     [
       finding,
