@@ -385,17 +385,22 @@ export class LangfuseSdkRuntimeEventExporter implements RuntimeEventExporter {
     if (existing) {
       return existing;
     }
+    const eventMetadata = isToolEvent(event)
+      ? toolMetadata(event)
+      : isLlmGenerationEvent(event)
+        ? llmGenerationMetadata(event)
+        : lifecycleMetadata(event);
     const trace = this.client.trace({
       id: langfuseTraceId(traceId),
       sessionId: event.sessionId,
       name: 'chat-turn',
       timestamp: event.createdAt,
       input: !isToolEvent(event) && !isLlmGenerationEvent(event) ? event.details?.input : undefined,
-      metadata: isToolEvent(event)
-        ? toolMetadata(event)
-        : isLlmGenerationEvent(event)
-          ? llmGenerationMetadata(event)
-          : lifecycleMetadata(event),
+      ...(this.config.serviceName ? { tags: [this.config.serviceName] } : {}),
+      metadata: {
+        ...(this.config.serviceName ? { serviceName: this.config.serviceName } : {}),
+        ...eventMetadata,
+      },
     });
     this.traces.set(traceId, trace);
     return trace;
@@ -1207,7 +1212,7 @@ function lineageMetadata(event: {
 }): JsonObject {
   const sessionId = compactSessionId(event.sessionId);
   const conversationId = compactSessionId(event.conversationId);
-  const taskRunId = shortCorrelationId(event.taskRunId ?? event.runId);
+  const taskRunId = event.taskRunId ?? shortCorrelationId(event.runId);
   return {
     ...(sessionId ? { sessionId } : {}),
     ...(conversationId && conversationId !== sessionId ? { conversationId } : {}),

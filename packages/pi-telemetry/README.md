@@ -36,6 +36,8 @@ The extension hooks into the following Pi lifecycle events:
 
 Traces are scoped to user input boundaries (not individual turns). A single user message may trigger multiple LLM turns and tool calls — all grouped under one trace. The trace is published on `message_end`.
 
+Langfuse traces include the configured `serviceName` as both a tag and metadata so shared projects can filter traces by runtime. The extension also adds `taskRunId` correlation metadata when `PI_TELEMETRY_TASK_RUN_ID` is present.
+
 ## Configuration
 
 Configuration is read from the `"pi-telemetry"` section of, in increasing

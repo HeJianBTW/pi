@@ -449,6 +449,8 @@ describe('telemetry', () => {
         baseUrl: 'https://langfuse.example.com',
         flushAt: 10,
         flushIntervalMs: 60_000,
+        serviceName: 'pi-task-worker',
+        serviceVersion: '0.1.0-test',
       },
       client,
     );
@@ -459,6 +461,7 @@ describe('telemetry', () => {
       type: 'chat_turn_started',
       sessionId: 'session-1',
       conversationId: 'conversation-1',
+      taskRunId: '003cc514-4f61-4f9c-b497-6ec99967d6d1',
       createdAt: '2026-05-02T00:00:00.000Z',
       details: { input: 'hello' },
     });
@@ -495,17 +498,32 @@ describe('telemetry', () => {
       durationMs: 2000,
       details: { output: 'world' },
     });
+    await exporter.publish({
+      id: 'legacy-event-1',
+      traceId: '33333333333333333333333333333333',
+      type: 'subagent_started',
+      sessionId: 'session-2',
+      runId: '20b486e7-8832-45cf-8457-674d17a5f014',
+      createdAt: '2026-05-02T00:00:03.000Z',
+    });
     await exporter.flush();
     await exporter.close();
 
-    expect(client.traces).toHaveLength(1);
+    expect(client.traces).toHaveLength(2);
     expect(client.flushed).toBe(3);
     expect(client.closed).toBe(1);
     expect(client.traces[0]?.body).toMatchObject({
       sessionId: 'session-1',
       name: 'chat-turn',
       input: 'hello',
+      tags: ['pi-task-worker'],
+      metadata: {
+        serviceName: 'pi-task-worker',
+        taskRunId: '003cc514-4f61-4f9c-b497-6ec99967d6d1',
+      },
     });
+    expect(client.traces[0]?.body.metadata).not.toHaveProperty('serviceVersion');
+    expect(client.traces[1]?.body.metadata).toMatchObject({ taskRunId: '20b486e7' });
     const traceUpdates = client.traces[0]?.updates ?? [];
     expect(traceUpdates[traceUpdates.length - 1]).toMatchObject({
       output: 'world',

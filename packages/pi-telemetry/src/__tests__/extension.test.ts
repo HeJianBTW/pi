@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, test, vi } from 'vitest';
 import type { RuntimeTelemetryEvent } from '../index.js';
 
 vi.mock('../config.js', () => ({
@@ -141,6 +141,46 @@ describe('telemetryExtension', () => {
     });
     expect(events[0]!.traceId).toMatch(/^[0-9a-f]{32}$/);
     expect(events[0]!.sessionId).toBeTruthy();
+  });
+
+  it('correlates runtime events with the telemetry task run', async () => {
+    process.env.PI_TELEMETRY_TASK_RUN_ID = '003cc514-4f61-4f9c-b497-6ec99967d6d1';
+    try {
+      telemetryExtension(mockPi as any);
+      await fireEvent('session_start', { type: 'session_start', reason: 'startup' });
+      await fireEvent('turn_start', {
+        type: 'turn_start',
+        turnIndex: 0,
+        timestamp: 1700000000000,
+      });
+      await fireEvent('tool_execution_start', {
+        type: 'tool_execution_start',
+        toolCallId: 'call-1',
+        toolName: 'read_file',
+        args: { path: 'README.md' },
+      });
+      await fireEvent(
+        'before_provider_request',
+        { type: 'before_provider_request', payload: { messages: [] } },
+        { model: { id: 'kimi-k2.5', provider: 'anthropic-compatible' } },
+      );
+
+      expect(getPublishedEvents()).toHaveLength(3);
+      expect(getPublishedEvents()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            taskRunId: '003cc514-4f61-4f9c-b497-6ec99967d6d1',
+          }),
+        ]),
+      );
+      expect(
+        getPublishedEvents().every(
+          (event) => event.taskRunId === '003cc514-4f61-4f9c-b497-6ec99967d6d1',
+        ),
+      ).toBe(true);
+    } finally {
+      delete process.env.PI_TELEMETRY_TASK_RUN_ID;
+    }
   });
 
   test('publishes chat_turn_completed on turn_end with durationMs', async () => {
