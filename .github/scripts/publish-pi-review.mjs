@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -7,7 +7,6 @@ const severities = ['P0', 'P1', 'P2', 'P3'];
 const axes = new Set(['Standards', 'Spec']);
 const sides = new Set(['LEFT', 'RIGHT']);
 const summaryMarker = '<!-- pi-code-review -->';
-const inlineMarkerPrefix = '<!-- pi-code-review-inline:';
 
 function stripJsonFence(value) {
   return value
@@ -305,8 +304,9 @@ export async function preparePiReview({ github, context, core, contextPath, work
     'Each structured output must have this exact shape:',
     '{"axis":"Standards|Spec","findings":[{"severity":"P0|P1|P2|P3","axis":"Standards|Spec","path":"repo/relative/file",',
     '"line":123,"side":"RIGHT|LEFT","title":"short defect","body":"evidence and impact","fix":"smallest fix"}]}.',
-    'Write every title, body, and fix in concise English. Keep the title short, the body to one or two',
-    'sentences, and the suggested fix to one sentence.',
+    'Write every title, body, and fix in concise English, regardless of the language used in the PR',
+    'title, body, or linked issues. Keep the title short, the body to one or two sentences, and the',
+    'suggested fix to one sentence.',
     'Copy path, side, and line exactly from this list of Allowed changed-line locations. If no listed',
     'location fits a finding, omit that finding.',
     'Every finding must be an actionable defect on an added RIGHT or removed LEFT line in the supplied diff.',
@@ -358,16 +358,8 @@ function sanitizeComment(value) {
 }
 
 function inlineBody(finding) {
-  const fingerprint = createHash('sha256')
-    .update([finding.axis, finding.path, finding.side, finding.line].join('\0'))
-    .digest('hex')
-    .slice(0, 24);
-  const marker = `${inlineMarkerPrefix}${fingerprint} -->`;
   const fix = finding.fix ? `\n\n**Suggested fix:** ${sanitizeComment(finding.fix)}` : '';
-  return {
-    marker,
-    body: `${marker}\n**[${finding.severity}] ${sanitizeComment(finding.title)}** · ${finding.axis}\n\n${sanitizeComment(finding.body)}${fix}`,
-  };
+  return `**[${finding.severity}] ${sanitizeComment(finding.title)}** · ${finding.axis}\n\n${sanitizeComment(finding.body)}${fix}`;
 }
 
 function sentence(value) {
@@ -421,84 +413,33 @@ export async function publishPiReview({ github, context, core, reviewPath }) {
     per_page: 100,
   });
   const validLocations = commentableLines(files);
-  const inlineFindings = findings.filter((finding) => {
-    if (validLocations.has(`${finding.path}\0${finding.side}\0${finding.line}`)) return true;
-    core.warning(`Summary-only Pi review finding outside changed lines: ${finding.path}:${finding.line} (${finding.side})`);
-    return false;
-  });
+  const comments = [];
+  for (const finding of findings) {
+    if (validLocations.has(`${finding.path}\0${finding.side}\0${finding.line}`)) {
+      comments.push({ path: finding.path, line: finding.line, side: finding.side, body: inlineBody(finding) });
+    } else {
+      core.warning(`Summary-only Pi review finding outside changed lines: ${finding.path}:${finding.line} (${finding.side})`);
+    }
+  }
 
-  const previousInline = await github.paginate(github.rest.pulls.listReviewComments, {
+  // Every run posts exactly one brand-new review: the body carries the full
+  // summary and the comments carry all current inline findings. Previous
+  // reviews and their comments are never read, updated, or deleted.
+  await github.rest.pulls.createReview({
     owner,
     repo,
     pull_number: pullNumber,
-    per_page: 100,
-  });
-  const newComments = [];
-  const retainedCommentIds = new Set();
-  for (const finding of inlineFindings) {
-    const formatted = inlineBody(finding);
-    const previous = previousInline.find(
-      (comment) =>
-        !retainedCommentIds.has(comment.id) &&
-        comment.user?.type === 'Bot' &&
-        comment.body?.includes(formatted.marker),
-    );
-    if (previous) {
-      retainedCommentIds.add(previous.id);
-      if (previous.body !== formatted.body) {
-        await github.rest.pulls.updateReviewComment({ owner, repo, comment_id: previous.id, body: formatted.body });
-      }
-    } else {
-      newComments.push({
-        path: finding.path,
-        line: finding.line,
-        side: finding.side,
-        body: formatted.body,
-      });
-    }
-  }
-  if (newComments.length) {
-    await github.rest.pulls.createReview({
+    commit_id: pull.head.sha,
+    event: 'COMMENT',
+    body: summaryBody(findings, {
       owner,
       repo,
-      pull_number: pullNumber,
-      commit_id: pull.head.sha,
-      event: 'COMMENT',
-      body: 'Pi code review inline findings.',
-      comments: newComments,
-    });
-  }
-  for (const comment of previousInline) {
-    if (
-      comment.user?.type === 'Bot' &&
-      comment.body?.includes(inlineMarkerPrefix) &&
-      !retainedCommentIds.has(comment.id)
-    ) {
-      await github.rest.pulls.deleteReviewComment({ owner, repo, comment_id: comment.id });
-    }
-  }
-
-  const body = summaryBody(findings, {
-    owner,
-    repo,
-    headSha: pull.head.sha,
-    baseSha: pull.base?.sha,
-    serverUrl: process.env.GITHUB_SERVER_URL,
+      headSha: pull.head.sha,
+      baseSha: pull.base?.sha,
+      serverUrl: process.env.GITHUB_SERVER_URL,
+    }),
+    comments,
   });
-  const previousSummaries = await github.paginate(github.rest.issues.listComments, {
-    owner,
-    repo,
-    issue_number: pullNumber,
-    per_page: 100,
-  });
-  const previousSummary = previousSummaries.find(
-    (comment) => comment.user?.type === 'Bot' && comment.body?.includes(summaryMarker),
-  );
-  if (previousSummary) {
-    await github.rest.issues.updateComment({ owner, repo, comment_id: previousSummary.id, body });
-  } else {
-    await github.rest.issues.createComment({ owner, repo, issue_number: pullNumber, body });
-  }
 
   const blocking = findings.filter((finding) => finding.severity === 'P0' || finding.severity === 'P1');
   if (blocking.length) core.setFailed(`Pi review found ${blocking.length} blocking P0/P1 finding(s)`);
