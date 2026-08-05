@@ -26,11 +26,12 @@ describe('security-sensitive workflows', () => {
 
   it('passes matrix prompts through the environment and enforces requested tool counts', () => {
     const workflow = read('.github/workflows/integration.yml');
+    const matrix = read('.github/scripts/integration-matrix.mjs');
 
     expect(workflow).toContain('EXTENSION_PROMPT: ${{ matrix.prompt }}');
     expect(workflow).toContain('-p "$EXTENSION_PROMPT"');
     expect(workflow).not.toContain("-p '${{ matrix.prompt }}'");
-    expect(workflow).toContain('assert_tool_count: 1');
+    expect(matrix).toContain('assert_tool_count: 1');
     expect(workflow).toContain('--argjson expected_count');
   });
 });
