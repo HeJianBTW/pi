@@ -12,11 +12,11 @@ concurrency:
 permissions:
   contents: read
   issues: write
-  pull-requests: read
+  pull-requests: write
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
-  PI_REVIEW_MODEL: ds-v4-flash
+  PI_REVIEW_MODEL: deepseek-v4-flash
   PI_OFFLINE: '1'
   PI_SUBAGENT_MAX_DEPTH: '1'
   PI_SUBAGENT_MAX_SPAWNS_PER_SESSION: '2'
@@ -129,7 +129,7 @@ jobs:
           ---
           name: general-purpose
           description: Read-only reviewer for one code-review axis
-          model: deepseek-integration/ds-v4-flash
+          model: deepseek-integration/deepseek-v4-flash
           thinking: max
           tools: []
           inheritProjectContext: false
@@ -272,7 +272,6 @@ jobs:
             fs.writeFileSync(process.env.CONTEXT_PATH, reviewContext, { mode: 0o600 });
 
       - name: Run Pi code review
-        id: pi-review
         env:
           PI_INTEGRATION_BASE_URL: ${{ secrets.PI_INTEGRATION_BASE_URL }}
           PI_INTEGRATION_API_KEY: ${{ secrets.PI_INTEGRATION_API_KEY }}
@@ -302,12 +301,14 @@ jobs:
             > "$PI_REVIEW_OUTPUT" 2> "$RUNNER_TEMP/pi-review-stderr.log"
           rc=$?
           set -e
-          echo "exit_code=$rc" >> "$GITHUB_OUTPUT"
           if [ "$rc" -ne 0 ]; then
-            echo 'Pi review failed; stderr is retained only in the runner temporary directory.' > "$PI_REVIEW_OUTPUT"
+            echo "::error::Pi code review failed with exit code $rc"
+            echo '--- Pi stderr (last 200 lines) ---'
+            tail -n 200 "$RUNNER_TEMP/pi-review-stderr.log"
+            exit "$rc"
           elif [ ! -s "$PI_REVIEW_OUTPUT" ]; then
-            echo 'Pi review returned no output.' > "$PI_REVIEW_OUTPUT"
-            echo 'exit_code=1' >> "$GITHUB_OUTPUT"
+            echo '::error::Pi review returned no output'
+            exit 1
           fi
 
       - name: Publish review comment
@@ -320,7 +321,7 @@ jobs:
             const marker = '<!-- pi-code-review -->';
             const raw = fs.readFileSync(process.env.REVIEW_PATH, 'utf8');
             const review = raw.length > 60000 ? `${raw.slice(0, 60000)}\n\n[OUTPUT TRUNCATED]` : raw;
-            const body = `${marker}\n## Pi code review\n\n${review}\n\n---\nModel: \`ds-v4-flash\` · [code-review skill](https://github.com/mattpocock/skills/tree/main/skills/engineering/code-review)`;
+            const body = `${marker}\n## Pi code review\n\n${review}\n\n---\nModel: \`deepseek-v4-flash\` · [code-review skill](https://github.com/mattpocock/skills/tree/main/skills/engineering/code-review)`;
             const comments = await github.paginate(github.rest.issues.listComments, {
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -343,9 +344,3 @@ jobs:
                 body,
               });
             }
-
-      - name: Fail on review runtime error
-        if: steps.pi-review.outputs.exit_code != '0'
-        run: |
-          echo '::error::Pi code review did not complete successfully'
-          exit 1
