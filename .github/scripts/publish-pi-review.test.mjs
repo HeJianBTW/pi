@@ -5,7 +5,7 @@ import path from 'node:path';
 import { test } from 'vitest';
 import {
   commentableLines,
-  combinePiReviewOutputs,
+  combinePiReviewTranscript,
   parseReviewOutput,
   preparePiReview,
   publishPiReview,
@@ -24,16 +24,29 @@ const finding = {
   fix: 'Move cleanup into a finally block.',
 };
 
-test('combines complete persisted axis outputs', async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'pi-review-axis-output-'));
-  const standardsPath = path.join(directory, 'standards.json');
-  const specPath = path.join(directory, 'spec.json');
+test('combines schema-validated axis outputs from the Pi JSON transcript', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'pi-review-transcript-'));
+  const transcriptPath = path.join(directory, 'pi.jsonl');
   const reviewPath = path.join(directory, 'review.json');
   const specFinding = { ...finding, severity: 'P2', axis: 'Spec', title: 'Documented fallback is missing' };
   try {
-    await writeFile(standardsPath, `Standards review complete.\n${JSON.stringify({ findings: [finding] })}`);
-    await writeFile(specPath, JSON.stringify({ findings: [specFinding] }));
-    await combinePiReviewOutputs({ standardsPath, specPath, reviewPath });
+    await writeFile(transcriptPath, [
+      JSON.stringify({ type: 'tool_execution_start', toolName: 'subagent' }),
+      JSON.stringify({
+        type: 'tool_execution_end',
+        toolName: 'subagent',
+        result: {
+          details: {
+            mode: 'parallel',
+            results: [
+              { exitCode: 0, structuredOutput: { findings: [finding] } },
+              { exitCode: 0, structuredOutput: { findings: [specFinding] } },
+            ],
+          },
+        },
+      }),
+    ].join('\n'));
+    await combinePiReviewTranscript({ transcriptPath, reviewPath });
     assert.deepEqual(JSON.parse(await readFile(reviewPath, 'utf8')), { findings: [finding, specFinding] });
   } finally {
     await rm(directory, { recursive: true, force: true });
@@ -113,29 +126,26 @@ test('prepares the review prompt outside the workflow', async () => {
       core: { warning: () => {} },
       contextPath,
       workspace: directory,
-      axisOutputPaths: {
-        Standards: '/tmp/pi-review-standards.json',
-        Spec: '/tmp/pi-review-spec.json',
-      },
     });
     const prompt = await readFile(contextPath, 'utf8');
     assert.match(prompt, /# Allowed changed-line locations/);
     assert.match(prompt, /src\/example\.ts\tRIGHT\t11/);
     assert.match(prompt, /Copy path, side, and line exactly from this list/);
-    assert.match(prompt, /outputMode to "file-only"/);
-    assert.match(prompt, /\/tmp\/pi-review-standards\.json/);
-    assert.match(prompt, /\/tmp\/pi-review-spec\.json/);
-    assert.doesNotMatch(prompt, /outputSchema/);
+    assert.match(prompt, /outputSchema/);
+    assert.match(prompt, /structured_output/);
+    assert.match(prompt, /"const":"Standards"/);
+    assert.match(prompt, /"const":"Spec"/);
+    assert.doesNotMatch(prompt, /file-only/);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
 
   const workflow = await readFile(new URL('../workflows/pi-review.yml', import.meta.url), 'utf8');
   assert.match(workflow, /preparePiReview\(\{ github, context, core/);
-  assert.match(workflow, /PI_REVIEW_STANDARDS_OUTPUT/);
-  assert.match(workflow, /PI_REVIEW_SPEC_OUTPUT/);
-  assert.match(workflow, /combinePiReviewOutputs/);
-  assert.match(workflow, /> "\$PI_REVIEW_COORDINATOR_OUTPUT"/);
+  assert.match(workflow, /PI_REVIEW_TRANSCRIPT/);
+  assert.match(workflow, /combinePiReviewTranscript/);
+  assert.match(workflow, /--mode json/);
+  assert.match(workflow, /> "\$PI_REVIEW_TRANSCRIPT"/);
   assert.doesNotMatch(workflow, /const diffResponse =/);
 });
 
