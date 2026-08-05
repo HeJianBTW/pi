@@ -168,6 +168,8 @@ test('prepares the review prompt outside the workflow', async () => {
   assert.match(workflow, /combinePiReviewTranscript/);
   assert.match(workflow, /--mode json/);
   assert.match(workflow, /> "\$PI_REVIEW_TRANSCRIPT"/);
+  assert.match(workflow, /acceptanceRole: read-only/);
+  assert.match(workflow, /completionGuard: false/);
   assert.doesNotMatch(workflow, /const diffResponse =/);
 });
 

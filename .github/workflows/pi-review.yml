@@ -133,6 +133,8 @@ jobs:
           model: deepseek-integration/deepseek-v4-flash
           thinking: max
           tools: []
+          acceptanceRole: read-only
+          completionGuard: false
           inheritProjectContext: false
           inheritSkills: false
           systemPromptMode: replace
