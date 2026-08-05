@@ -29,6 +29,9 @@ test('combines schema-validated axis outputs from the Pi JSON transcript', async
   const transcriptPath = path.join(directory, 'pi.jsonl');
   const reviewPath = path.join(directory, 'review.json');
   const specFinding = { ...finding, severity: 'P2', axis: 'Spec', title: 'Documented fallback is missing' };
+  const infos = [];
+  const warnings = [];
+  const core = { info: (m) => infos.push(m), warning: (m) => warnings.push(m) };
   try {
     await writeFile(transcriptPath, [
       JSON.stringify({ type: 'tool_execution_start', toolName: 'subagent' }),
@@ -46,8 +49,15 @@ test('combines schema-validated axis outputs from the Pi JSON transcript', async
         },
       }),
     ].join('\n'));
-    await combinePiReviewTranscript({ transcriptPath, reviewPath });
+    await combinePiReviewTranscript({ transcriptPath, reviewPath, core });
     assert.deepEqual(JSON.parse(await readFile(reviewPath, 'utf8')), { findings: [finding, specFinding] });
+    assert.deepEqual(infos, [
+      'Pi review transcript: 1 completed parallel subagent run(s)',
+      'Pi review Standards reviewer: 1 finding(s)',
+      'Pi review Spec reviewer: 1 finding(s)',
+      'Pi review combined 2 total finding(s)',
+    ]);
+    assert.deepEqual(warnings, []);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -57,6 +67,9 @@ test('accepts a Standards-only run when the skill finds no specification', async
   const directory = await mkdtemp(path.join(tmpdir(), 'pi-review-no-spec-'));
   const transcriptPath = path.join(directory, 'pi.jsonl');
   const reviewPath = path.join(directory, 'review.json');
+  const infos = [];
+  const warnings = [];
+  const core = { info: (m) => infos.push(m), warning: (m) => warnings.push(m) };
   try {
     await writeFile(transcriptPath, JSON.stringify({
       type: 'tool_execution_end',
@@ -68,8 +81,17 @@ test('accepts a Standards-only run when the skill finds no specification', async
         },
       },
     }));
-    await combinePiReviewTranscript({ transcriptPath, reviewPath });
+    await combinePiReviewTranscript({ transcriptPath, reviewPath, core });
     assert.deepEqual(JSON.parse(await readFile(reviewPath, 'utf8')), { findings: [finding] });
+    // A missing axis is tolerated but must be visible, not silent.
+    assert.deepEqual(infos, [
+      'Pi review transcript: 1 completed parallel subagent run(s)',
+      'Pi review Standards reviewer: 1 finding(s)',
+      'Pi review combined 1 total finding(s)',
+    ]);
+    assert.deepEqual(warnings, [
+      'Pi review Spec reviewer produced no usable result; that axis contributes no findings',
+    ]);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -80,6 +102,9 @@ test('combines successful structured outputs across coordinator recovery calls',
   const transcriptPath = path.join(directory, 'pi.jsonl');
   const reviewPath = path.join(directory, 'review.json');
   const specFinding = { ...finding, severity: 'P2', axis: 'Spec', title: 'Documented fallback is missing' };
+  const infos = [];
+  const warnings = [];
+  const core = { info: (m) => infos.push(m), warning: (m) => warnings.push(m) };
   const event = (results) => JSON.stringify({
     type: 'tool_execution_end',
     toolName: 'subagent',
@@ -91,8 +116,16 @@ test('combines successful structured outputs across coordinator recovery calls',
       event([{ exitCode: 0, structuredOutput: { axis: 'Standards', findings: [finding] } }]),
       event([{ exitCode: 0, structuredOutput: { axis: 'Spec', findings: [specFinding] } }]),
     ].join('\n'));
-    await combinePiReviewTranscript({ transcriptPath, reviewPath });
+    await combinePiReviewTranscript({ transcriptPath, reviewPath, core });
     assert.deepEqual(JSON.parse(await readFile(reviewPath, 'utf8')), { findings: [finding, specFinding] });
+    // The failed first attempt is surfaced as a warning, not swallowed.
+    assert.deepEqual(warnings, ['Pi review discarded reviewer output: first attempt failed']);
+    assert.deepEqual(infos, [
+      'Pi review transcript: 3 completed parallel subagent run(s)',
+      'Pi review Standards reviewer: 1 finding(s)',
+      'Pi review Spec reviewer: 1 finding(s)',
+      'Pi review combined 2 total finding(s)',
+    ]);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -188,7 +221,7 @@ test('prepares the review prompt outside the workflow', async () => {
   const workflow = await readFile(new URL('../workflows/pi-review.yml', import.meta.url), 'utf8');
   assert.match(workflow, /preparePiReview\(\{ github, context, core/);
   assert.match(workflow, /PI_REVIEW_TRANSCRIPT/);
-  assert.match(workflow, /combinePiReviewTranscript/);
+  assert.match(workflow, /combinePiReviewTranscript\(\{[^}]*\bcore\b/);
   assert.match(workflow, /--mode json/);
   assert.match(workflow, /> "\$PI_REVIEW_TRANSCRIPT"/);
   assert.match(workflow, /acceptanceRole: read-only/);
@@ -218,9 +251,11 @@ test('posts one new review per run with the full summary and current findings', 
   };
   const failures = [];
   const warnings = [];
+  const infos = [];
   const core = {
     setFailed: (message) => failures.push(message),
     warning: (message) => warnings.push(message),
+    info: (message) => infos.push(message),
   };
   const publish = (sha) => publishPiReview({
     github,
@@ -284,6 +319,11 @@ test('posts one new review per run with the full summary and current findings', 
     'Pi review found 1 blocking P0/P1 finding(s)',
   ]);
   assert.deepEqual(warnings, ['Summary-only Pi review finding outside changed lines: src/example.ts:12 (RIGHT)']);
+  assert.deepEqual(infos, [
+    'Pi review published 1 finding(s): 1 inline, 0 summary-only; blocking P0/P1: 1',
+    'Pi review published 2 finding(s): 1 inline, 1 summary-only; blocking P0/P1: 1',
+    'Pi review published 0 finding(s): 0 inline, 0 summary-only; blocking P0/P1: 0',
+  ]);
   const summary = summaryBody(
     [
       finding,

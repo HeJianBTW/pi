@@ -113,7 +113,7 @@ function reviewOutputSchema(axis) {
   };
 }
 
-export async function combinePiReviewTranscript({ transcriptPath, reviewPath }) {
+export async function combinePiReviewTranscript({ transcriptPath, reviewPath, core }) {
   const events = (await readFile(transcriptPath, 'utf8'))
     .split('\n')
     .filter((line) => line.trim())
@@ -129,6 +129,7 @@ export async function combinePiReviewTranscript({ transcriptPath, reviewPath }) 
     event?.toolName === 'subagent' &&
     event?.result?.details?.mode === 'parallel',
   );
+  core.info(`Pi review transcript: ${completedRuns.length} completed parallel subagent run(s)`);
   if (completedRuns.length < 1 || completedRuns.length > 10) {
     throw new Error(`Pi review transcript contained ${completedRuns.length} completed parallel subagent runs; expected 1 to 10`);
   }
@@ -166,12 +167,25 @@ export async function combinePiReviewTranscript({ transcriptPath, reviewPath }) 
       }
     }
   }
+
+  // Surface what was combined and what was silently dropped, so a reviewer that
+  // failed is visible in the log instead of reading as a clean axis.
+  for (const failure of failures) core.warning(`Pi review discarded reviewer output: ${failure}`);
+  for (const axis of axes) {
+    if (findingsByAxis.has(axis)) {
+      core.info(`Pi review ${axis} reviewer: ${findingsByAxis.get(axis).length} finding(s)`);
+    } else {
+      core.warning(`Pi review ${axis} reviewer produced no usable result; that axis contributes no findings`);
+    }
+  }
+
   if (!findingsByAxis.has('Standards')) {
     throw new Error(`Pi review returned no valid Standards result${failures.length ? `: ${failures.at(-1)}` : ''}`);
   }
   const findings = [...findingsByAxis.get('Standards'), ...(findingsByAxis.get('Spec') ?? [])];
   if (findings.length > 20) throw new Error('Pi review returned more than 20 combined findings');
   await writeFile(reviewPath, `${JSON.stringify({ findings })}\n`, { mode: 0o600 });
+  core.info(`Pi review combined ${findings.length} total finding(s)`);
 }
 
 export function commentableLines(files) {
@@ -442,6 +456,10 @@ export async function publishPiReview({ github, context, core, reviewPath }) {
   });
 
   const blocking = findings.filter((finding) => finding.severity === 'P0' || finding.severity === 'P1');
+  core.info(
+    `Pi review published ${findings.length} finding(s): ${comments.length} inline, ` +
+    `${findings.length - comments.length} summary-only; blocking P0/P1: ${blocking.length}`,
+  );
   if (blocking.length) core.setFailed(`Pi review found ${blocking.length} blocking P0/P1 finding(s)`);
   return { findings, blocking };
 }
