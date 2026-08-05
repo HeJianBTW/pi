@@ -908,6 +908,57 @@ jobs:
             fi
           fi
 
+          # Image generation may legitimately override the configured outputDir
+          # per tool call. Verify the files reported by the successful tool result
+          # instead of assuming they remain under the settings-level directory.
+          if [ "${{ matrix.extension }}" = "pi-image-gen" ]; then
+            if ! command -v jq >/dev/null 2>&1; then
+              echo "::error::jq is required for the generated image assertion"
+              exit 1
+            fi
+            IMAGE_PATHS=$(jq -sr '
+              [
+                .[]
+                | select(
+                    .type == "tool_execution_end"
+                    and .toolName == "image_generate"
+                    and .isError != true
+                    and .result.isError != true
+                  )
+                | (.result.details.images // [])[]?.path
+                | select(type == "string" and length > 0)
+              ]
+              | unique[]
+            ' <<<"$output")
+            if [ -z "$IMAGE_PATHS" ]; then
+              echo "::error::image_generate returned no generated image paths"
+              exit 1
+            fi
+            IMAGE_COUNT=0
+            while IFS= read -r IMAGE_PATH; do
+              case "$IMAGE_PATH" in
+                "$GITHUB_WORKSPACE"/* | "$RUNNER_TEMP"/*) ;;
+                *)
+                  echo "::error::image_generate returned a path outside the runner workspace and temp directories"
+                  exit 1
+                  ;;
+              esac
+              case "$IMAGE_PATH" in
+                *.png | *.jpg | *.jpeg | *.webp | *.gif) ;;
+                *)
+                  echo "::error::image_generate returned a path without a supported image extension"
+                  exit 1
+                  ;;
+              esac
+              if [ ! -f "$IMAGE_PATH" ]; then
+                echo "::error::image_generate reported an image path that does not exist"
+                exit 1
+              fi
+              IMAGE_COUNT=$((IMAGE_COUNT + 1))
+            done <<<"$IMAGE_PATHS"
+            echo "✓ Verified $IMAGE_COUNT image file(s) from the image_generate result."
+          fi
+
           # Screenshot scenario: browser_analyze_screenshot captures the image
           # internally, sends it to the configured Kimi vision model, and returns
           # text to the DeepSeek main model. Assert the vision tool itself found
@@ -1084,24 +1135,6 @@ jobs:
             exit 1
           fi
           echo "✓ pi-memory mem0 vector dedup verification passed."
-
-      - name: Verify image file generated (pi-image-gen only)
-        if: matrix.extension == 'pi-image-gen' && env.PI_INTEGRATION_BASE_URL != ''
-        run: |
-          set -euo pipefail
-          IMAGE_DIR="${RUNNER_TEMP}/pi-images"
-          if [ ! -d "$IMAGE_DIR" ]; then
-            echo "::error::pi-image-gen output dir $IMAGE_DIR not created"
-            exit 1
-          fi
-          FILE_COUNT=$(find "$IMAGE_DIR" -type f \( -name "*.png" -o -name "*.jpg" -o -name "*.webp" \) | wc -l)
-          echo "Image files found: $FILE_COUNT"
-          if [ "$FILE_COUNT" -lt 1 ]; then
-            echo "::error::No image files in $IMAGE_DIR"
-            exit 1
-          fi
-          find "$IMAGE_DIR" -type f -exec ls -la {} \;
-          echo "✓ pi-image-gen file verification passed."
 
       - name: Skipped (secrets unavailable)
         if: >
