@@ -39,8 +39,8 @@ test('combines schema-validated axis outputs from the Pi JSON transcript', async
           details: {
             mode: 'parallel',
             results: [
-              { exitCode: 0, structuredOutput: { findings: [finding] } },
-              { exitCode: 0, structuredOutput: { findings: [specFinding] } },
+              { exitCode: 0, structuredOutput: { axis: 'Standards', findings: [finding] } },
+              { exitCode: 0, structuredOutput: { axis: 'Spec', findings: [specFinding] } },
             ],
           },
         },
@@ -48,6 +48,28 @@ test('combines schema-validated axis outputs from the Pi JSON transcript', async
     ].join('\n'));
     await combinePiReviewTranscript({ transcriptPath, reviewPath });
     assert.deepEqual(JSON.parse(await readFile(reviewPath, 'utf8')), { findings: [finding, specFinding] });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('accepts a Standards-only run when the skill finds no specification', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'pi-review-no-spec-'));
+  const transcriptPath = path.join(directory, 'pi.jsonl');
+  const reviewPath = path.join(directory, 'review.json');
+  try {
+    await writeFile(transcriptPath, JSON.stringify({
+      type: 'tool_execution_end',
+      toolName: 'subagent',
+      result: {
+        details: {
+          mode: 'parallel',
+          results: [{ exitCode: 0, structuredOutput: { axis: 'Standards', findings: [finding] } }],
+        },
+      },
+    }));
+    await combinePiReviewTranscript({ transcriptPath, reviewPath });
+    assert.deepEqual(JSON.parse(await readFile(reviewPath, 'utf8')), { findings: [finding] });
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
