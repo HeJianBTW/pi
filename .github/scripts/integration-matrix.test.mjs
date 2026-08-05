@@ -1,0 +1,45 @@
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { test } from 'vitest';
+import { fullMatrix, selectIntegrationMatrix } from './integration-matrix.mjs';
+
+test('does not execute the PR-controlled selector for fork pull requests', async () => {
+  const workflow = await readFile(new URL('../workflows/integration.yml', import.meta.url), 'utf8');
+  const detector = workflow.slice(workflow.indexOf('  detect-extension-matrix:'), workflow.indexOf('  # ──'));
+  assert.match(detector, /github\.event\.pull_request\.head\.repo\.full_name == github\.repository/);
+});
+
+test('selects every scenario for a changed extension', () => {
+  const selected = selectIntegrationMatrix(['packages/pi-image-gen/src/index.ts']);
+  assert.deepEqual(selected.map(({ extension, provider }) => [extension, provider]), [
+    ['pi-image-gen', undefined],
+    ['pi-image-gen', 'seedream-lite'],
+  ]);
+});
+
+test('routes companion packages and package-specific integration tests', () => {
+  assert.deepEqual(
+    selectIntegrationMatrix(['packages/pi-memory-mem0/src/index.ts']).map(({ extension }) => extension),
+    ['pi-memory'],
+  );
+  assert.deepEqual(
+    selectIntegrationMatrix(['tests/computer-use-owner-exit.mjs']).map(({ extension }) => extension),
+    ['pi-computer-use'],
+  );
+});
+
+test('runs the full matrix for shared and integration infrastructure changes', () => {
+  for (const file of [
+    'packages/shared/src/settings.ts',
+    '.github/workflows/integration.yml',
+    '.github/actions/setup-pi-build/action.yml',
+    'pnpm-lock.yaml',
+  ]) {
+    assert.equal(selectIntegrationMatrix([file]).length, fullMatrix.length, file);
+  }
+  assert.equal(selectIntegrationMatrix([], { forceAll: true }).length, fullMatrix.length);
+});
+
+test('skips Stage C when no tested extension changed', () => {
+  assert.deepEqual(selectIntegrationMatrix(['README.md', 'packages/pi-telemetry/README.md']), []);
+});
