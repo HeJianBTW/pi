@@ -54,6 +54,7 @@ jobs:
           echo "PI_CODING_AGENT_DIR=$RUNNER_TEMP/pi-review-agent" >> "$GITHUB_ENV"
           echo "PI_REVIEW_CONTEXT=$RUNNER_TEMP/pi-review-context.md" >> "$GITHUB_ENV"
           echo "PI_REVIEW_TRANSCRIPT=$RUNNER_TEMP/pi-review-transcript.jsonl" >> "$GITHUB_ENV"
+          echo "PI_REVIEW_FULL=$RUNNER_TEMP/pi-review-full.jsonl" >> "$GITHUB_ENV"
           echo "PI_REVIEW_OUTPUT=$RUNNER_TEMP/pi-review-output.json" >> "$GITHUB_ENV"
           mkdir -p "$RUNNER_TEMP/pi-review-agent/agents" "$RUNNER_TEMP/pi-review-skills"
 
@@ -188,6 +189,7 @@ jobs:
             -p \
             < "$PI_REVIEW_CONTEXT" \
             2> "$RUNNER_TEMP/pi-review-stderr.log" \
+            | tee "$PI_REVIEW_FULL" \
             | grep -F '"type":"tool_execution_end"' > "$PI_REVIEW_TRANSCRIPT"
           rc=$?
           set -e
@@ -201,6 +203,12 @@ jobs:
             exit 1
           fi
 
+      # Always render the captured event stream, even if the run failed, so a
+      # clean review and a silent reviewer failure are distinguishable in the log.
+      - name: Print Pi execution trace
+        if: always()
+        run: node .github/scripts/pi-review-trace.mjs "$PI_REVIEW_FULL"
+
       - name: Combine structured axis review outputs
         uses: actions/github-script@v7
         with:
@@ -211,6 +219,7 @@ jobs:
             await combinePiReviewTranscript({
               transcriptPath: process.env.PI_REVIEW_TRANSCRIPT,
               reviewPath: process.env.PI_REVIEW_OUTPUT,
+              core,
             });
 
       - name: Publish review comment
@@ -223,3 +232,17 @@ jobs:
             const scriptUrl = pathToFileURL(`${process.env.GITHUB_WORKSPACE}/.github/scripts/publish-pi-review.mjs`);
             const { publishPiReview } = await import(scriptUrl.href);
             await publishPiReview({ github, context, core, reviewPath: process.env.REVIEW_PATH });
+
+      # Full-fidelity evidence for download: the complete event stream (including
+      # streaming thinking and large tool args), Pi stderr, and the combined review.
+      - name: Upload Pi review execution artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pi-review-execution-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: ignore
+          retention-days: 14
+          path: |
+            ${{ runner.temp }}/pi-review-full.jsonl
+            ${{ runner.temp }}/pi-review-stderr.log
+            ${{ runner.temp }}/pi-review-output.json
