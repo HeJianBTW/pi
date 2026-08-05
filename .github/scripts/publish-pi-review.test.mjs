@@ -75,6 +75,29 @@ test('accepts a Standards-only run when the skill finds no specification', async
   }
 });
 
+test('combines successful structured outputs across coordinator recovery calls', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'pi-review-recovery-'));
+  const transcriptPath = path.join(directory, 'pi.jsonl');
+  const reviewPath = path.join(directory, 'review.json');
+  const specFinding = { ...finding, severity: 'P2', axis: 'Spec', title: 'Documented fallback is missing' };
+  const event = (results) => JSON.stringify({
+    type: 'tool_execution_end',
+    toolName: 'subagent',
+    result: { details: { mode: 'parallel', results } },
+  });
+  try {
+    await writeFile(transcriptPath, [
+      event([{ exitCode: 1, error: 'first attempt failed' }]),
+      event([{ exitCode: 0, structuredOutput: { axis: 'Standards', findings: [finding] } }]),
+      event([{ exitCode: 0, structuredOutput: { axis: 'Spec', findings: [specFinding] } }]),
+    ].join('\n'));
+    await combinePiReviewTranscript({ transcriptPath, reviewPath });
+    assert.deepEqual(JSON.parse(await readFile(reviewPath, 'utf8')), { findings: [finding, specFinding] });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('parses findings JSON wrapped in model prose', () => {
   assert.deepEqual(parseReviewOutput(`\`\`\`json\n${JSON.stringify({ findings: [finding] })}\n\`\`\``), [finding]);
   assert.deepEqual(parseReviewOutput(`Both reviews completed.\n${JSON.stringify({ findings: [] })}\nReview complete.`), []);

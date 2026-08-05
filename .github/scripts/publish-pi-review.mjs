@@ -130,31 +130,47 @@ export async function combinePiReviewTranscript({ transcriptPath, reviewPath }) 
     event?.toolName === 'subagent' &&
     event?.result?.details?.mode === 'parallel',
   );
-  if (completedRuns.length !== 1) {
-    throw new Error(`Pi review transcript contained ${completedRuns.length} completed parallel subagent runs; expected 1`);
-  }
-  const results = completedRuns[0].result.details.results;
-  if (!Array.isArray(results) || results.length < 1 || results.length > 2) {
-    throw new Error(`Pi review parallel run returned ${Array.isArray(results) ? results.length : 0} results; expected 1 or 2`);
+  if (completedRuns.length < 1 || completedRuns.length > 10) {
+    throw new Error(`Pi review transcript contained ${completedRuns.length} completed parallel subagent runs; expected 1 to 10`);
   }
 
-  const findings = [];
-  const seenAxes = new Set();
-  for (const [index, result] of results.entries()) {
-    if (result?.exitCode !== 0) {
-      throw new Error(`Pi reviewer #${index + 1} failed${result?.error ? `: ${String(result.error).slice(0, 500)}` : ''}`);
+  const findingsByAxis = new Map();
+  const failures = [];
+  let resultCount = 0;
+  for (const run of completedRuns) {
+    const results = run.result.details.results;
+    if (!Array.isArray(results) || results.length < 1 || results.length > 2) {
+      failures.push(`parallel run returned ${Array.isArray(results) ? results.length : 0} results`);
+      continue;
     }
-    const axis = result?.structuredOutput?.axis;
-    if (!axes.has(axis)) throw new Error(`Pi reviewer #${index + 1} returned no valid structured axis`);
-    if (seenAxes.has(axis)) throw new Error(`Pi review returned duplicate ${axis} results`);
-    seenAxes.add(axis);
-    const axisFindings = parseReviewOutput(JSON.stringify(result.structuredOutput));
-    if (axisFindings.some((finding) => finding.axis !== axis)) {
-      throw new Error(`Pi ${axis} reviewer returned a finding for another axis`);
+    resultCount += results.length;
+    if (resultCount > 20) throw new Error('Pi review transcript returned more than 20 child results');
+    for (const result of results) {
+      if (result?.exitCode !== 0) {
+        failures.push(result?.error ? String(result.error).slice(0, 500) : 'reviewer failed');
+        continue;
+      }
+      const axis = result?.structuredOutput?.axis;
+      if (!axes.has(axis)) {
+        failures.push('reviewer returned no valid structured axis');
+        continue;
+      }
+      try {
+        const axisFindings = parseReviewOutput(JSON.stringify(result.structuredOutput));
+        if (axisFindings.some((finding) => finding.axis !== axis)) {
+          failures.push(`${axis} reviewer returned a finding for another axis`);
+          continue;
+        }
+        findingsByAxis.set(axis, axisFindings);
+      } catch (error) {
+        failures.push(error instanceof Error ? error.message : String(error));
+      }
     }
-    findings.push(...axisFindings);
   }
-  if (!seenAxes.has('Standards')) throw new Error('Pi review returned no Standards result');
+  if (!findingsByAxis.has('Standards')) {
+    throw new Error(`Pi review returned no valid Standards result${failures.length ? `: ${failures.at(-1)}` : ''}`);
+  }
+  const findings = [...findingsByAxis.get('Standards'), ...(findingsByAxis.get('Spec') ?? [])];
   if (findings.length > 20) throw new Error('Pi review returned more than 20 combined findings');
   await writeFile(reviewPath, `${JSON.stringify({ findings })}\n`, { mode: 0o600 });
 }
