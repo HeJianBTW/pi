@@ -75,6 +75,7 @@ const PROVIDER_LABELS: Record<VideoApiStyle, string> = {
   dashscope: 'DashScope',
   openrouter: 'OpenRouter',
   newapi: 'NewAPI',
+  minimax: 'MiniMax',
 };
 
 export function providerLabel(style: VideoApiStyle): string {

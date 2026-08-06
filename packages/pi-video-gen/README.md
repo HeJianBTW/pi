@@ -15,6 +15,7 @@ that orchestrates the full shot-book workflow together with
 | `ark` (Volcengine Ark) | Seedance 2.0 standard / fast / mini | ✅ built-in |
 | `dashscope` (Alibaba) | HappyHorse 1.1 / 1.0 (t2v/i2v/r2v auto-routed) | ✅ built-in |
 | `kling` (Kuaishou) | Kling 3.0 Turbo / 3.0 Omni (API 2.0) | ✅ built-in |
+| `minimax` | MiniMax-H3 (v2 API) | ✅ built-in |
 | `openrouter` | google/veo-3.1 (+ custom models) | ✅ built-in |
 | `newapi` | self-hosted NewAPI relay (Kling / Jimeng / Vidu / Gemini channels) | ✅ via `customProviders` — `baseUrl` **required** |
 | custom | your own endpoints | ✅ via `customProviders` |
@@ -32,7 +33,7 @@ Global settings (`~/.pi/agent/settings.json`):
 ```jsonc
 {
   "pi-video-gen": {
-    "defaultModel": "seedance",                  // alias of doubao-seedance-2-0-260128
+    "defaultModel": "seedance-2.0",              // alias of doubao-seedance-2-0-260128
     "providers": {
       "ark": { "apiKey": "${ARK_API_KEY}" }      // Volcengine Ark key
     },
@@ -44,7 +45,12 @@ Global settings (`~/.pi/agent/settings.json`):
 
 **Custom providers** (same idea as pi-image-gen's — point any Ark-compatible
 endpoint at your own models; string models get conservative capabilities,
-object models declare them):
+object models declare them). When a custom model's `id` names a built-in
+model (e.g. `"MiniMax-H3"` behind your relay), the built-in capability table
+and defaults are inherited automatically — undeclared `capabilities`,
+`defaultResolution`/`defaultAspectRatio`/`defaultDurationSec` fall back to
+the registry values instead of the conservative 720p/16:9 profile, and any
+field you do declare overrides the inherited one:
 
 ```jsonc
 {
@@ -95,6 +101,22 @@ ambiguous submits are parked for manual resolution rather than auto-retried:
   }
 }
 ```
+
+**MiniMax notes** (v2 API, [create](https://platform.minimax.io/docs/api-reference/video-generation-v2-create) / [query](https://platform.minimax.io/docs/api-reference/video-generation-v2-query)):
+MiniMax-H3 speaks a multimodal task API — prompt + frames ride in one
+`content` array with `first_frame` / `last_frame` / `reference_image` roles
+(first/last frames and reference images are mutually exclusive; a last frame
+requires a first frame). Resolution is `768P` or `2K`, duration 4–15s, ratio
+`16:9|4:3|1:1|3:4|9:16|21:9` — required and non-adaptive for text-to-video,
+ignored (forced adaptive) once a first frame is present. There is no audio
+toggle, no idempotency key and no documented cancel endpoint, so ambiguous
+submits are parked for manual resolution rather than auto-retried. Auth is a
+plain Bearer key (`providers.minimax.apiKey`, env `MINIMAX_API_KEY`), and keys
+are region-locked: the default endpoint is international
+`api.minimax.io` — mainland-China keys need `providers.minimax.baseUrl` set
+to `https://api.minimaxi.com` (and vice versa a 401 means wrong region).
+Result URLs are time-limited; clips are downloaded immediately, and tasks
+stay queryable for 7 days.
 
 **Kling notes** (verified against kling.ai/document-api via browser, 2026-07):
 current Kling API 2.0 uses a plain API key (`providers.kling.apiKey`, env

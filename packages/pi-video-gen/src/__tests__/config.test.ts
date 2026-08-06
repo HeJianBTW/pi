@@ -56,7 +56,7 @@ describe('loadVideoGenSettings', () => {
 
   it('ignores the project layer entirely when untrusted', () => {
     writeJson(join(cwd, '.pi', 'settings.json'), {
-      'pi-video-gen': { defaultModel: 'seedance-fast', outputDir: 'custom-out' },
+      'pi-video-gen': { defaultModel: 'seedance-2.0-fast', outputDir: 'custom-out' },
     });
     const settings = loadVideoGenSettings(cwd, false);
     expect(settings.defaultModel).toBeUndefined();
@@ -66,13 +66,13 @@ describe('loadVideoGenSettings', () => {
   it('honors whitelisted keys from a trusted project', () => {
     writeJson(join(cwd, '.pi', 'settings.json'), {
       'pi-video-gen': {
-        defaultModel: 'seedance-fast',
+        defaultModel: 'seedance-2.0-fast',
         outputDir: 'custom-out',
         concurrency: { clips: 1 },
       },
     });
     const settings = loadVideoGenSettings(cwd, true);
-    expect(settings.defaultModel).toBe('seedance-fast');
+    expect(settings.defaultModel).toBe('seedance-2.0-fast');
     expect(settings.outputDir).toBe('custom-out');
     expect(settings.concurrency?.clips).toBe(1);
   });
@@ -80,13 +80,13 @@ describe('loadVideoGenSettings', () => {
   it('strips sensitive keys from a trusted project layer', () => {
     writeJson(join(cwd, '.pi', 'settings.json'), {
       'pi-video-gen': {
-        defaultModel: 'seedance-fast',
+        defaultModel: 'seedance-2.0-fast',
         providers: { ark: { apiKey: 'stolen', baseUrl: 'https://evil.example' } },
         ffmpegPath: '/tmp/evil-ffmpeg',
       },
     });
     const settings = loadVideoGenSettings(cwd, true);
-    expect(settings.defaultModel).toBe('seedance-fast');
+    expect(settings.defaultModel).toBe('seedance-2.0-fast');
     expect(settings.providers?.ark?.apiKey).toBeUndefined();
     expect(settings.ffmpegPath).toBeUndefined();
   });
@@ -132,13 +132,13 @@ describe('loadVideoGenSettings', () => {
 
   it('project whitelist keys override global ones when trusted', () => {
     writeJson(join(home, '.pi', 'agent', 'settings.json'), {
-      'pi-video-gen': { defaultModel: 'seedance-mini' },
+      'pi-video-gen': { defaultModel: 'seedance-2.0-mini' },
     });
     writeJson(join(cwd, '.pi', 'settings.json'), {
-      'pi-video-gen': { defaultModel: 'seedance-fast' },
+      'pi-video-gen': { defaultModel: 'seedance-2.0-fast' },
     });
-    expect(loadVideoGenSettings(cwd, true).defaultModel).toBe('seedance-fast');
-    expect(loadVideoGenSettings(cwd, false).defaultModel).toBe('seedance-mini');
+    expect(loadVideoGenSettings(cwd, true).defaultModel).toBe('seedance-2.0-fast');
+    expect(loadVideoGenSettings(cwd, false).defaultModel).toBe('seedance-2.0-mini');
   });
 });
 
@@ -224,7 +224,7 @@ describe('config validation & loud project read', () => {
 });
 
 describe('resolveModel', () => {
-  it('defaults to the seedance alias and ark default base url', () => {
+  it('defaults to the seedance 2.0 standard model and ark default base url', () => {
     const resolved = resolveModel({});
     expect(resolved?.entry.id).toBe('doubao-seedance-2-0-260128');
     expect(resolved?.provider.style).toBe('ark');
@@ -232,7 +232,7 @@ describe('resolveModel', () => {
   });
 
   it('resolves aliases case-insensitively', () => {
-    expect(resolveModel({}, 'Seedance-FAST')?.entry.id).toBe('doubao-seedance-2-0-fast-260128');
+    expect(resolveModel({}, 'Seedance-2.0-FAST')?.entry.id).toBe('doubao-seedance-2-0-fast-260128');
   });
 
   it('returns null for unknown models', () => {
@@ -276,6 +276,80 @@ describe('resolveModel', () => {
       /providers.newapi.baseUrl/,
     );
   });
+
+  it('custom models with unknown ids get conservative capabilities', () => {
+    const resolved = resolveModel(
+      {
+        customProviders: {
+          myproxy: { api: 'ark', baseUrl: 'https://proxy.example/v3', models: ['mystery-9'] },
+        },
+      },
+      'mystery-9',
+    );
+    expect(resolved?.entry.capabilities).toMatchObject({
+      maxReferenceImages: 1,
+      resolutions: ['720p'],
+      aspectRatios: ['16:9'],
+      nativeAudio: false,
+      supportsFirstLastFrame: false,
+    });
+    expect(resolved?.entry.defaultResolution).toBe('720p');
+  });
+
+  it('custom models inherit built-in capabilities when the id names a known model', () => {
+    const resolved = resolveModel(
+      {
+        customProviders: {
+          relay: {
+            api: 'minimax',
+            baseUrl: 'https://relay.example',
+            apiKey: 'k',
+            models: [{ id: 'MiniMax-H3', alias: 'h3-relay' }],
+          },
+        },
+      },
+      'h3-relay',
+    );
+    // No capabilities declared: the registry's H3 contract applies (768P/2K,
+    // flf, 4-15s) instead of the conservative 720p/16:9 fallback, while the
+    // relay keeps its own wire format, endpoint and remote id.
+    expect(resolved?.provider.style).toBe('minimax');
+    expect(resolved?.provider.baseUrl).toBe('https://relay.example');
+    expect(resolved?.remoteId).toBe('MiniMax-H3');
+    expect(resolved?.entry.capabilities.resolutions).toEqual(['768P', '2K']);
+    expect(resolved?.entry.capabilities.supportsFirstLastFrame).toBe(true);
+    expect(resolved?.entry.defaultResolution).toBe('768P');
+    expect(resolved?.entry.defaultAspectRatio).toBe('16:9');
+    expect(resolved?.entry.defaultDurationSec).toBe(5);
+  });
+
+  it('explicit custom capabilities/defaults override the inherited ones per field', () => {
+    const resolved = resolveModel(
+      {
+        customProviders: {
+          relay: {
+            api: 'minimax',
+            baseUrl: 'https://relay.example',
+            models: [
+              {
+                id: 'MiniMax-H3',
+                alias: 'h3x',
+                capabilities: { resolutions: ['768P'] },
+                defaultDurationSec: 10,
+              },
+            ],
+          },
+        },
+      },
+      'h3x',
+    );
+    // Overridden field wins; untouched fields keep the built-in values; the
+    // built-in 2K default is skipped because the override dropped it.
+    expect(resolved?.entry.capabilities.resolutions).toEqual(['768P']);
+    expect(resolved?.entry.capabilities.aspectRatios).toContain('21:9');
+    expect(resolved?.entry.defaultResolution).toBe('768P');
+    expect(resolved?.entry.defaultDurationSec).toBe(10);
+  });
 });
 
 describe('listModelRegistry', () => {
@@ -286,7 +360,7 @@ describe('listModelRegistry', () => {
     expect(info.models.filter((m) => m.provider === 'dashscope').every((m) => !m.keyReady)).toBe(
       true,
     );
-    expect(info.models).toHaveLength(8);
+    expect(info.models).toHaveLength(9);
   });
 
   it('includes custom provider models in the registry view', () => {
