@@ -341,12 +341,15 @@ describe('buildImageToolParameters', () => {
     expect(fixed).toHaveProperty('aspectRatio');
   });
 
-  it('caps n per model and hides it when the model has no count knob', () => {
+  it('carries the documented n ceiling as advice (no maximum) and hides n when there is no count knob', () => {
+    // Advisory, not gated: no schema maximum — a private deployment may allow
+    // more than the cloud docs, and the provider's error is the backstop.
     const qwen = buildImageToolParameters(caps('dashscope', null, qwenCaps)).properties as Record<
       string,
-      { maximum?: number }
+      { maximum?: number; description?: string }
     >;
-    expect(qwen.n?.maximum).toBe(6);
+    expect(qwen.n?.maximum).toBeUndefined();
+    expect(qwen.n?.description).toContain('up to 6');
 
     const seedream = buildImageToolParameters(caps('ark', null, seedreamCaps)).properties as Record<
       string,
@@ -356,13 +359,15 @@ describe('buildImageToolParameters', () => {
   });
 
   it('drives the size schema from the model contract', () => {
-    // qwen: pattern accepts the asterisk form, description spells out bounds.
+    // qwen: description spells out the documented form and limits — with NO
+    // schema pattern, so out-of-range values reach the provider (advisory).
     const qwen = buildImageToolParameters(caps('dashscope', null, qwenCaps)).properties as Record<
       string,
       { pattern?: string; description?: string }
     >;
-    expect(new RegExp(qwen.size?.pattern ?? '').test('2048*2048')).toBe(true);
+    expect(qwen.size?.pattern).toBeUndefined();
     expect(qwen.size?.description).toContain('<width>*<height>');
+    expect(qwen.size?.description).toContain('Documented limits');
 
     // discrete list → string enum.
     const fixed = buildImageToolParameters(
@@ -383,13 +388,13 @@ describe('buildImageToolParameters', () => {
       { description?: string }
     >;
     expect(props.image?.description).toContain('JPG/JPEG/PNG/BMP/TIFF/WEBP/GIF');
-    expect(props.image?.description).toContain('at most 3');
+    expect(props.image?.description).toContain('documents up to 3');
     // The fallback schema keeps the generic description.
     const generic = buildImageToolParameters(caps(null, QUALITY_VALUES)).properties as Record<
       string,
       { description?: string }
     >;
-    expect(generic.image?.description).not.toContain('at most');
+    expect(generic.image?.description).not.toContain('documents up to');
   });
 });
 

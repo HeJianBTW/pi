@@ -212,30 +212,6 @@ describe('resolveImageInputs', () => {
     expect(out[0]?.mimeType).toBe('image/png');
     expect(out[1]?.mimeType).toBe('image/jpeg');
   });
-
-  it('enforces the per-model format allowlist', async () => {
-    const dir = makeTempDir();
-    writeFileSync(join(dir, 'a.png'), PNG_BYTES);
-    // gpt-image-2 takes PNG/WEBP/JPEG — a GIF must be refused before any call.
-    await expect(
-      resolveImageInputs(['a.png'], dir, fetch, undefined, { formats: ['JPEG', 'WEBP'] }),
-    ).rejects.toThrow(/does not accept.*JPEG\/WEBP/);
-    const ok = await resolveImageInputs(['a.png'], dir, fetch, undefined, {
-      formats: ['PNG', 'JPEG'],
-    });
-    expect(ok[0]?.mimeType).toBe('image/png');
-  });
-
-  it('enforces the per-model byte ceiling instead of the global one', async () => {
-    const dir = makeTempDir();
-    writeFileSync(join(dir, 'a.png'), PNG_BYTES);
-    await expect(
-      resolveImageInputs(['a.png'], dir, fetch, undefined, { maxBytes: 8 }),
-    ).rejects.toThrow(/size ceiling/i);
-    // Without limits the global ceiling applies (the fixture is far below it).
-    const ok = await resolveImageInputs(['a.png'], dir, fetch);
-    expect(ok).toHaveLength(1);
-  });
 });
 
 describe('sniffMime', () => {

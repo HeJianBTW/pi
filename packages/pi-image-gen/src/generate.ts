@@ -66,24 +66,15 @@ export async function generateImage(
   const resolved = resolveModel(requested, options.settings);
   if ('error' in resolved) throw new ImageGenError(resolved.error, 'model did not resolve');
 
-  // Capability pre-flight: n/size/aspect knobs and reference-image counts are
-  // checked against the model's contract BEFORE any image is downloaded or any
-  // paid request is made, so an invalid call fails fast with the legal values
-  // spelled out. Models without a contract (custom catch-alls) skip this.
-  const caps = resolved.capabilities;
-  if (caps) validateGenerateParams(params, caps, resolved.requestedId);
+  // Pre-flight guards only against parameter combinations our adapters would
+  // silently drop (see capabilities.ts) — documented numeric limits are
+  // schema-description advice, and the provider's error is the backstop.
+  if (resolved.capabilities) {
+    validateGenerateParams(params, resolved.capabilities, resolved.requestedId);
+  }
 
   const adapter = getAdapter(resolved.provider.api);
-  const inputLimits = caps
-    ? { formats: caps.inputFormats, maxBytes: caps.inputMaxBytes }
-    : undefined;
-  const inputs = await resolveImageInputs(
-    params.image,
-    options.cwd,
-    safeFetch,
-    options.signal,
-    inputLimits,
-  );
+  const inputs = await resolveImageInputs(params.image, options.cwd, safeFetch, options.signal);
   const raws = await adapter.generate(
     resolved.provider,
     resolved.remoteId,

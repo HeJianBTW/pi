@@ -4,7 +4,6 @@ import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-a
 import { Type } from 'typebox';
 import {
   capabilitySizeDescription,
-  capabilitySizePattern,
   hasAspectRatioKnob,
   hasImageSizeKnob,
   referenceImageDescription,
@@ -264,14 +263,16 @@ const IMAGE_PARAM_BASE =
 /**
  * Build the `image_generate` parameter schema for the resolved capabilities.
  * The invariant params are always present; everything else is shaped by the
- * active model's contract so the LLM never sees a knob the provider would
- * reject or silently ignore:
- * - `size` carries the model's exact form (enum / pattern + description) and
- *   is hidden entirely for Gemini-style aspect-ratio models;
+ * active model's contract so the LLM sees exactly the knobs the provider
+ * honors, with the documented values as ADVICE in enums and descriptions:
+ * - `size` carries the model's documented form and limits in its description
+ *   (never a schema pattern — the provider validates; private deployments may
+ *   diverge from the cloud docs) and is hidden for Gemini-style models;
  * - `aspectRatio` / `imageSize` appear only for models that honor them
  *   (imageSize only when more than one tier exists);
- * - `n` is capped per model and hidden for models with no count knob;
- * - `image` spells out the model's reference-image contract;
+ * - `n` carries the documented ceiling in its description (no `maximum`) and
+ *   is hidden for models with no count knob;
+ * - `image` spells out the model's documented reference-image contract;
  * - `quality` appears only when {@link resolveImageToolCapabilities} says the
  *   active provider honors it.
  */
@@ -283,7 +284,6 @@ export function buildImageToolParameters(caps: ImageToolCapabilities) {
   const sizeText = showSize
     ? ((model ? capabilitySizeDescription(model) : null) ?? sizeDescription(caps.api))
     : null;
-  const sizePattern = model ? capabilitySizePattern(model) : undefined;
   return Type.Object({
     prompt: Type.String({
       description: 'Text prompt describing what to generate or how to edit.',
@@ -300,11 +300,12 @@ export function buildImageToolParameters(caps: ImageToolCapabilities) {
           n: Type.Optional(
             Type.Number({
               minimum: 1,
-              maximum: model?.nMax ?? 8,
-              // The no-contract fallback keeps the pre-capabilities wording so
-              // the generic schema stays byte-identical to what it was.
+              // Advisory only: the documented ceiling goes in the description,
+              // not a schema `maximum` — a private deployment may legitimately
+              // differ from the cloud docs, and the provider's error is the
+              // backstop. The no-contract fallback keeps the original wording.
               description: model
-                ? `Number of images. Default 1 (integer, at most ${model.nMax} for the active model).`
+                ? `Number of images. Default 1 (integer; the active model documents up to ${model.nMax}).`
                 : 'Number of images. Default 1 (integer).',
             }),
           ),
@@ -315,10 +316,7 @@ export function buildImageToolParameters(caps: ImageToolCapabilities) {
           size: Type.Optional(
             model?.sizes
               ? StringEnum(model.sizes, { description: sizeText })
-              : Type.String({
-                  description: sizeText,
-                  ...(sizePattern ? { pattern: sizePattern } : {}),
-                }),
+              : Type.String({ description: sizeText }),
           ),
         }
       : {}),

@@ -28,26 +28,6 @@ const FTYP_BRAND_MIME: Record<string, string> = {
   msf1: 'image/heif',
 };
 
-/** Sniffed MIME type → the display label used by capability inputFormats. */
-export const MIME_FORMAT_LABEL: Record<string, string> = {
-  'image/png': 'PNG',
-  'image/jpeg': 'JPEG',
-  'image/gif': 'GIF',
-  'image/webp': 'WEBP',
-  'image/bmp': 'BMP',
-  'image/tiff': 'TIFF',
-  'image/heic': 'HEIC',
-  'image/heif': 'HEIF',
-};
-
-/** Per-model reference-image constraints, from the capability contract. */
-export type ImageInputLimits = {
-  /** Allowed format labels (e.g. "PNG"); undefined = any sniffable image. */
-  formats?: string[];
-  /** Per-image byte ceiling; defaults to MAX_IMAGE_BYTES. */
-  maxBytes?: number;
-};
-
 const DATA_URI_RE = /^data:(image\/[a-z+.-]+);base64,(.+)$/i;
 export const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 export const MAX_BASE64_IMAGE_CHARS = Math.ceil(MAX_IMAGE_BYTES / 3) * 4;
@@ -58,31 +38,14 @@ export async function resolveImageInputs(
   cwd: string,
   fetchImpl: (input: string | URL, init?: RequestInit) => Promise<Response>,
   signal?: AbortSignal,
-  limits?: ImageInputLimits,
 ): Promise<ResolvedImageInput[]> {
   if (!raw || raw.length === 0) return [];
   const out: ResolvedImageInput[] = [];
   for (let index = 0; index < raw.length; index++) {
     const inputLabel = raw.length > 1 ? `Image input #${index + 1}` : 'Image input';
-    out.push(await resolveOne(raw[index]!, inputLabel, cwd, fetchImpl, signal, limits));
+    out.push(await resolveOne(raw[index]!, inputLabel, cwd, fetchImpl, signal));
   }
   return out;
-}
-
-/** Format gate applied after sniffing, when the active model declares one. */
-function assertFormatAllowed(
-  mimeType: string,
-  limits: ImageInputLimits | undefined,
-  inputLabel: string,
-  logLabel: string,
-): void {
-  if (!limits?.formats) return;
-  const label = MIME_FORMAT_LABEL[mimeType];
-  if (label && limits.formats.includes(label)) return;
-  throw new ImageGenError(
-    `${inputLabel} is ${label ?? 'an unrecognized format'}, which the active model does not accept (allowed: ${limits.formats.join('/')}).`,
-    `${logLabel} rejected (format not allowed)`,
-  );
 }
 
 async function resolveOne(
@@ -91,11 +54,9 @@ async function resolveOne(
   cwd: string,
   fetchImpl: (input: string | URL, init?: RequestInit) => Promise<Response>,
   signal?: AbortSignal,
-  limits?: ImageInputLimits,
 ): Promise<ResolvedImageInput> {
   const trimmed = value.trim();
   const logLabel = inputLabel.toLowerCase();
-  const maxBytes = limits?.maxBytes ?? MAX_IMAGE_BYTES;
   // Every throw below is an ImageGenError so it survives the body-free log sink
   // (toLogSummary) with an actionable message; none interpolate the raw value —
   // an image input could be a giant base64 blob or a signed URL.
@@ -141,7 +102,7 @@ async function resolveOne(
     // Body reads can fail after headers; keep them in the sanitized download boundary.
     let buf: Uint8Array;
     try {
-      buf = await readResponseBytes(res, maxBytes);
+      buf = await readResponseBytes(res, MAX_IMAGE_BYTES);
     } catch (error) {
       if (error instanceof Error && /size ceiling/i.test(error.message)) {
         throw new ImageGenError(error.message, `${logLabel} rejected (too large)`);
@@ -155,7 +116,6 @@ async function resolveOne(
         `${logLabel} rejected (invalid image)`,
       );
     }
-    assertFormatAllowed(mimeType, limits, inputLabel, logLabel);
     return { bytes: buf, mimeType };
   }
 
@@ -185,7 +145,7 @@ async function resolveOne(
         `${logLabel} rejected (not regular)`,
       );
     }
-    if (info.size > maxBytes) {
+    if (info.size > MAX_IMAGE_BYTES) {
       throw new ImageGenError(
         `${inputLabel} exceeds the image size ceiling.`,
         `${logLabel} rejected (too large)`,
@@ -200,7 +160,7 @@ async function resolveOne(
           `${logLabel} rejected (not regular)`,
         );
       }
-      if (openedInfo.size > maxBytes) {
+      if (openedInfo.size > MAX_IMAGE_BYTES) {
         throw new ImageGenError(
           `${inputLabel} exceeds the image size ceiling.`,
           `${logLabel} rejected (too large)`,
@@ -242,7 +202,6 @@ async function resolveOne(
       `${logLabel} rejected (invalid image)`,
     );
   }
-  assertFormatAllowed(mimeType, limits, inputLabel, logLabel);
   return { bytes, mimeType };
 }
 
