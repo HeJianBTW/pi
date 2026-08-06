@@ -11,7 +11,7 @@
  */
 
 /** Wire format, NOT vendor — the same model via official or proxy endpoints differs only in baseUrl. */
-export type VideoApiStyle = 'ark' | 'kling' | 'dashscope' | 'openrouter' | 'newapi';
+export type VideoApiStyle = 'ark' | 'kling' | 'dashscope' | 'openrouter' | 'newapi' | 'minimax';
 
 export type VideoModelCapabilities = {
   /** Max reference images a request may carry (0 = text-to-video only). */
@@ -57,10 +57,12 @@ export type CustomVideoModel = {
   /** Optional display name. */
   name?: string | undefined;
   /**
-   * Capability declaration driving tool schema and preflight. Omitted fields
-   * fall back to conservative defaults (no audio, no last-frame, 720p, 16:9).
+   * Capability declaration driving tool schema and preflight. Every field is
+   * optional; omitted fields fall back to the built-in registry entry of the
+   * same id when one exists, else to conservative defaults (no audio, no
+   * last-frame, 720p, 16:9).
    */
-  capabilities?: VideoModelCapabilities | undefined;
+  capabilities?: Partial<VideoModelCapabilities> | undefined;
   defaultResolution?: string | undefined;
   defaultAspectRatio?: string | undefined;
   defaultDurationSec?: number | undefined;

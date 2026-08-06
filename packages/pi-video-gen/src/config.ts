@@ -4,6 +4,7 @@ import { providerLabel, VideoGenError } from './errors.js';
 import { ARK_DEFAULT_BASE_URL } from './providers/ark.js';
 import { DASHSCOPE_DEFAULT_BASE_URL } from './providers/dashscope.js';
 import { KLING_DEFAULT_BASE_URL } from './providers/kling.js';
+import { MINIMAX_DEFAULT_BASE_URL } from './providers/minimax.js';
 import { BUILT_IN_VIDEO_MODELS, findBuiltInModel } from './providers/models.js';
 import { OPENROUTER_DEFAULT_BASE_URL } from './providers/openrouter.js';
 import type {
@@ -16,6 +17,13 @@ import type {
 } from './types.js';
 
 const SETTINGS_KEY = 'pi-video-gen';
+
+/**
+ * Fallback model when neither the caller nor settings.defaultModel name one.
+ * A full registry id, NOT an alias — aliases can be dropped between versions,
+ * the default must not depend on one.
+ */
+export const DEFAULT_VIDEO_MODEL_ID = 'doubao-seedance-2-0-260128';
 
 /**
  * Keys a project-level settings file may set. Everything else — notably
@@ -34,6 +42,7 @@ const PROVIDER_DEFAULT_BASE_URLS: Partial<Record<VideoApiStyle, string>> = {
   kling: KLING_DEFAULT_BASE_URL,
   dashscope: DASHSCOPE_DEFAULT_BASE_URL,
   openrouter: OPENROUTER_DEFAULT_BASE_URL,
+  minimax: MINIMAX_DEFAULT_BASE_URL,
 };
 
 /** Resolve the effective base URL, failing clearly when the style mandates one. */
@@ -153,7 +162,7 @@ function validateCapabilities(value: unknown, path: string): void {
   }
 }
 
-const WIRE_FORMATS = ['ark', 'kling', 'dashscope', 'openrouter', 'newapi'];
+const WIRE_FORMATS = ['ark', 'kling', 'dashscope', 'openrouter', 'newapi', 'minimax'];
 
 function validateCustomProviders(value: unknown): void {
   if (value === undefined) return;
@@ -295,9 +304,13 @@ export function resolveProvider(
 
 /**
  * Conservative capabilities for custom models declared as a bare string (or
- * with a partial capabilities object): text-to-video + first frame only, no
- * audio, no last-frame interpolation, 720p/16:9. Declare full capabilities in
- * the custom model object to lift these.
+ * with a partial capabilities object) whose id matches NO built-in registry
+ * entry: text-to-video + first frame only, no audio, no last-frame
+ * interpolation, 720p/16:9. Declare full capabilities in the custom model
+ * object to lift these. When the id DOES name a built-in model (e.g.
+ * "MiniMax-H3" behind a relay), the built-in capability table is the base
+ * instead — the remote contract is known, so resolution/duration/ratio
+ * defaults come from the registry.
  */
 const CONSERVATIVE_CUSTOM_CAPABILITIES: VideoModelCapabilities = {
   maxReferenceImages: 1,
@@ -308,6 +321,20 @@ const CONSERVATIVE_CUSTOM_CAPABILITIES: VideoModelCapabilities = {
   supportsFirstLastFrame: false,
 };
 
+/**
+ * Default-value inheritance for custom models: an explicit settings value
+ * wins; then the built-in registry default (only while it stays valid against
+ * the merged capabilities); finally the caller-supplied fallback.
+ */
+function inheritDefault<T>(
+  explicit: T | undefined,
+  builtIn: T | undefined,
+  isValid: (value: T) => boolean,
+  fallback: T,
+): T {
+  return explicit ?? (builtIn !== undefined && isValid(builtIn) ? builtIn : fallback);
+}
+
 function resolveCustomModel(settings: VideoGenSettings, wanted: string): ResolvedModel | null {
   const needle = wanted.trim().toLowerCase();
   for (const [providerName, cp] of Object.entries(settings.customProviders ?? {})) {
@@ -317,16 +344,38 @@ function resolveCustomModel(settings: VideoGenSettings, wanted: string): Resolve
         model.id.toLowerCase() === needle ||
         (model.alias != null && model.alias.toLowerCase() === needle);
       if (!matches) continue;
-      const capabilities = { ...CONSERVATIVE_CUSTOM_CAPABILITIES, ...(model.capabilities ?? {}) };
+      const builtIn = findBuiltInModel(model.id);
+      const capabilities = {
+        ...(builtIn?.capabilities ?? CONSERVATIVE_CUSTOM_CAPABILITIES),
+        ...(model.capabilities ?? {}),
+      };
+      const defaultResolution = inheritDefault(
+        model.defaultResolution,
+        builtIn?.defaultResolution,
+        (v) => capabilities.resolutions.includes(v),
+        capabilities.resolutions[0]!,
+      );
+      const defaultAspectRatio = inheritDefault(
+        model.defaultAspectRatio,
+        builtIn?.defaultAspectRatio,
+        (v) => capabilities.aspectRatios.includes(v),
+        capabilities.aspectRatios[0]!,
+      );
+      const defaultDurationSec = inheritDefault(
+        model.defaultDurationSec,
+        builtIn?.defaultDurationSec,
+        (v) => v >= capabilities.durations[0] && v <= capabilities.durations[1],
+        capabilities.durations[0],
+      );
       return {
         entry: {
           id: model.id,
           aliases: model.alias ? [model.alias] : [],
           provider: cp.api,
           capabilities,
-          defaultResolution: model.defaultResolution ?? capabilities.resolutions[0]!,
-          defaultAspectRatio: model.defaultAspectRatio ?? capabilities.aspectRatios[0]!,
-          defaultDurationSec: model.defaultDurationSec ?? capabilities.durations[0],
+          defaultResolution,
+          defaultAspectRatio,
+          defaultDurationSec,
         },
         remoteId: model.id,
         provider: {
@@ -347,10 +396,11 @@ function resolveCustomModel(settings: VideoGenSettings, wanted: string): Resolve
 
 /**
  * Resolve a model id/alias (defaulting to settings.defaultModel, then
- * 'seedance'). Built-in registry wins over custom provider models on conflict.
+ * DEFAULT_VIDEO_MODEL_ID). Built-in registry wins over custom provider
+ * models on conflict.
  */
 export function resolveModel(settings: VideoGenSettings, modelId?: string): ResolvedModel | null {
-  const wanted = modelId ?? settings.defaultModel ?? 'seedance';
+  const wanted = modelId ?? settings.defaultModel ?? DEFAULT_VIDEO_MODEL_ID;
   const entry = findBuiltInModel(wanted);
   if (entry) {
     return {
@@ -368,7 +418,7 @@ export function listModelRegistry(settings: VideoGenSettings): {
   activeResolved: boolean;
   models: { id: string; aliases: string[]; provider: string; keyReady: boolean }[];
 } {
-  const wanted = settings.defaultModel ?? 'seedance';
+  const wanted = settings.defaultModel ?? DEFAULT_VIDEO_MODEL_ID;
   const active = resolveModel(settings, wanted);
   return {
     activeId: active?.entry.id ?? wanted,

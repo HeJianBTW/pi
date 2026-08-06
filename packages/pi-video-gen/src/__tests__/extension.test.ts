@@ -956,7 +956,7 @@ describe('pi-video-gen extension', () => {
       join(home, '.pi', 'agent', 'settings.json'),
       JSON.stringify({
         'pi-video-gen': {
-          defaultModel: 'happyhorse',
+          defaultModel: 'happyhorse-1.1',
           providers: { dashscope: { apiKey: 'k' } },
         },
       }),
