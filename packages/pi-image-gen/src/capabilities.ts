@@ -14,12 +14,12 @@ import type { GenerateImageParams, ImageModelCapabilities } from './types.js';
 export const SIZE_PIXEL_RE = /^(\d{2,5})\s*[x*]\s*(\d{2,5})$/i;
 
 /**
- * Bound a value echoed into a user-facing validation error. Tool params reach
- * these messages even from schema-unaware callers, and an unbounded string
- * would land in the tool result verbatim — same reason image-input never
- * interpolates raw input values.
+ * Truncate a value echoed into a user-facing validation error. Tool params
+ * reach these messages even from schema-unaware callers, and an unbounded
+ * string would land in the tool result verbatim — same reason image-input
+ * never interpolates raw input values.
  */
-function echo(value: string): string {
+function truncateEcho(value: string): string {
   return value.length > 40 ? `${value.slice(0, 40)}…` : value;
 }
 
@@ -148,7 +148,7 @@ export function validateGenerateParams(
     }
     if (params.aspectRatio && !caps.aspectRatios!.includes(params.aspectRatio)) {
       throw new ImageGenError(
-        `aspectRatio must be one of ${caps.aspectRatios!.join(', ')} for ${modelId} (got "${echo(params.aspectRatio)}").`,
+        `aspectRatio must be one of ${caps.aspectRatios!.join(', ')} for ${modelId} (got "${truncateEcho(params.aspectRatio)}").`,
         'aspectRatio not allowed',
       );
     }
@@ -161,7 +161,7 @@ export function validateGenerateParams(
       }
       if (!caps.imageSizes.includes(params.imageSize)) {
         throw new ImageGenError(
-          `imageSize must be one of ${caps.imageSizes.join(', ')} for ${modelId} (got "${echo(params.imageSize)}").`,
+          `imageSize must be one of ${caps.imageSizes.join(', ')} for ${modelId} (got "${truncateEcho(params.imageSize)}").`,
           'imageSize not allowed',
         );
       }
@@ -183,7 +183,7 @@ function validateSize(size: string, caps: ImageModelCapabilities, modelId: strin
   if (caps.sizes) {
     if (!caps.sizes.includes(trimmed)) {
       throw new ImageGenError(
-        `size must be one of ${caps.sizes.join(', ')} for ${modelId} (got "${echo(size)}").`,
+        `size must be one of ${caps.sizes.join(', ')} for ${modelId} (got "${truncateEcho(size)}").`,
         'size not allowed',
       );
     }
@@ -200,7 +200,7 @@ function validateSize(size: string, caps: ImageModelCapabilities, modelId: strin
     if (range.tiers) forms.push(`one of ${range.tiers.join(', ')}`);
     if (range.allowAuto) forms.push('"auto"');
     throw new ImageGenError(
-      `size must be ${forms.join(', ')} for ${modelId} (got "${echo(size)}").`,
+      `size must be ${forms.join(', ')} for ${modelId} (got "${truncateEcho(size)}").`,
       'size malformed',
     );
   }
@@ -326,9 +326,22 @@ function sanitizeSizeRange(
     return undefined;
   }
   const range: NonNullable<ImageModelCapabilities['sizeRange']> = { separator, minArea, maxArea };
-  if (typeof raw.minRatio === 'number' && typeof raw.maxRatio === 'number' && raw.minRatio > 0) {
-    range.minRatio = raw.minRatio;
-    range.maxRatio = raw.maxRatio;
+  if (typeof raw.minRatio === 'number' || typeof raw.maxRatio === 'number') {
+    // The ratio pair is checked like the area pair: an inverted pair would
+    // otherwise pass the shape check and make validateSize reject everything.
+    if (
+      typeof raw.minRatio === 'number' &&
+      typeof raw.maxRatio === 'number' &&
+      raw.minRatio > 0 &&
+      raw.maxRatio > raw.minRatio
+    ) {
+      range.minRatio = raw.minRatio;
+      range.maxRatio = raw.maxRatio;
+    } else {
+      console.error(
+        `[pi-image-gen] ignoring capabilities.sizeRange ratio bounds for ${owner}: expected 0 < minRatio < maxRatio`,
+      );
+    }
   }
   if (Array.isArray(raw.tiers) && raw.tiers.every((t) => typeof t === 'string' && t.length > 0)) {
     range.tiers = raw.tiers as string[];

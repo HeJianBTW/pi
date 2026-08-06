@@ -271,4 +271,31 @@ describe('sanitizeCapabilities', () => {
       errSpy.mockRestore();
     }
   });
+
+  it('drops an inverted ratio pair but keeps the rest of sizeRange', () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const clean = sanitizeCapabilities(
+        {
+          sizeRange: {
+            separator: 'x',
+            minArea: 100,
+            maxArea: 200,
+            minRatio: 8,
+            maxRatio: 0.125,
+          },
+        },
+        'test',
+      );
+      // The inverted pair would make validateSize reject every size — dropped
+      // with a warning while the valid area bounds survive.
+      expect(clean.sizeRange?.minArea).toBe(100);
+      expect(clean.sizeRange?.minRatio).toBeUndefined();
+      expect(clean.sizeRange?.maxRatio).toBeUndefined();
+      const logged = errSpy.mock.calls.map((c) => String(c[0])).join('\n');
+      expect(logged).toContain('ratio bounds');
+    } finally {
+      errSpy.mockRestore();
+    }
+  });
 });
