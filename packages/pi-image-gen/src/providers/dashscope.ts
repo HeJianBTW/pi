@@ -25,6 +25,17 @@ import { withDefaultPath } from '../url.js';
  * The legacy async task endpoint (text2image/image-synthesis) is not used —
  * it doesn't accept reference images and the supported models there are old.
  */
+
+/**
+ * DashScope wants "<width>*<height>" (asterisk). The tool schema tells the
+ * model so, but normalize defensively anyway — a stale prompt, a hand-written
+ * /image-gen call, or a custom gateway can still produce the x-form, and the
+ * API rejects it with a bare InvalidParameter.
+ */
+function normalizeDashScopeSize(size: string): string {
+  return size.trim().replace(/^(\d{2,5})\s*[xX]\s*(\d{2,5})$/, '$1*$2');
+}
+
 export const dashscopeAdapter: ImageProviderAdapter = {
   async generate(
     provider: ResolvedProvider,
@@ -60,7 +71,7 @@ export const dashscopeAdapter: ImageProviderAdapter = {
           input: { messages: [{ role: 'user', content: userContent }] },
           parameters: {
             n: params.n ?? 1,
-            ...(params.size ? { size: params.size } : {}),
+            ...(params.size ? { size: normalizeDashScopeSize(params.size) } : {}),
           },
         }),
         signal: signal ?? null,

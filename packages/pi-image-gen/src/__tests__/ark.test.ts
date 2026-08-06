@@ -94,9 +94,10 @@ describe('ark provider (Volcengine Seedream)', () => {
     expect(calls[0]?.body).toMatchObject({
       model: 'doubao-seedream-5-0-260128',
       prompt: '一只猫',
-      n: 1,
       size: '2048x2048',
     });
+    // Seedream documents no `n` parameter — it must not reach the wire.
+    expect(calls[0]?.body.n).toBeUndefined();
     expect(calls[0]?.body.image).toBeUndefined();
     expect(calls[0]?.body.quality).toBeUndefined();
     expect(result.provider).toBe('ark');

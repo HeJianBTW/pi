@@ -39,12 +39,14 @@ export const arkAdapter: ImageProviderAdapter = {
     const body: Record<string, unknown> = {
       model: remoteModelId,
       prompt: params.prompt,
-      n: params.n ?? 1,
     };
     if (params.size) body.size = params.size;
     // Seedream sizing is driven by `size` resolution tiers (1K/2K/4K), not an
     // OpenAI-style `quality` knob — forwarding `quality` here risks a 400, so we
-    // intentionally drop it. See README provider table.
+    // intentionally drop it. See README provider table. The same applies to `n`:
+    // the Seedream API has no count parameter (multi-image is the
+    // sequential_image_generation mechanism, which we don't expose), so `n` is
+    // neither offered in the schema nor forwarded on the wire.
     if (inputs && inputs.length > 0) {
       body.image = inputs.map((input) => toDataUri(input));
     }

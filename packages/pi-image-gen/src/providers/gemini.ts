@@ -59,11 +59,17 @@ export const geminiAdapter: ImageProviderAdapter = {
       });
     }
     userParts.push({ text: params.prompt });
+    // Gemini image models have no pixel-size knob — output shape is driven by
+    // imageConfig { aspectRatio, imageSize } (uppercase "K" tiers).
+    const imageConfig: Record<string, string> = {};
+    if (params.aspectRatio) imageConfig.aspectRatio = params.aspectRatio;
+    if (params.imageSize) imageConfig.imageSize = params.imageSize;
     const body = {
       contents: [{ role: 'user', parts: userParts }],
       generationConfig: {
         responseModalities: ['IMAGE'],
         candidateCount: n,
+        ...(Object.keys(imageConfig).length > 0 ? { imageConfig } : {}),
       },
     };
 
