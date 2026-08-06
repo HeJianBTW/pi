@@ -1,4 +1,5 @@
 import { loadPiSettings } from '@amaster.ai/pi-shared/settings';
+import { sanitizeCapabilities } from './capabilities.js';
 import {
   BUILT_IN_MODELS,
   DEFAULT_API_STYLE,
@@ -36,19 +37,21 @@ const GENERIC_CAPABILITIES: ImageModelCapabilities = {
 };
 
 /**
- * Resolve a custom model's capabilities: explicit per-field declarations win,
- * then the built-in registry entry of the same id, then the generic contract.
- * Mirrors pi-video-gen's capability inheritance for custom models.
+ * Resolve a custom model's capabilities: explicit per-field declarations win
+ * (after a shape check — settings are a trust boundary), then the built-in
+ * registry entry of the same id, then the generic contract. Mirrors
+ * pi-video-gen's capability inheritance for custom models.
  */
 function inheritCapabilities(
   modelId: string,
   explicit: Partial<ImageModelCapabilities> | undefined,
+  owner: string,
 ): ImageModelCapabilities | undefined {
   const builtIn = findBuiltInModel(modelId)?.capabilities;
   if (!builtIn && !explicit) return undefined;
   const merged: ImageModelCapabilities = { ...GENERIC_CAPABILITIES, ...builtIn };
   if (explicit) {
-    for (const [key, value] of Object.entries(explicit)) {
+    for (const [key, value] of Object.entries(sanitizeCapabilities(explicit, owner))) {
       if (value !== undefined) {
         (merged as Record<string, unknown>)[key] = value;
       }
@@ -144,16 +147,18 @@ export function resolveModel(
     for (const model of customModels(raw)) {
       if (model.alias === requested || model.id === requested) {
         const resolved: ResolvedModel = { provider, remoteId: model.id, requestedId: requested };
-        const capabilities = inheritCapabilities(model.id, model.capabilities);
+        const capabilities = inheritCapabilities(
+          model.id,
+          model.capabilities,
+          `customProviders.${name} model "${model.id}"`,
+        );
         if (capabilities) resolved.capabilities = capabilities;
         return resolved;
       }
     }
   }
 
-  const builtIn = BUILT_IN_MODELS.find(
-    (entry) => entry.id === requested || entry.aliases?.includes(requested),
-  );
+  const builtIn = findBuiltInModel(requested);
   if (builtIn) {
     const provider = buildBuiltInProvider(builtIn.provider, settings);
     if (provider?.apiKey) {

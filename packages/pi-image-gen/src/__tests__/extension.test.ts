@@ -68,17 +68,25 @@ function caps(
   return { api, quality, model };
 }
 
+/**
+ * Isolate the global/agent-dir settings layers: the developer's real
+ * ~/.pi/agent/settings.json would otherwise leak a configured defaultModel
+ * into these tests and shape the registered schema. loadPiSettings reads the
+ * global layer via os.homedir(), so HOME must be stubbed too. Returns the temp
+ * dir for the caller's afterEach cleanup.
+ */
+function stubIsolatedHome(): string {
+  const dir = mkdtempSync(join(tmpdir(), 'pi-image-gen-home-'));
+  vi.stubEnv('HOME', dir);
+  vi.stubEnv('PI_AGENT_HOME', dir);
+  vi.stubEnv('PI_CODING_AGENT_DIR', dir);
+  return dir;
+}
+
 describe('piImageGenExtension', () => {
-  // Isolate the global/agent-dir settings layers: the developer's real
-  // ~/.pi/agent/settings.json would otherwise leak a configured defaultModel
-  // into these tests and shape the registered schema. loadPiSettings reads the
-  // global layer via os.homedir(), so HOME must be stubbed too.
   let isolatedHome = '';
   beforeEach(() => {
-    isolatedHome = mkdtempSync(join(tmpdir(), 'pi-image-gen-home-'));
-    vi.stubEnv('HOME', isolatedHome);
-    vi.stubEnv('PI_AGENT_HOME', isolatedHome);
-    vi.stubEnv('PI_CODING_AGENT_DIR', isolatedHome);
+    isolatedHome = stubIsolatedHome();
   });
   afterEach(() => {
     vi.unstubAllEnvs();
@@ -436,13 +444,9 @@ describe('image_generate execute error surfaces are sanitized', () => {
     tmpDirs.length = 0;
     realFetch = globalThis.fetch;
     safeFetchMock.mockReset().mockImplementation((input, init) => globalThis.fetch(input, init));
-    // Same isolation as above: keep the developer's global settings (and the
-    // default model they configure) out of the execute path. The global layer
-    // resolves via os.homedir(), so HOME must be stubbed too.
-    isolatedHome = mkdtempSync(join(tmpdir(), 'pi-image-gen-home-'));
-    vi.stubEnv('HOME', isolatedHome);
-    vi.stubEnv('PI_AGENT_HOME', isolatedHome);
-    vi.stubEnv('PI_CODING_AGENT_DIR', isolatedHome);
+    // Keep the developer's global settings (and the default model they
+    // configure) out of the execute path.
+    isolatedHome = stubIsolatedHome();
     // Stub (don't assign) so it's auto-reverted after each test — a bare
     // process.env write would leak into other tests sharing this worker.
     vi.stubEnv('OPENAI_API_KEY', 'sk-test');

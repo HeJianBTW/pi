@@ -10,7 +10,18 @@ import type { GenerateImageParams, ImageModelCapabilities } from './types.js';
  * so a retry succeeds on the first attempt — same style as pi-video-gen.
  */
 
-const SIZE_PIXEL_RE = /^(\d{2,5})\s*[x*]\s*(\d{2,5})$/i;
+/** Shared pixel-size matcher ("<w>x<h>" or "<w>*<h>") — also used by the DashScope adapter. */
+export const SIZE_PIXEL_RE = /^(\d{2,5})\s*[x*]\s*(\d{2,5})$/i;
+
+/**
+ * Bound a value echoed into a user-facing validation error. Tool params reach
+ * these messages even from schema-unaware callers, and an unbounded string
+ * would land in the tool result verbatim — same reason image-input never
+ * interpolates raw input values.
+ */
+function echo(value: string): string {
+  return value.length > 40 ? `${value.slice(0, 40)}…` : value;
+}
 
 /** True when the model uses aspectRatio/imageSize instead of a pixel size. */
 export function hasAspectRatioKnob(caps: ImageModelCapabilities): boolean {
@@ -68,13 +79,16 @@ export function capabilitySizeDescription(caps: ImageModelCapabilities): string 
  * form accepts both separators (the DashScope adapter normalizes x → *), and
  * tier/auto tokens come from the capability contract. Semantic bounds (area,
  * ratio, …) are enforced by {@link validateGenerateParams}, not the pattern.
+ * Returns undefined when the contract declares no size semantics at all —
+ * schema and validation must stay equally permissive for such models.
  */
 export function capabilitySizePattern(caps: ImageModelCapabilities): string | undefined {
   if (hasAspectRatioKnob(caps)) return undefined;
+  if (!caps.sizeRange) return undefined;
   const alternatives: string[] = ['[0-9]{2,5}[x*][0-9]{2,5}'];
-  const tiers = caps.sizeRange?.tiers;
+  const tiers = caps.sizeRange.tiers;
   if (tiers?.length) alternatives.push('[0-9]+(\\.[0-9])?K');
-  if (caps.sizeRange?.allowAuto) alternatives.push('auto');
+  if (caps.sizeRange.allowAuto) alternatives.push('auto');
   return `^(${alternatives.join('|')})$`;
 }
 
@@ -134,7 +148,7 @@ export function validateGenerateParams(
     }
     if (params.aspectRatio && !caps.aspectRatios!.includes(params.aspectRatio)) {
       throw new ImageGenError(
-        `aspectRatio must be one of ${caps.aspectRatios!.join(', ')} for ${modelId} (got "${params.aspectRatio}").`,
+        `aspectRatio must be one of ${caps.aspectRatios!.join(', ')} for ${modelId} (got "${echo(params.aspectRatio)}").`,
         'aspectRatio not allowed',
       );
     }
@@ -147,7 +161,7 @@ export function validateGenerateParams(
       }
       if (!caps.imageSizes.includes(params.imageSize)) {
         throw new ImageGenError(
-          `imageSize must be one of ${caps.imageSizes.join(', ')} for ${modelId} (got "${params.imageSize}").`,
+          `imageSize must be one of ${caps.imageSizes.join(', ')} for ${modelId} (got "${echo(params.imageSize)}").`,
           'imageSize not allowed',
         );
       }
@@ -169,7 +183,7 @@ function validateSize(size: string, caps: ImageModelCapabilities, modelId: strin
   if (caps.sizes) {
     if (!caps.sizes.includes(trimmed)) {
       throw new ImageGenError(
-        `size must be one of ${caps.sizes.join(', ')} for ${modelId} (got "${size}").`,
+        `size must be one of ${caps.sizes.join(', ')} for ${modelId} (got "${echo(size)}").`,
         'size not allowed',
       );
     }
@@ -186,7 +200,7 @@ function validateSize(size: string, caps: ImageModelCapabilities, modelId: strin
     if (range.tiers) forms.push(`one of ${range.tiers.join(', ')}`);
     if (range.allowAuto) forms.push('"auto"');
     throw new ImageGenError(
-      `size must be ${forms.join(', ')} for ${modelId} (got "${size}").`,
+      `size must be ${forms.join(', ')} for ${modelId} (got "${echo(size)}").`,
       'size malformed',
     );
   }
@@ -220,4 +234,108 @@ function validateSize(size: string, caps: ImageModelCapabilities, modelId: strin
       'size edge too long',
     );
   }
+}
+
+/**
+ * Shape-check a user-supplied capability declaration (customProviders model
+ * entry). Invalid fields are dropped with a stderr warning rather than
+ * flowing into the tool schema and validators — settings are a trust boundary
+ * (CLAUDE.md), and pi-video-gen enforces the same at settings load. Returns a
+ * clean Partial; valid fields pass through untouched.
+ */
+export function sanitizeCapabilities(
+  explicit: Partial<ImageModelCapabilities>,
+  owner: string,
+): Partial<ImageModelCapabilities> {
+  const clean: Partial<ImageModelCapabilities> = {};
+  const drop = (key: string, value: unknown, rule: string) => {
+    console.error(
+      `[pi-image-gen] ignoring invalid capabilities.${key} for ${owner}: expected ${rule}, got ${JSON.stringify(value)?.slice(0, 80)}`,
+    );
+  };
+  const stringArray = (v: unknown): v is string[] =>
+    Array.isArray(v) && v.every((s) => typeof s === 'string' && s.length > 0);
+
+  for (const [key, value] of Object.entries(explicit)) {
+    if (value === undefined) continue;
+    switch (key) {
+      case 'nMax':
+        if (Number.isInteger(value) && (value as number) >= 1) clean.nMax = value as number;
+        else drop(key, value, 'an integer ≥ 1');
+        break;
+      case 'maxReferenceImages':
+        if (Number.isInteger(value) && (value as number) >= 0)
+          clean.maxReferenceImages = value as number;
+        else drop(key, value, 'an integer ≥ 0');
+        break;
+      case 'inputMaxBytes':
+        if (typeof value === 'number' && Number.isFinite(value) && value > 0)
+          clean.inputMaxBytes = value;
+        else drop(key, value, 'a positive number');
+        break;
+      case 'inputFormats':
+        if (stringArray(value)) clean.inputFormats = value;
+        else drop(key, value, 'an array of format labels');
+        break;
+      case 'sizes':
+        if (stringArray(value)) clean.sizes = value;
+        else drop(key, value, 'an array of size strings');
+        break;
+      case 'aspectRatios':
+        if (stringArray(value)) clean.aspectRatios = value;
+        else drop(key, value, 'an array of aspect ratios');
+        break;
+      case 'imageSizes':
+        if (stringArray(value)) clean.imageSizes = value;
+        else drop(key, value, 'an array of size tiers');
+        break;
+      case 'inputDimAdvice':
+        if (typeof value === 'string' && value.length > 0) clean.inputDimAdvice = value;
+        else drop(key, value, 'a non-empty string');
+        break;
+      case 'sizeRange': {
+        const range = sanitizeSizeRange(value, key, owner, drop);
+        if (range) clean.sizeRange = range;
+        break;
+      }
+      default:
+        drop(key, value, 'a known capabilities field');
+    }
+  }
+  return clean;
+}
+
+function sanitizeSizeRange(
+  value: unknown,
+  key: string,
+  owner: string,
+  drop: (key: string, value: unknown, rule: string) => void,
+): ImageModelCapabilities['sizeRange'] | undefined {
+  if (typeof value !== 'object' || value === null) {
+    drop(key, value, 'a sizeRange object');
+    return undefined;
+  }
+  const raw = value as Record<string, unknown>;
+  const separator = raw.separator === 'x' || raw.separator === '*' ? raw.separator : undefined;
+  const minArea = typeof raw.minArea === 'number' && raw.minArea > 0 ? raw.minArea : undefined;
+  const maxArea = typeof raw.maxArea === 'number' && raw.maxArea > 0 ? raw.maxArea : undefined;
+  if (!separator || minArea == null || maxArea == null || maxArea <= minArea) {
+    console.error(
+      `[pi-image-gen] ignoring invalid capabilities.sizeRange for ${owner}: separator must be "x" or "*" and 0 < minArea < maxArea`,
+    );
+    return undefined;
+  }
+  const range: NonNullable<ImageModelCapabilities['sizeRange']> = { separator, minArea, maxArea };
+  if (typeof raw.minRatio === 'number' && typeof raw.maxRatio === 'number' && raw.minRatio > 0) {
+    range.minRatio = raw.minRatio;
+    range.maxRatio = raw.maxRatio;
+  }
+  if (Array.isArray(raw.tiers) && raw.tiers.every((t) => typeof t === 'string' && t.length > 0)) {
+    range.tiers = raw.tiers as string[];
+  }
+  if (raw.allowAuto === true) range.allowAuto = true;
+  if (typeof raw.divisibleBy === 'number' && raw.divisibleBy > 0)
+    range.divisibleBy = raw.divisibleBy;
+  if (typeof raw.maxEdge === 'number' && raw.maxEdge > 0) range.maxEdge = raw.maxEdge;
+  return range;
 }

@@ -6,6 +6,7 @@ import {
   capabilitySizeDescription,
   capabilitySizePattern,
   hasAspectRatioKnob,
+  hasImageSizeKnob,
   referenceImageDescription,
 } from './capabilities.js';
 import {
@@ -276,9 +277,9 @@ const IMAGE_PARAM_BASE =
  */
 export function buildImageToolParameters(caps: ImageToolCapabilities) {
   const model = caps.model;
-  const aspectRatios = model?.aspectRatios;
-  const imageSizes = model?.imageSizes;
-  const showSize = !aspectRatios?.length;
+  const aspectRatios = model && hasAspectRatioKnob(model) ? model.aspectRatios : undefined;
+  const tieredImageSizes = model && hasImageSizeKnob(model) ? model.imageSizes : undefined;
+  const showSize = !aspectRatios;
   const sizeText = showSize
     ? ((model ? capabilitySizeDescription(model) : null) ?? sizeDescription(caps.api))
     : null;
@@ -300,7 +301,11 @@ export function buildImageToolParameters(caps: ImageToolCapabilities) {
             Type.Number({
               minimum: 1,
               maximum: model?.nMax ?? 8,
-              description: `Number of images. Default 1 (integer, at most ${model?.nMax ?? 8} for the active model).`,
+              // The no-contract fallback keeps the pre-capabilities wording so
+              // the generic schema stays byte-identical to what it was.
+              description: model
+                ? `Number of images. Default 1 (integer, at most ${model.nMax} for the active model).`
+                : 'Number of images. Default 1 (integer).',
             }),
           ),
         }
@@ -317,17 +322,17 @@ export function buildImageToolParameters(caps: ImageToolCapabilities) {
           ),
         }
       : {}),
-    ...(aspectRatios?.length
+    ...(aspectRatios
       ? {
           aspectRatio: Type.Optional(
             StringEnum(aspectRatios, {
               description: 'Aspect ratio for the active model (it has no pixel-size knob).',
             }),
           ),
-          ...((imageSizes?.length ?? 0) > 1
+          ...(tieredImageSizes
             ? {
                 imageSize: Type.Optional(
-                  StringEnum(imageSizes ?? [], {
+                  StringEnum(tieredImageSizes, {
                     description:
                       'Output resolution tier for the active model (uppercase "K"). Omit for the default tier.',
                   }),

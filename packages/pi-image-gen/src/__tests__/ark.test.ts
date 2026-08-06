@@ -59,7 +59,7 @@ describe('ark provider (Volcengine Seedream)', () => {
     expect(result.remoteId).toBe('doubao-seedream-5-0-pro-260628');
   });
 
-  it('text-to-image posts to /images/generations with prompt/n/size as JSON', async () => {
+  it('text-to-image posts to /images/generations with prompt/size as JSON (no n on the wire)', async () => {
     const cwd = mkdtempSync(join(tmpdir(), 'pi-image-gen-ark-'));
     vi.stubEnv('ARK_API_KEY', 'ark-test');
 

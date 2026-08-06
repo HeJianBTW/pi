@@ -1,9 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   capabilitySizeDescription,
   capabilitySizePattern,
   hasImageSizeKnob,
   referenceImageDescription,
+  sanitizeCapabilities,
   validateGenerateParams,
 } from '../capabilities.js';
 import { findBuiltInModel } from '../models.js';
@@ -188,5 +189,86 @@ describe('capability descriptions', () => {
     expect(text).toContain('JPG/JPEG/PNG/BMP/TIFF/WEBP/GIF');
     expect(text).toContain('10MB');
     expect(text).toContain('384 and 2048');
+  });
+
+  it('emits no pattern when the contract declares no size semantics', () => {
+    // A merged generic contract (e.g. a custom model declaring only nMax) must
+    // keep schema and validation equally permissive — a pattern here would
+    // reject free-form sizes that validateSize happily passes.
+    const generic: ImageModelCapabilities = {
+      nMax: 4,
+      maxReferenceImages: 8,
+      inputFormats: ['PNG'],
+      inputMaxBytes: 20 * 1024 * 1024,
+    };
+    expect(capabilitySizePattern(generic)).toBeUndefined();
+    validateGenerateParams({ prompt: 'p', size: 'large' }, generic, 'custom-x');
+  });
+
+  it('bounds values echoed into user-facing validation errors', () => {
+    const huge = '9'.repeat(500);
+    try {
+      validateGenerateParams({ prompt: 'p', size: huge }, QWEN3, 'qwen-image-3.0');
+      throw new Error('expected validation to throw');
+    } catch (error) {
+      const message = (error as Error).message;
+      expect(message).toContain('…');
+      expect(message.length).toBeLessThan(200);
+      expect(message).not.toContain(huge);
+    }
+  });
+});
+
+describe('sanitizeCapabilities', () => {
+  it('drops malformed fields with a stderr warning and keeps the valid ones', () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const clean = sanitizeCapabilities(
+        {
+          nMax: 'six',
+          maxReferenceImages: 2,
+          inputMaxBytes: 0,
+          inputFormats: ['PNG', 7],
+          bogusField: true,
+        } as unknown as Parameters<typeof sanitizeCapabilities>[0],
+        'customProviders.gw model "m"',
+      );
+      expect(clean).toEqual({ maxReferenceImages: 2 });
+      const logged = errSpy.mock.calls.map((c) => String(c[0])).join('\n');
+      expect(logged).toContain('capabilities.nMax');
+      expect(logged).toContain('capabilities.inputMaxBytes');
+      expect(logged).toContain('capabilities.inputFormats');
+      expect(logged).toContain('capabilities.bogusField');
+      expect(logged).toContain('customProviders.gw model "m"');
+    } finally {
+      errSpy.mockRestore();
+    }
+  });
+
+  it('validates sizeRange shape and passes a valid one through', () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      expect(
+        sanitizeCapabilities({ sizeRange: { separator: 'x', minArea: 100 } } as never, 'test')
+          .sizeRange,
+      ).toBeUndefined();
+      const valid = sanitizeCapabilities(
+        {
+          sizeRange: {
+            separator: '*',
+            minArea: 262144,
+            maxArea: 4194304,
+            minRatio: 0.125,
+            maxRatio: 8,
+            tiers: ['2K'],
+          },
+        },
+        'test',
+      );
+      expect(valid.sizeRange?.separator).toBe('*');
+      expect(valid.sizeRange?.tiers).toEqual(['2K']);
+    } finally {
+      errSpy.mockRestore();
+    }
   });
 });

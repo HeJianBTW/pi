@@ -1,3 +1,4 @@
+import { SIZE_PIXEL_RE } from '../capabilities.js';
 import {
   describeNetworkError,
   ImageGenError,
@@ -33,7 +34,9 @@ import { withDefaultPath } from '../url.js';
  * API rejects it with a bare InvalidParameter.
  */
 function normalizeDashScopeSize(size: string): string {
-  return size.trim().replace(/^(\d{2,5})\s*[xX]\s*(\d{2,5})$/, '$1*$2');
+  const trimmed = size.trim();
+  const match = SIZE_PIXEL_RE.exec(trimmed);
+  return match ? `${match[1]}*${match[2]}` : trimmed;
 }
 
 export const dashscopeAdapter: ImageProviderAdapter = {

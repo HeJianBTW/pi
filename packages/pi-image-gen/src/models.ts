@@ -25,6 +25,18 @@ const QWEN_INPUT_FORMATS = ['JPG', 'JPEG', 'PNG', 'BMP', 'TIFF', 'WEBP', 'GIF'];
 const SEEDREAM_INPUT_FORMATS = ['JPEG', 'PNG', 'WEBP', 'BMP', 'TIFF', 'GIF', 'HEIC', 'HEIF'];
 const GEMINI_INPUT_FORMATS = ['PNG', 'JPEG', 'WEBP', 'HEIC', 'HEIF'];
 
+// Contract fragments shared by sibling entries.
+const SEEDREAM_DIM_ADVICE =
+  'reference images: each dimension > 14 px, aspect ratio 1/16–16, total pixels ≤ 6000x6000';
+const QWEN3_SIZE_RANGE: NonNullable<ImageModelCapabilities['sizeRange']> = {
+  // 3.0 adds a hard 1:8–8:1 aspect-ratio cap; size omitted = model picks.
+  separator: '*',
+  minArea: 512 * 512,
+  maxArea: 2048 * 2048,
+  minRatio: 1 / 8,
+  maxRatio: 8,
+};
+
 const MB = 1024 * 1024;
 
 // Gemini aspect-ratio vocabularies per https://ai.google.dev/gemini-api/docs/image-generation
@@ -153,14 +165,7 @@ export const BUILT_IN_MODELS: BuiltInModelEntry[] = [
     id: 'qwen-image-3.0-pro',
     provider: 'dashscope',
     capabilities: {
-      // 3.0 adds a hard 1:8–8:1 aspect-ratio cap; size omitted = model picks.
-      sizeRange: {
-        separator: '*',
-        minArea: 512 * 512,
-        maxArea: 2048 * 2048,
-        minRatio: 1 / 8,
-        maxRatio: 8,
-      },
+      sizeRange: QWEN3_SIZE_RANGE,
       nMax: 6,
       maxReferenceImages: 3,
       inputFormats: QWEN_INPUT_FORMATS,
@@ -172,13 +177,7 @@ export const BUILT_IN_MODELS: BuiltInModelEntry[] = [
     id: 'qwen-image-3.0',
     provider: 'dashscope',
     capabilities: {
-      sizeRange: {
-        separator: '*',
-        minArea: 512 * 512,
-        maxArea: 2048 * 2048,
-        minRatio: 1 / 8,
-        maxRatio: 8,
-      },
+      sizeRange: QWEN3_SIZE_RANGE,
       nMax: 6,
       maxReferenceImages: 3,
       inputFormats: QWEN_INPUT_FORMATS,
@@ -239,8 +238,7 @@ export const BUILT_IN_MODELS: BuiltInModelEntry[] = [
       maxReferenceImages: 10,
       inputFormats: SEEDREAM_INPUT_FORMATS,
       inputMaxBytes: 30 * MB,
-      inputDimAdvice:
-        'reference images: each dimension > 14 px, aspect ratio 1/16–16, total pixels ≤ 6000x6000',
+      inputDimAdvice: SEEDREAM_DIM_ADVICE,
     },
   },
   {
@@ -261,8 +259,7 @@ export const BUILT_IN_MODELS: BuiltInModelEntry[] = [
       maxReferenceImages: 14,
       inputFormats: SEEDREAM_INPUT_FORMATS,
       inputMaxBytes: 30 * MB,
-      inputDimAdvice:
-        'reference images: each dimension > 14 px, aspect ratio 1/16–16, total pixels ≤ 6000x6000',
+      inputDimAdvice: SEEDREAM_DIM_ADVICE,
     },
   },
   {
@@ -282,8 +279,7 @@ export const BUILT_IN_MODELS: BuiltInModelEntry[] = [
       maxReferenceImages: 14,
       inputFormats: SEEDREAM_INPUT_FORMATS,
       inputMaxBytes: 30 * MB,
-      inputDimAdvice:
-        'reference images: each dimension > 14 px, aspect ratio 1/16–16, total pixels ≤ 6000x6000',
+      inputDimAdvice: SEEDREAM_DIM_ADVICE,
     },
   },
   {
@@ -304,8 +300,7 @@ export const BUILT_IN_MODELS: BuiltInModelEntry[] = [
       maxReferenceImages: 14,
       inputFormats: SEEDREAM_INPUT_FORMATS,
       inputMaxBytes: 30 * MB,
-      inputDimAdvice:
-        'reference images: each dimension > 14 px, aspect ratio 1/16–16, total pixels ≤ 6000x6000',
+      inputDimAdvice: SEEDREAM_DIM_ADVICE,
     },
   },
 ];

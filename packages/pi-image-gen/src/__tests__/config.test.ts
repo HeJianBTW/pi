@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { resolveModel } from '../config.js';
 import type { ImageGenSettings } from '../types.js';
 
@@ -247,6 +247,37 @@ describe('resolveModel — capability attachment', () => {
     expect(result.capabilities?.nMax).toBe(4);
     expect(result.capabilities?.maxReferenceImages).toBe(8);
     expect(result.capabilities?.inputMaxBytes).toBe(20 * 1024 * 1024);
+  });
+
+  it('drops malformed capability fields instead of letting them reach the schema', () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const settings: ImageGenSettings = {
+        customProviders: {
+          gateway: {
+            api: 'openai',
+            baseUrl: 'https://gateway.example/v1',
+            apiKey: 'k',
+            models: [
+              {
+                id: 'my-finetune',
+                capabilities: { nMax: 'six', maxReferenceImages: 2 } as never,
+              },
+            ],
+          },
+        },
+      };
+      const result = resolveModel('my-finetune', settings);
+      if ('error' in result) throw new Error(result.error);
+      // The valid field wins; the malformed one falls back to the generic contract.
+      expect(result.capabilities?.maxReferenceImages).toBe(2);
+      expect(result.capabilities?.nMax).toBe(8);
+      const logged = errSpy.mock.calls.map((c) => String(c[0])).join('\n');
+      expect(logged).toContain('[pi-image-gen]');
+      expect(logged).toContain('capabilities.nMax');
+    } finally {
+      errSpy.mockRestore();
+    }
   });
 
   it('leaves capabilities undefined for unknown custom models and slash routes', () => {
