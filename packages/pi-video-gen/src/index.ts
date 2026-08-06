@@ -12,6 +12,7 @@ import {
 import { Type } from 'typebox';
 import { runCompose } from './compose.js';
 import {
+  DEFAULT_VIDEO_MODEL_ID,
   listModelRegistry,
   loadVideoGenSettings,
   resolveModel,
@@ -47,6 +48,7 @@ import {
 import { arkAdapter } from './providers/ark.js';
 import { dashscopeAdapter } from './providers/dashscope.js';
 import { klingAdapter } from './providers/kling.js';
+import { minimaxAdapter } from './providers/minimax.js';
 import { newapiAdapter } from './providers/newapi.js';
 import { openrouterAdapter } from './providers/openrouter.js';
 import { requestFingerprint } from './providers/request.js';
@@ -69,6 +71,7 @@ const ADAPTERS: Partial<Record<VideoApiStyle, VideoProviderAdapter>> = {
   ark: arkAdapter,
   dashscope: dashscopeAdapter,
   kling: klingAdapter,
+  minimax: minimaxAdapter,
   newapi: newapiAdapter,
   openrouter: openrouterAdapter,
 };
@@ -77,6 +80,7 @@ const ENV_VAR_BY_STYLE: Record<VideoApiStyle, string> = {
   ark: 'ARK_API_KEY',
   dashscope: 'DASHSCOPE_API_KEY',
   kling: 'KLING_API_KEY',
+  minimax: 'MINIMAX_API_KEY',
   newapi: 'NEWAPI_API_KEY',
   openrouter: 'OPENROUTER_API_KEY',
 };
@@ -232,7 +236,7 @@ export default function piVideoGenExtension(pi: ExtensionAPI): void {
     const resolved = resolveModel(settings);
     if (!resolved) {
       return errResult(
-        `Cannot resolve model "${settings.defaultModel ?? 'seedance'}" against the built-in registry. Run /video-gen models to see available ids and aliases, or fix "pi-video-gen.defaultModel" in settings.`,
+        `Cannot resolve model "${settings.defaultModel ?? DEFAULT_VIDEO_MODEL_ID}" against the built-in registry. Run /video-gen models to see available ids and aliases, or fix "pi-video-gen.defaultModel" in settings.`,
       );
     }
     const caps = resolved.entry.capabilities;
@@ -668,7 +672,7 @@ export default function piVideoGenExtension(pi: ExtensionAPI): void {
       const resolved = resolveModel(settings);
       if (!resolved) {
         return errResult(
-          `Cannot resolve model "${settings.defaultModel ?? 'seedance'}". Run /video-gen models, or fix pi-video-gen.defaultModel.`,
+          `Cannot resolve model "${settings.defaultModel ?? DEFAULT_VIDEO_MODEL_ID}". Run /video-gen models, or fix pi-video-gen.defaultModel.`,
         );
       }
       const adapter = ADAPTERS[resolved.provider.style];
@@ -1081,7 +1085,7 @@ export default function piVideoGenExtension(pi: ExtensionAPI): void {
     const resolved = resolveModel(settings);
     if (!resolved) {
       checks.push(
-        `❌ defaultModel "${settings.defaultModel ?? 'seedance'}" not in registry — fix pi-video-gen.defaultModel`,
+        `❌ defaultModel "${settings.defaultModel ?? DEFAULT_VIDEO_MODEL_ID}" not in registry — fix pi-video-gen.defaultModel`,
       );
     } else {
       const label = providerLabel(resolved.provider.style);
