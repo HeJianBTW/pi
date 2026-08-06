@@ -183,7 +183,10 @@ function sanitizeSchemaNode(node: unknown): unknown {
   if (Array.isArray(node)) return node.map(sanitizeSchemaNode);
   if (node === null || typeof node !== 'object') return node;
 
-  const result: Record<string, unknown> = {};
+  // Null-prototype copy: a schema from the wire may carry an own "__proto__"
+  // key (JSON.parse creates one), and assigning it on a plain object would hit
+  // the inherited setter — dropping the key and replacing the copy's prototype.
+  const result: Record<string, unknown> = Object.create(null);
   for (const [key, value] of Object.entries(node)) {
     result[key] = sanitizeSchemaValue(key, value);
   }
@@ -214,7 +217,7 @@ function sanitizeSchemaNode(node: unknown): unknown {
 function sanitizeSchemaValue(key: string, value: unknown): unknown {
   if (NON_SCHEMA_KEYS.has(key)) return value;
   if (PROPERTY_MAP_KEYS.has(key) && isRecord(value)) {
-    const map: Record<string, unknown> = {};
+    const map: Record<string, unknown> = Object.create(null);
     for (const [name, subschema] of Object.entries(value)) {
       map[name] = sanitizeSchemaNode(subschema);
     }
