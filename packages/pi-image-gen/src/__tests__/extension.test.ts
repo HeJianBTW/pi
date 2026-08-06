@@ -10,7 +10,12 @@ import piImageGenExtension, {
   resolveImageToolCapabilities,
   sizeDescription,
 } from '../index.js';
+import { findBuiltInModel } from '../models.js';
 import type { ImageGenSettings } from '../types.js';
+
+const geminiCaps = findBuiltInModel('gemini-3-pro-image')!.capabilities!;
+const qwenCaps = findBuiltInModel('qwen-image-3.0')!.capabilities!;
+const seedreamCaps = findBuiltInModel('doubao-seedream-5-0-260128')!.capabilities!;
 
 const { safeFetchMock } = vi.hoisted(() => ({ safeFetchMock: vi.fn() }));
 
@@ -58,11 +63,28 @@ async function startSession(handlers: Map<string, Handler>, cwd = '/tmp') {
 function caps(
   api: ImageToolCapabilities['api'],
   quality: readonly string[] | null,
+  model: ImageToolCapabilities['model'] = null,
 ): ImageToolCapabilities {
-  return { api, quality };
+  return { api, quality, model };
 }
 
 describe('piImageGenExtension', () => {
+  // Isolate the global/agent-dir settings layers: the developer's real
+  // ~/.pi/agent/settings.json would otherwise leak a configured defaultModel
+  // into these tests and shape the registered schema. loadPiSettings reads the
+  // global layer via os.homedir(), so HOME must be stubbed too.
+  let isolatedHome = '';
+  beforeEach(() => {
+    isolatedHome = mkdtempSync(join(tmpdir(), 'pi-image-gen-home-'));
+    vi.stubEnv('HOME', isolatedHome);
+    vi.stubEnv('PI_AGENT_HOME', isolatedHome);
+    vi.stubEnv('PI_CODING_AGENT_DIR', isolatedHome);
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    rmSync(isolatedHome, { recursive: true, force: true });
+  });
+
   it('registers the /image-gen command at factory time', () => {
     const { commands } = setup();
     expect(commands.has('image-gen')).toBe(true);
@@ -213,6 +235,47 @@ describe('resolveImageToolCapabilities', () => {
     expect(c.quality).toEqual(QUALITY_VALUES);
     expect(c.api).toBeNull();
   });
+
+  it('attaches the registry contract for built-in models', () => {
+    vi.stubEnv('DASHSCOPE_API_KEY', 'ds-test');
+    vi.stubEnv('GEMINI_API_KEY', 'gem-test');
+    const qwen = resolveImageToolCapabilities({ defaultModel: 'qwen-image-3.0' });
+    expect(qwen.model?.sizeRange?.separator).toBe('*');
+    const gemini = resolveImageToolCapabilities({ defaultModel: 'nano-banana-pro' });
+    expect(gemini.model?.aspectRatios).toContain('16:9');
+  });
+
+  it('keeps the generic schema (model null) for custom models without a contract', () => {
+    const settings: ImageGenSettings = {
+      defaultModel: 'my-model',
+      customProviders: {
+        gateway: {
+          api: 'openai',
+          baseUrl: 'https://gateway.example/v1',
+          apiKey: 'k',
+          models: ['my-model'],
+        },
+      },
+    };
+    expect(resolveImageToolCapabilities(settings).model).toBeNull();
+  });
+
+  it('inherits the registry contract for a custom model naming a built-in id', () => {
+    const settings: ImageGenSettings = {
+      defaultModel: 'qwen-image-3.0',
+      customProviders: {
+        gateway: {
+          api: 'dashscope',
+          baseUrl: 'https://gateway.example/v1',
+          apiKey: 'k',
+          models: ['qwen-image-3.0'],
+        },
+      },
+    };
+    const c = resolveImageToolCapabilities(settings);
+    expect(c.api).toBe('dashscope');
+    expect(c.model?.sizeRange?.separator).toBe('*');
+  });
 });
 
 describe('buildImageToolParameters', () => {
@@ -246,6 +309,80 @@ describe('buildImageToolParameters', () => {
       }
     }
   });
+
+  it('gemini-style models swap size for aspectRatio (+imageSize when tiered)', () => {
+    const pro = buildImageToolParameters(caps('gemini', null, geminiCaps)).properties as Record<
+      string,
+      { enum?: unknown[] }
+    >;
+    expect(pro).not.toHaveProperty('size');
+    expect(pro.aspectRatio?.enum).toContain('16:9');
+    expect(pro.imageSize?.enum).toEqual(['1K', '2K', '4K']);
+
+    // A single-tier model hides imageSize; a tier-less model hides both.
+    const lite = buildImageToolParameters(
+      caps('gemini', null, { ...geminiCaps, imageSizes: ['1K'] }),
+    ).properties as Record<string, unknown>;
+    expect(lite).not.toHaveProperty('imageSize');
+    // Destructure the tier list away — exactOptionalPropertyTypes forbids an
+    // explicit `imageSizes: undefined` in the object literal.
+    const { imageSizes: _tiers, ...geminiWithoutTiers } = geminiCaps;
+    const fixed = buildImageToolParameters(caps('gemini', null, geminiWithoutTiers))
+      .properties as Record<string, unknown>;
+    expect(fixed).not.toHaveProperty('imageSize');
+    expect(fixed).toHaveProperty('aspectRatio');
+  });
+
+  it('caps n per model and hides it when the model has no count knob', () => {
+    const qwen = buildImageToolParameters(caps('dashscope', null, qwenCaps)).properties as Record<
+      string,
+      { maximum?: number }
+    >;
+    expect(qwen.n?.maximum).toBe(6);
+
+    const seedream = buildImageToolParameters(caps('ark', null, seedreamCaps)).properties as Record<
+      string,
+      unknown
+    >;
+    expect(seedream).not.toHaveProperty('n');
+  });
+
+  it('drives the size schema from the model contract', () => {
+    // qwen: pattern accepts the asterisk form, description spells out bounds.
+    const qwen = buildImageToolParameters(caps('dashscope', null, qwenCaps)).properties as Record<
+      string,
+      { pattern?: string; description?: string }
+    >;
+    expect(new RegExp(qwen.size?.pattern ?? '').test('2048*2048')).toBe(true);
+    expect(qwen.size?.description).toContain('<width>*<height>');
+
+    // discrete list → string enum.
+    const fixed = buildImageToolParameters(
+      caps('openai', null, {
+        sizes: ['1024x1024', '1792x1024'],
+        nMax: 1,
+        maxReferenceImages: 0,
+        inputFormats: ['PNG'],
+        inputMaxBytes: 4 * 1024 * 1024,
+      }),
+    ).properties as Record<string, { enum?: unknown[] }>;
+    expect(fixed.size?.enum).toEqual(['1024x1024', '1792x1024']);
+  });
+
+  it('spells out the reference-image contract in the image description', () => {
+    const props = buildImageToolParameters(caps('dashscope', null, qwenCaps)).properties as Record<
+      string,
+      { description?: string }
+    >;
+    expect(props.image?.description).toContain('JPG/JPEG/PNG/BMP/TIFF/WEBP/GIF');
+    expect(props.image?.description).toContain('at most 3');
+    // The fallback schema keeps the generic description.
+    const generic = buildImageToolParameters(caps(null, QUALITY_VALUES)).properties as Record<
+      string,
+      { description?: string }
+    >;
+    expect(generic.image?.description).not.toContain('at most');
+  });
 });
 
 describe('sizeDescription', () => {
@@ -272,6 +409,7 @@ describe('image_generate execute error surfaces are sanitized', () => {
   ).toString('base64');
   const tmpDirs: string[] = [];
   let realFetch: typeof fetch;
+  let isolatedHome = '';
 
   const makeProject = (settings: ImageGenSettings): string => {
     const dir = mkdtempSync(join(tmpdir(), 'pi-image-gen-execute-'));
@@ -298,6 +436,13 @@ describe('image_generate execute error surfaces are sanitized', () => {
     tmpDirs.length = 0;
     realFetch = globalThis.fetch;
     safeFetchMock.mockReset().mockImplementation((input, init) => globalThis.fetch(input, init));
+    // Same isolation as above: keep the developer's global settings (and the
+    // default model they configure) out of the execute path. The global layer
+    // resolves via os.homedir(), so HOME must be stubbed too.
+    isolatedHome = mkdtempSync(join(tmpdir(), 'pi-image-gen-home-'));
+    vi.stubEnv('HOME', isolatedHome);
+    vi.stubEnv('PI_AGENT_HOME', isolatedHome);
+    vi.stubEnv('PI_CODING_AGENT_DIR', isolatedHome);
     // Stub (don't assign) so it's auto-reverted after each test — a bare
     // process.env write would leak into other tests sharing this worker.
     vi.stubEnv('OPENAI_API_KEY', 'sk-test');
@@ -306,6 +451,8 @@ describe('image_generate execute error surfaces are sanitized', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
     globalThis.fetch = realFetch;
+    if (isolatedHome) rmSync(isolatedHome, { recursive: true, force: true });
+    isolatedHome = '';
     for (const dir of tmpDirs) rmSync(dir, { recursive: true, force: true });
     tmpDirs.length = 0;
   });
@@ -467,5 +614,15 @@ describe('buildImageGuidelines', () => {
       expect(text).toMatch(/icon|logo|svg/i);
       expect(text).toMatch(/\bn\b/);
     }
+  });
+
+  it('guides gemini-style models toward aspectRatio and drops n talk when n is hidden', () => {
+    const gemini = buildImageGuidelines(caps('gemini', null, geminiCaps)).join('\n');
+    expect(gemini).toContain('aspectRatio');
+    expect(gemini).toMatch(/no pixel-`size` knob/);
+
+    const seedream = buildImageGuidelines(caps('ark', null, seedreamCaps)).join('\n');
+    expect(seedream).not.toMatch(/`n` produces variants/);
+    expect(seedream).not.toContain('aspectRatio');
   });
 });

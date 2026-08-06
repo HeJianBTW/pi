@@ -3,6 +3,12 @@ import { StringEnum } from '@earendil-works/pi-ai';
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
 import {
+  capabilitySizeDescription,
+  capabilitySizePattern,
+  hasAspectRatioKnob,
+  referenceImageDescription,
+} from './capabilities.js';
+import {
   listConfiguredProviders,
   listKnownModelIds,
   loadImageGenSettings,
@@ -10,7 +16,13 @@ import {
 } from './config.js';
 import { errorMessageForUser, toLogSummary } from './errors.js';
 import { generateImage } from './generate.js';
-import type { ApiStyle, GenerateImageParams, ImageGenResult, ImageGenSettings } from './types.js';
+import type {
+  ApiStyle,
+  GenerateImageParams,
+  ImageGenResult,
+  ImageGenSettings,
+  ImageModelCapabilities,
+} from './types.js';
 
 export { loadImageGenSettings, resolveModel } from './config.js';
 export { errorMessageForUser, toLogSummary } from './errors.js';
@@ -33,6 +45,13 @@ export interface ImageToolCapabilities {
   api: ApiStyle | null;
   /** Allowed `quality` enum values, or null to omit `quality` from the schema entirely. */
   quality: readonly string[] | null;
+  /**
+   * Active model's capability contract — drives which of size/aspectRatio/
+   * imageSize/n appear and with what enums, patterns, and descriptions. Null
+   * (unset/unresolvable model, or a custom model with no contract) yields the
+   * fully-generic fallback schema.
+   */
+  model: ImageModelCapabilities | null;
 }
 
 export default function piImageGenExtension(pi: ExtensionAPI): void {
@@ -214,18 +233,22 @@ function honorsGptImageQuality(api: ApiStyle, remoteId: string): boolean {
  */
 export function resolveImageToolCapabilities(settings: ImageGenSettings): ImageToolCapabilities {
   const defaultModel = settings.defaultModel?.trim();
-  if (!defaultModel) return { api: null, quality: QUALITY_VALUES };
+  if (!defaultModel) return { api: null, quality: QUALITY_VALUES, model: null };
   const resolved = resolveModel(defaultModel, settings);
-  if ('error' in resolved) return { api: null, quality: QUALITY_VALUES };
+  if ('error' in resolved) return { api: null, quality: QUALITY_VALUES, model: null };
   const { provider } = resolved;
   const quality =
     provider.builtIn && honorsGptImageQuality(provider.api, resolved.remoteId)
       ? QUALITY_VALUES
       : null;
-  return { api: provider.api, quality };
+  return { api: provider.api, quality, model: resolved.capabilities ?? null };
 }
 
-/** Provider-tailored description for the `size` parameter. */
+/**
+ * Fallback description for the `size` parameter when the active model has no
+ * capability contract (custom providers without a registry match). Models
+ * with a contract get a precise description from {@link capabilitySizeDescription}.
+ */
 export function sizeDescription(api: ApiStyle | null): string {
   if (api === 'ark') {
     return 'Image size such as "2048x2048". Seedream 5.0 / 5.0-lite / 4.5 require 2K or larger — "1024x1024" fails with InvalidParameter; only Seedream 4.0 accepts 1K sizes.';
@@ -233,31 +256,86 @@ export function sizeDescription(api: ApiStyle | null): string {
   return 'Image size hint such as "1024x1024". Provider-specific; ignored if unsupported.';
 }
 
+/** Capability-independent part of the `image` parameter description. */
+const IMAGE_PARAM_BASE =
+  'Optional reference image(s) for image-to-image / edit / style transfer / character preservation. Each entry MUST be either (a) a regular image file inside the session cwd — absolute or relative — or (b) a public http(s) URL. Symlinks, Base64 strings, and data: URIs are rejected; write raw image bytes to a file under cwd first. For a single image pass ["path"]. Multi-image conditioning is supported by OpenAI gpt-image-2, Gemini, and Qwen sync models. To iterate on a previous output inside cwd, pass that file path here.';
+
 /**
  * Build the `image_generate` parameter schema for the resolved capabilities.
- * The invariant params are always present; `quality` is a constrained string
- * enum included only when {@link resolveImageToolCapabilities} says the active
- * provider honors it, and `size` carries a provider-tailored description.
+ * The invariant params are always present; everything else is shaped by the
+ * active model's contract so the LLM never sees a knob the provider would
+ * reject or silently ignore:
+ * - `size` carries the model's exact form (enum / pattern + description) and
+ *   is hidden entirely for Gemini-style aspect-ratio models;
+ * - `aspectRatio` / `imageSize` appear only for models that honor them
+ *   (imageSize only when more than one tier exists);
+ * - `n` is capped per model and hidden for models with no count knob;
+ * - `image` spells out the model's reference-image contract;
+ * - `quality` appears only when {@link resolveImageToolCapabilities} says the
+ *   active provider honors it.
  */
 export function buildImageToolParameters(caps: ImageToolCapabilities) {
+  const model = caps.model;
+  const aspectRatios = model?.aspectRatios;
+  const imageSizes = model?.imageSizes;
+  const showSize = !aspectRatios?.length;
+  const sizeText = showSize
+    ? ((model ? capabilitySizeDescription(model) : null) ?? sizeDescription(caps.api))
+    : null;
+  const sizePattern = model ? capabilitySizePattern(model) : undefined;
   return Type.Object({
     prompt: Type.String({
       description: 'Text prompt describing what to generate or how to edit.',
     }),
     image: Type.Optional(
       Type.Array(Type.String(), {
-        description:
-          'Optional reference image(s) for image-to-image / edit / style transfer / character preservation. Each entry MUST be either (a) a regular image file inside the session cwd — absolute or relative — or (b) a public http(s) URL. Symlinks, Base64 strings, and data: URIs are rejected; write raw image bytes to a file under cwd first. For a single image pass ["path"]. Multi-image conditioning is supported by OpenAI gpt-image-2, Gemini, and Qwen sync models. To iterate on a previous output inside cwd, pass that file path here.',
+        description: model
+          ? `${IMAGE_PARAM_BASE} ${referenceImageDescription(model)}`
+          : IMAGE_PARAM_BASE,
       }),
     ),
-    n: Type.Optional(
-      Type.Number({
-        minimum: 1,
-        maximum: 8,
-        description: 'Number of images. Default 1 (integer).',
-      }),
-    ),
-    size: Type.Optional(Type.String({ description: sizeDescription(caps.api) })),
+    ...(!model || model.nMax > 1
+      ? {
+          n: Type.Optional(
+            Type.Number({
+              minimum: 1,
+              maximum: model?.nMax ?? 8,
+              description: `Number of images. Default 1 (integer, at most ${model?.nMax ?? 8} for the active model).`,
+            }),
+          ),
+        }
+      : {}),
+    ...(showSize && sizeText
+      ? {
+          size: Type.Optional(
+            model?.sizes
+              ? StringEnum(model.sizes, { description: sizeText })
+              : Type.String({
+                  description: sizeText,
+                  ...(sizePattern ? { pattern: sizePattern } : {}),
+                }),
+          ),
+        }
+      : {}),
+    ...(aspectRatios?.length
+      ? {
+          aspectRatio: Type.Optional(
+            StringEnum(aspectRatios, {
+              description: 'Aspect ratio for the active model (it has no pixel-size knob).',
+            }),
+          ),
+          ...((imageSizes?.length ?? 0) > 1
+            ? {
+                imageSize: Type.Optional(
+                  StringEnum(imageSizes ?? [], {
+                    description:
+                      'Output resolution tier for the active model (uppercase "K"). Omit for the default tier.',
+                  }),
+                ),
+              }
+            : {}),
+        }
+      : {}),
     ...(caps.quality
       ? {
           quality: Type.Optional(
@@ -285,10 +363,15 @@ export function buildImageToolParameters(caps: ImageToolCapabilities) {
  * model cannot use.
  */
 export function buildImageGuidelines(caps: ImageToolCapabilities): string[] {
+  const showN = !caps.model || caps.model.nMax > 1;
   const guidelines = [
     'Use image_generate for bitmap assets: photos, illustrations, textures, sprites, product/UI mockups, concept art. Do NOT use it for icons, logos, or diagrams that should match existing repo-native SVG/vector/CSS/canvas assets — edit or write those directly instead.',
     'Generate vs edit: with no `image`, or when `image` entries are only style/composition/mood references, this is a fresh generation. To modify an existing image while preserving most of it, pass that image and describe the change as an edit.',
-    '`n` produces variants of ONE prompt, not distinct assets. For several different assets, make one image_generate call per asset with its own prompt (do not raise `n` to cover distinct subjects).',
+    ...(showN
+      ? [
+          '`n` produces variants of ONE prompt, not distinct assets. For several different assets, make one image_generate call per asset with its own prompt (do not raise `n` to cover distinct subjects).',
+        ]
+      : []),
     'For edits and multi-image conditioning, label each reference by role (e.g. "Image 1: edit target; Image 2: style reference") and restate invariants every iteration ("change only X; keep Y unchanged") to reduce drift.',
     'For text inside an image, quote the exact string verbatim and specify placement; spell uncommon words letter-by-letter when accuracy matters.',
   ];
@@ -297,6 +380,11 @@ export function buildImageGuidelines(caps: ImageToolCapabilities): string[] {
       ? 'Prefer one targeted change per iteration over rewriting the whole prompt. Use `quality: "low"` for fast drafts and a higher `quality` for final assets or dense text.'
       : 'Prefer one targeted change per iteration over rewriting the whole prompt.',
   );
+  if (caps.model && hasAspectRatioKnob(caps.model)) {
+    guidelines.push(
+      'The active model has no pixel-`size` knob — set `aspectRatio` (and `imageSize` where offered) instead; passing `size` is rejected.',
+    );
+  }
   guidelines.push(
     'The active model is fixed in settings — there is no `model` parameter. If generation fails on model/size, run /image-gen list and tell the user which knob (defaultModel or size) to adjust.',
   );

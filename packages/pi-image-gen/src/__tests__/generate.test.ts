@@ -685,4 +685,73 @@ describe('generateImage', () => {
     expect(refs).toHaveLength(1);
     expect(refs[0]?.image_url.url.startsWith('data:image/png;base64,')).toBe(true);
   });
+
+  it('rejects an out-of-contract size before any provider call', async () => {
+    const cwd = makeTmpDir();
+    vi.stubEnv('DASHSCOPE_API_KEY', 'ds-test');
+    const settings: ImageGenSettings = { defaultModel: 'qwen-image-3.0' };
+    const fetchImpl = vi.fn() as unknown as typeof fetch;
+
+    await expect(
+      generateImage({ prompt: 'p', size: '256*256' }, { cwd, settings, fetchImpl }),
+    ).rejects.toThrow(/between 262144 and 4194304/);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('rejects a pixel size on gemini-style models before any provider call', async () => {
+    const cwd = makeTmpDir();
+    vi.stubEnv('GEMINI_API_KEY', 'gem-test');
+    const settings: ImageGenSettings = { defaultModel: 'nano-banana-pro' };
+    const fetchImpl = vi.fn() as unknown as typeof fetch;
+
+    await expect(
+      generateImage({ prompt: 'p', size: '1024x1024' }, { cwd, settings, fetchImpl }),
+    ).rejects.toThrow(/no pixel-size knob/);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('rejects n above the model ceiling before any provider call', async () => {
+    const cwd = makeTmpDir();
+    vi.stubEnv('DASHSCOPE_API_KEY', 'ds-test');
+    const settings: ImageGenSettings = { defaultModel: 'qwen-image-3.0' };
+    const fetchImpl = vi.fn() as unknown as typeof fetch;
+
+    await expect(
+      generateImage({ prompt: 'p', n: 7 }, { cwd, settings, fetchImpl }),
+    ).rejects.toThrow(/at most 6/);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('rejects too many reference images before reading any of them', async () => {
+    const cwd = makeTmpDir();
+    vi.stubEnv('DASHSCOPE_API_KEY', 'ds-test');
+    const settings: ImageGenSettings = { defaultModel: 'qwen-image-3.0' };
+    const fetchImpl = vi.fn() as unknown as typeof fetch;
+
+    await expect(
+      generateImage(
+        // Paths need not exist — the count check fires before resolution.
+        { prompt: 'p', image: ['a.png', 'b.png', 'c.png', 'd.png'] },
+        { cwd, settings, fetchImpl },
+      ),
+    ).rejects.toThrow(/at most 3/);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('rejects a reference format the active model does not accept', async () => {
+    const cwd = makeTmpDir();
+    vi.stubEnv('OPENAI_API_KEY', 'sk-test');
+    const settings: ImageGenSettings = { defaultModel: 'gpt-image-2' };
+    const fetchImpl = vi.fn() as unknown as typeof fetch;
+    // gpt-image-2 takes png/webp/jpg — a GIF reference must fail pre-flight.
+    writeFileSync(
+      join(cwd, 'anim.gif'),
+      Buffer.concat([Buffer.from([0x47, 0x49, 0x46, 0x38, 0x39, 0x61]), Buffer.alloc(20)]),
+    );
+
+    await expect(
+      generateImage({ prompt: 'p', image: ['anim.gif'] }, { cwd, settings, fetchImpl }),
+    ).rejects.toThrow(/does not accept/);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
 });

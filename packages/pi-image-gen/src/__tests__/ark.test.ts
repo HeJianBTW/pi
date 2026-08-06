@@ -78,7 +78,8 @@ describe('ark provider (Volcengine Seedream)', () => {
 
     const result = await generateImage(
       // `quality` is passed but Seedream has no such knob — assert it's dropped.
-      { prompt: '一只猫', size: '1024x1024', quality: 'high', filename: 'cat' },
+      // Seedream 5.0's 2K floor makes 1024x1024 invalid — use 2048x2048.
+      { prompt: '一只猫', size: '2048x2048', quality: 'high', filename: 'cat' },
       {
         cwd,
         settings: { defaultModel: 'seedream' },
@@ -94,7 +95,7 @@ describe('ark provider (Volcengine Seedream)', () => {
       model: 'doubao-seedream-5-0-260128',
       prompt: '一只猫',
       n: 1,
-      size: '1024x1024',
+      size: '2048x2048',
     });
     expect(calls[0]?.body.image).toBeUndefined();
     expect(calls[0]?.body.quality).toBeUndefined();

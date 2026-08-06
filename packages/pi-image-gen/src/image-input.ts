@@ -11,7 +11,42 @@ const MAGIC_BYTES: Array<{ mimeType: string; bytes: number[] }> = [
   { mimeType: 'image/gif', bytes: [0x47, 0x49, 0x46, 0x38] },
   // WebP: "RIFF....WEBP" — bytes 0..3 = RIFF, bytes 8..11 = WEBP
   { mimeType: 'image/webp', bytes: [0x52, 0x49, 0x46, 0x46] },
+  { mimeType: 'image/bmp', bytes: [0x42, 0x4d] },
+  // TIFF little-endian ("II*\0") and big-endian ("MM\0*")
+  { mimeType: 'image/tiff', bytes: [0x49, 0x49, 0x2a, 0x00] },
+  { mimeType: 'image/tiff', bytes: [0x4d, 0x4d, 0x00, 0x2a] },
 ];
+
+// ISO-BMFF major brands (bytes 8..11 of the ftyp box) → HEIC/HEIF family.
+// qwen/seedream/gemini all accept these as reference-image formats.
+const FTYP_BRAND_MIME: Record<string, string> = {
+  heic: 'image/heic',
+  heix: 'image/heic',
+  hevc: 'image/heic',
+  hevx: 'image/heic',
+  mif1: 'image/heif',
+  msf1: 'image/heif',
+};
+
+/** Sniffed MIME type → the display label used by capability inputFormats. */
+export const MIME_FORMAT_LABEL: Record<string, string> = {
+  'image/png': 'PNG',
+  'image/jpeg': 'JPEG',
+  'image/gif': 'GIF',
+  'image/webp': 'WEBP',
+  'image/bmp': 'BMP',
+  'image/tiff': 'TIFF',
+  'image/heic': 'HEIC',
+  'image/heif': 'HEIF',
+};
+
+/** Per-model reference-image constraints, from the capability contract. */
+export type ImageInputLimits = {
+  /** Allowed format labels (e.g. "PNG"); undefined = any sniffable image. */
+  formats?: string[];
+  /** Per-image byte ceiling; defaults to MAX_IMAGE_BYTES. */
+  maxBytes?: number;
+};
 
 const DATA_URI_RE = /^data:(image\/[a-z+.-]+);base64,(.+)$/i;
 export const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
@@ -23,14 +58,31 @@ export async function resolveImageInputs(
   cwd: string,
   fetchImpl: (input: string | URL, init?: RequestInit) => Promise<Response>,
   signal?: AbortSignal,
+  limits?: ImageInputLimits,
 ): Promise<ResolvedImageInput[]> {
   if (!raw || raw.length === 0) return [];
   const out: ResolvedImageInput[] = [];
   for (let index = 0; index < raw.length; index++) {
     const inputLabel = raw.length > 1 ? `Image input #${index + 1}` : 'Image input';
-    out.push(await resolveOne(raw[index]!, inputLabel, cwd, fetchImpl, signal));
+    out.push(await resolveOne(raw[index]!, inputLabel, cwd, fetchImpl, signal, limits));
   }
   return out;
+}
+
+/** Format gate applied after sniffing, when the active model declares one. */
+function assertFormatAllowed(
+  mimeType: string,
+  limits: ImageInputLimits | undefined,
+  inputLabel: string,
+  logLabel: string,
+): void {
+  if (!limits?.formats) return;
+  const label = MIME_FORMAT_LABEL[mimeType];
+  if (label && limits.formats.includes(label)) return;
+  throw new ImageGenError(
+    `${inputLabel} is ${label ?? 'an unrecognized format'}, which the active model does not accept (allowed: ${limits.formats.join('/')}).`,
+    `${logLabel} rejected (format not allowed)`,
+  );
 }
 
 async function resolveOne(
@@ -39,9 +91,11 @@ async function resolveOne(
   cwd: string,
   fetchImpl: (input: string | URL, init?: RequestInit) => Promise<Response>,
   signal?: AbortSignal,
+  limits?: ImageInputLimits,
 ): Promise<ResolvedImageInput> {
   const trimmed = value.trim();
   const logLabel = inputLabel.toLowerCase();
+  const maxBytes = limits?.maxBytes ?? MAX_IMAGE_BYTES;
   // Every throw below is an ImageGenError so it survives the body-free log sink
   // (toLogSummary) with an actionable message; none interpolate the raw value —
   // an image input could be a giant base64 blob or a signed URL.
@@ -87,7 +141,7 @@ async function resolveOne(
     // Body reads can fail after headers; keep them in the sanitized download boundary.
     let buf: Uint8Array;
     try {
-      buf = await readResponseBytes(res, MAX_IMAGE_BYTES);
+      buf = await readResponseBytes(res, maxBytes);
     } catch (error) {
       if (error instanceof Error && /size ceiling/i.test(error.message)) {
         throw new ImageGenError(error.message, `${logLabel} rejected (too large)`);
@@ -101,6 +155,7 @@ async function resolveOne(
         `${logLabel} rejected (invalid image)`,
       );
     }
+    assertFormatAllowed(mimeType, limits, inputLabel, logLabel);
     return { bytes: buf, mimeType };
   }
 
@@ -130,7 +185,7 @@ async function resolveOne(
         `${logLabel} rejected (not regular)`,
       );
     }
-    if (info.size > MAX_IMAGE_BYTES) {
+    if (info.size > maxBytes) {
       throw new ImageGenError(
         `${inputLabel} exceeds the image size ceiling.`,
         `${logLabel} rejected (too large)`,
@@ -145,7 +200,7 @@ async function resolveOne(
           `${logLabel} rejected (not regular)`,
         );
       }
-      if (openedInfo.size > MAX_IMAGE_BYTES) {
+      if (openedInfo.size > maxBytes) {
         throw new ImageGenError(
           `${inputLabel} exceeds the image size ceiling.`,
           `${logLabel} rejected (too large)`,
@@ -187,10 +242,15 @@ async function resolveOne(
       `${logLabel} rejected (invalid image)`,
     );
   }
+  assertFormatAllowed(mimeType, limits, inputLabel, logLabel);
   return { bytes, mimeType };
 }
 
 export function sniffMime(bytes: Uint8Array): string | undefined {
+  // ISO-BMFF (HEIC/HEIF): no fixed magic at offset 0 — the box size varies —
+  // so match "ftyp" at offset 4 and read the major brand at offset 8.
+  const brand = sniffFtypBrand(bytes);
+  if (brand) return brand;
   for (const { mimeType, bytes: magic } of MAGIC_BYTES) {
     if (bytes.length < magic.length) continue;
     let match = true;
@@ -217,6 +277,25 @@ export function sniffMime(bytes: Uint8Array): string | undefined {
     return mimeType;
   }
   return undefined;
+}
+
+/**
+ * Detect HEIC/HEIF via the ISO-BMFF `ftyp` box: 4-byte box size, then the
+ * literal "ftyp", then a 4-char major brand. Returns undefined for anything
+ * else (including AVIF's "avif" brand, which no built-in model accepts).
+ */
+function sniffFtypBrand(bytes: Uint8Array): string | undefined {
+  if (
+    bytes.length < 12 ||
+    bytes[4] !== 0x66 || // f
+    bytes[5] !== 0x74 || // t
+    bytes[6] !== 0x79 || // y
+    bytes[7] !== 0x70 // p
+  ) {
+    return undefined;
+  }
+  const brand = String.fromCharCode(bytes[8]!, bytes[9]!, bytes[10]!, bytes[11]!);
+  return FTYP_BRAND_MIME[brand];
 }
 
 export function toDataUri(input: ResolvedImageInput): string {
