@@ -1,4 +1,5 @@
-import { readFileSync } from 'node:fs';
+import { createReadStream } from 'node:fs';
+import { createInterface } from 'node:readline';
 import { pathToFileURL } from 'node:url';
 
 // Renders a compact, human-readable timeline of a Pi `--mode json` event stream
@@ -47,11 +48,15 @@ function describeSubagentChildren(event) {
 }
 
 /**
- * Renders events to log lines. Message content and streaming deltas are skipped
- * by design; agent/turn lifecycle and tool (subagent) outcomes are shown.
+ * Incremental trace renderer. The full event stream can reach gigabytes
+ * (thinking deltas), so main() streams events through this collector instead
+ * of materializing the file as one string. Message content and streaming
+ * deltas are skipped by design; agent/turn lifecycle and tool (subagent)
+ * outcomes are shown.
  */
-export function renderPiReviewTrace(events) {
+export function createTraceCollector() {
   const lines = [];
+  let total = 0;
   let turn = 0;
   let toolCalls = 0;
   let toolErrors = 0;
@@ -61,67 +66,89 @@ export function renderPiReviewTrace(events) {
     if (lines.length < MAX_RENDERED) lines.push(line);
   };
 
-  for (const event of events) {
-    switch (event?.type) {
-      case 'agent_start':
-        push('▶ agent start');
-        break;
-      case 'turn_start':
-        turn += 1;
-        push(`├─ turn ${turn} start`);
-        break;
-      case 'turn_end': {
-        const results = Array.isArray(event?.toolResults) ? event.toolResults.length : 0;
-        push(`├─ turn ${turn} end (${results} tool result(s))`);
-        break;
-      }
-      case 'message_end':
-        assistantMessages += 1;
-        break;
-      case 'tool_execution_start':
-        toolCalls += 1;
-        push(`│  ▶ ${event?.toolName ?? 'tool'}`);
-        break;
-      case 'tool_execution_end': {
-        if (event?.isError) toolErrors += 1;
-        push(`│  ${event?.isError ? '✗' : '✓'} ${event?.toolName ?? 'tool'}${event?.isError ? ' (error)' : ''}`);
-        if (event?.toolName === 'subagent') {
-          for (const child of describeSubagentChildren(event)) push(`│     ${child}`);
+  return {
+    add(event) {
+      total += 1;
+      switch (event?.type) {
+        case 'agent_start':
+          push('▶ agent start');
+          break;
+        case 'turn_start':
+          turn += 1;
+          push(`├─ turn ${turn} start`);
+          break;
+        case 'turn_end': {
+          const results = Array.isArray(event?.toolResults) ? event.toolResults.length : 0;
+          push(`├─ turn ${turn} end (${results} tool result(s))`);
+          break;
         }
-        break;
+        case 'message_end':
+          assistantMessages += 1;
+          break;
+        case 'tool_execution_start':
+          toolCalls += 1;
+          push(`│  ▶ ${event?.toolName ?? 'tool'}`);
+          break;
+        case 'tool_execution_end': {
+          if (event?.isError) toolErrors += 1;
+          push(`│  ${event?.isError ? '✗' : '✓'} ${event?.toolName ?? 'tool'}${event?.isError ? ' (error)' : ''}`);
+          if (event?.toolName === 'subagent') {
+            for (const child of describeSubagentChildren(event)) push(`│     ${child}`);
+          }
+          break;
+        }
+        case 'agent_end': {
+          const messages = Array.isArray(event?.messages) ? event.messages.length : 0;
+          push(`■ agent end (${messages} message(s))`);
+          break;
+        }
+        default:
+          // message_start / message_update / tool_execution_update: streaming, skipped.
+          break;
       }
-      case 'agent_end': {
-        const messages = Array.isArray(event?.messages) ? event.messages.length : 0;
-        push(`■ agent end (${messages} message(s))`);
-        break;
-      }
-      default:
-        // message_start / message_update / tool_execution_update: streaming, skipped.
-        break;
-    }
-  }
+    },
+    finish() {
+      const summary =
+        `Pi review execution trace: ${total} event(s), ${turn} turn(s), ` +
+        `${toolCalls} tool call(s), ${assistantMessages} assistant message(s), ${toolErrors} tool error(s)`;
+      if (lines.length >= MAX_RENDERED) lines.push(`… trace truncated after ${MAX_RENDERED} lines …`);
+      return [summary, ...lines];
+    },
+    get size() {
+      return total;
+    },
+  };
+}
 
-  const summary =
-    `Pi review execution trace: ${events.length} event(s), ${turn} turn(s), ` +
-    `${toolCalls} tool call(s), ${assistantMessages} assistant message(s), ${toolErrors} tool error(s)`;
-  if (lines.length >= MAX_RENDERED) lines.push(`… trace truncated after ${MAX_RENDERED} lines …`);
-  return [summary, ...lines];
+/** Renders a parsed event list to log lines. */
+export function renderPiReviewTrace(events) {
+  const collector = createTraceCollector();
+  for (const event of events) collector.add(event);
+  return collector.finish();
 }
 
 const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isMain) {
   const file = process.argv[2];
-  let text = '';
+  const collector = createTraceCollector();
   try {
-    text = readFileSync(file, 'utf8');
-  } catch {
-    console.log(`Pi review execution trace: no event stream captured at ${file ?? '(unset path)'}`);
+    const lines = createInterface({ input: createReadStream(file, 'utf8'), crlfDelay: Infinity });
+    for await (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        collector.add(JSON.parse(line));
+      } catch {
+        // Skip malformed lines; the uploaded artifact keeps the raw bytes.
+      }
+    }
+  } catch (error) {
+    const reason = error && typeof error === 'object' && 'code' in error ? error.code : String(error);
+    console.log(`Pi review execution trace: no event stream captured at ${file ?? '(unset path)'} (${reason})`);
     process.exit(0);
   }
-  const events = parseTraceEvents(text);
-  if (events.length === 0) {
+  if (collector.size === 0) {
     console.log('Pi review execution trace: event stream is empty');
     process.exit(0);
   }
-  for (const line of renderPiReviewTrace(events)) console.log(line);
+  for (const line of collector.finish()) console.log(line);
 }
