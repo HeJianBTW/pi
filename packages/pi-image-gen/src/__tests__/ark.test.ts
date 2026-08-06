@@ -56,7 +56,7 @@ describe('ark provider (Volcengine Seedream)', () => {
     const result = resolveModel('seedream-5-pro', {});
     if ('error' in result) throw new Error(result.error);
     expect(result.provider.id).toBe('ark');
-    expect(result.remoteId).toBe('doubao-seedream-5-0-pro-260128');
+    expect(result.remoteId).toBe('doubao-seedream-5-0-pro-260628');
   });
 
   it('text-to-image posts to /images/generations with prompt/n/size as JSON', async () => {
