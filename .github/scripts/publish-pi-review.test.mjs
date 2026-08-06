@@ -52,7 +52,7 @@ test('combines schema-validated axis outputs from the Pi JSON transcript', async
     await combinePiReviewTranscript({ transcriptPath, reviewPath, core });
     assert.deepEqual(JSON.parse(await readFile(reviewPath, 'utf8')), { findings: [finding, specFinding] });
     assert.deepEqual(infos, [
-      'Pi review transcript: 1 completed parallel subagent run(s)',
+      'Pi review transcript: 1 completed reviewer subagent run(s)',
       'Pi review Standards reviewer: 1 finding(s)',
       'Pi review Spec reviewer: 1 finding(s)',
       'Pi review combined 2 total finding(s)',
@@ -85,13 +85,57 @@ test('accepts a Standards-only run when the skill finds no specification', async
     assert.deepEqual(JSON.parse(await readFile(reviewPath, 'utf8')), { findings: [finding] });
     // A missing axis is tolerated but must be visible, not silent.
     assert.deepEqual(infos, [
-      'Pi review transcript: 1 completed parallel subagent run(s)',
+      'Pi review transcript: 1 completed reviewer subagent run(s)',
       'Pi review Standards reviewer: 1 finding(s)',
       'Pi review combined 1 total finding(s)',
     ]);
     assert.deepEqual(warnings, [
       'Pi review Spec reviewer produced no usable result; that axis contributes no findings',
     ]);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('combines workflow-mode runs and ignores management calls', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'pi-review-workflow-'));
+  const transcriptPath = path.join(directory, 'pi.jsonl');
+  const reviewPath = path.join(directory, 'review.json');
+  const infos = [];
+  const warnings = [];
+  const core = { info: (m) => infos.push(m), warning: (m) => warnings.push(m) };
+  try {
+    await writeFile(transcriptPath, [
+      // A subagent action:"list" management call carries an empty results array.
+      JSON.stringify({
+        type: 'tool_execution_end',
+        toolName: 'subagent',
+        result: { details: { mode: 'management', results: [] } },
+      }),
+      // pi-subagents 0.41+ lets the coordinator fan out via a workflow script.
+      JSON.stringify({
+        type: 'tool_execution_end',
+        toolName: 'subagent',
+        result: {
+          details: {
+            mode: 'workflow',
+            results: [
+              { exitCode: 0, structuredOutput: { axis: 'Standards', findings: [finding] } },
+              { exitCode: 0, structuredOutput: { axis: 'Spec', findings: [] } },
+            ],
+          },
+        },
+      }),
+    ].join('\n'));
+    await combinePiReviewTranscript({ transcriptPath, reviewPath, core });
+    assert.deepEqual(JSON.parse(await readFile(reviewPath, 'utf8')), { findings: [finding] });
+    assert.deepEqual(infos, [
+      'Pi review transcript: 1 completed reviewer subagent run(s)',
+      'Pi review Standards reviewer: 1 finding(s)',
+      'Pi review Spec reviewer: 0 finding(s)',
+      'Pi review combined 1 total finding(s)',
+    ]);
+    assert.deepEqual(warnings, []);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -121,7 +165,7 @@ test('combines successful structured outputs across coordinator recovery calls',
     // The failed first attempt is surfaced as a warning, not swallowed.
     assert.deepEqual(warnings, ['Pi review discarded reviewer output: first attempt failed']);
     assert.deepEqual(infos, [
-      'Pi review transcript: 3 completed parallel subagent run(s)',
+      'Pi review transcript: 3 completed reviewer subagent run(s)',
       'Pi review Standards reviewer: 1 finding(s)',
       'Pi review Spec reviewer: 1 finding(s)',
       'Pi review combined 2 total finding(s)',

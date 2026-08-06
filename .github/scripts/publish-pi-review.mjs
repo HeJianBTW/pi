@@ -124,14 +124,20 @@ export async function combinePiReviewTranscript({ transcriptPath, reviewPath, co
         throw new Error(`Pi review transcript line ${index + 1} is not valid JSON`);
       }
     });
+  // Accept any orchestration mode (parallel tasks, workflow script, or whatever a
+  // future pi-subagents version advertises): the coordinator picks the mode, so
+  // filtering on details.mode breaks whenever that surface evolves. What matters
+  // is that a subagent run produced child results; management calls such as
+  // action:"list" return an empty results array and are ignored here.
   const completedRuns = events.filter((event) =>
     event?.type === 'tool_execution_end' &&
     event?.toolName === 'subagent' &&
-    event?.result?.details?.mode === 'parallel',
+    Array.isArray(event?.result?.details?.results) &&
+    event.result.details.results.length > 0,
   );
-  core.info(`Pi review transcript: ${completedRuns.length} completed parallel subagent run(s)`);
+  core.info(`Pi review transcript: ${completedRuns.length} completed reviewer subagent run(s)`);
   if (completedRuns.length < 1 || completedRuns.length > 10) {
-    throw new Error(`Pi review transcript contained ${completedRuns.length} completed parallel subagent runs; expected 1 to 10`);
+    throw new Error(`Pi review transcript contained ${completedRuns.length} completed reviewer subagent runs; expected 1 to 10`);
   }
 
   const findingsByAxis = new Map();
@@ -140,7 +146,7 @@ export async function combinePiReviewTranscript({ transcriptPath, reviewPath, co
   for (const run of completedRuns) {
     const results = run.result.details.results;
     if (!Array.isArray(results) || results.length < 1 || results.length > 2) {
-      failures.push(`parallel run returned ${Array.isArray(results) ? results.length : 0} results`);
+      failures.push(`subagent run returned ${Array.isArray(results) ? results.length : 0} results`);
       continue;
     }
     resultCount += results.length;
