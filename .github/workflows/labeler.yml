@@ -65,7 +65,7 @@ jobs:
             const EXT_PACKAGES = [
               'attachments', 'browser-use', 'channels', 'computer-use', 'dingtalk',
               'goal', 'image-gen', 'lark', 'memory', 'security', 'task-scheduler',
-              'teamwork', 'telemetry', 'web-access', 'wecom',
+              'teamwork', 'telemetry', 'video-gen', 'web-access', 'wecom',
             ];
             for (const n of EXT_PACKAGES) defs.set(`ext:${n}`, ['5B21B6', `Changes to packages/pi-${n}`]);
             defs.set('core:shared', ['8B5CF6', 'Changes to packages/shared']);
