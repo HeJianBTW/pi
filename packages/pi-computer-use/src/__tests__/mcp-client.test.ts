@@ -108,6 +108,52 @@ describe('sanitizeSchemaFormats', () => {
     sanitizeSchemaFormats(schema);
     expect(schema).toEqual({ properties: { samples: { format: 'uint64' } } });
   });
+
+  it('sanitizes properties named like schema keywords', () => {
+    const schema = {
+      type: 'object',
+      properties: {
+        default: { type: 'integer', format: 'uint64' },
+        enum: { type: 'integer', format: 'uint32' },
+      },
+      $defs: { const: { format: 'uint64' } },
+    };
+
+    const sanitized = sanitizeSchemaFormats(schema);
+    expect(sanitized.properties.default).toEqual({ type: 'integer', minimum: 0 });
+    expect(sanitized.properties.enum).toEqual({
+      type: 'integer',
+      minimum: 0,
+      maximum: 4_294_967_295,
+    });
+    expect(sanitized.$defs.const).toEqual({ type: 'integer', minimum: 0 });
+  });
+
+  it('still leaves keyword-position instance data untouched', () => {
+    const schema = {
+      type: 'object',
+      properties: {
+        count: { type: 'integer', format: 'uint64', default: { format: 'uint64' } },
+      },
+    };
+
+    const sanitized = sanitizeSchemaFormats(schema);
+    expect(sanitized.properties.count).toEqual({
+      type: 'integer',
+      minimum: 0,
+      default: { format: 'uint64' },
+    });
+  });
+
+  it('leaves integer formats on non-integer types untouched', () => {
+    const schema = { type: 'string', format: 'uint32' };
+    expect(sanitizeSchemaFormats(schema)).toEqual(schema);
+  });
+
+  it('ignores format values matching Object.prototype keys', () => {
+    const schema = { type: 'integer', format: 'constructor' };
+    expect(sanitizeSchemaFormats(schema)).toEqual(schema);
+  });
 });
 
 describe('SanitizingJsonSchemaValidator', () => {

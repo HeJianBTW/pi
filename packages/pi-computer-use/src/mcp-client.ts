@@ -158,6 +158,19 @@ const INTEGER_FORMAT_BOUNDS: Record<string, { minimum?: number; maximum?: number
 const NON_SCHEMA_KEYS = new Set(['const', 'default', 'enum', 'examples']);
 
 /**
+ * Keywords whose values are maps of property name → subschema. Inside these maps the
+ * keys are property names, not schema keywords, so NON_SCHEMA_KEYS must not apply:
+ * a property literally named "default" or "enum" still needs its subschema sanitized.
+ */
+const PROPERTY_MAP_KEYS = new Set([
+  'properties',
+  'patternProperties',
+  'dependentSchemas',
+  '$defs',
+  'definitions',
+]);
+
+/**
  * Returns a copy of the schema with schemars' non-standard integer `format`
  * annotations ("uint64", ...) replaced by standard constraints ajv can enforce.
  * The input schema is not modified.
@@ -172,13 +185,20 @@ function sanitizeSchemaNode(node: unknown): unknown {
 
   const result: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(node)) {
-    result[key] = NON_SCHEMA_KEYS.has(key) ? value : sanitizeSchemaNode(value);
+    result[key] = sanitizeSchemaValue(key, value);
   }
 
   const format = result.format;
   if (typeof format !== 'string') return result;
-  const bounds = INTEGER_FORMAT_BOUNDS[format];
+  // Own-property check: a plain table lookup would match Object.prototype keys
+  // ("constructor", "toString", ...) on hostile or malformed schemas.
+  const bounds = Object.hasOwn(INTEGER_FORMAT_BOUNDS, format)
+    ? INTEGER_FORMAT_BOUNDS[format]
+    : undefined;
   if (!bounds) return result;
+  // Only rewrite integer schemas; injecting numeric bounds into a node that
+  // declares another type would misannotate it.
+  if (!isIntegerType(result.type)) return result;
 
   delete result.format;
   result.type ??= 'integer';
@@ -189,6 +209,28 @@ function sanitizeSchemaNode(node: unknown): unknown {
     result.maximum = bounds.maximum;
   }
   return result;
+}
+
+function sanitizeSchemaValue(key: string, value: unknown): unknown {
+  if (NON_SCHEMA_KEYS.has(key)) return value;
+  if (PROPERTY_MAP_KEYS.has(key) && isRecord(value)) {
+    const map: Record<string, unknown> = {};
+    for (const [name, subschema] of Object.entries(value)) {
+      map[name] = sanitizeSchemaNode(subschema);
+    }
+    return map;
+  }
+  return sanitizeSchemaNode(value);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isIntegerType(type: unknown): boolean {
+  if (type === undefined) return true;
+  if (Array.isArray(type)) return type.includes('integer');
+  return type === 'integer';
 }
 
 /**
