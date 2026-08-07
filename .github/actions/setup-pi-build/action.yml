@@ -65,18 +65,23 @@ runs:
     # Note: callers are responsible for `actions/checkout@v7` before invoking
     # this composite — GitHub needs to find action.yml on disk first.
 
-    - name: Setup pnpm
-      uses: pnpm/action-setup@v6
-      with:
-        # Per-job temp dir avoids cwd-deleted races between concurrent matrix
-        # jobs sharing the runner's $HOME/setup-pnpm.
-        dest: ${{ runner.temp }}/setup-pnpm
-
+    # Node must come before pnpm: v6's npm-based bootstrap (@pnpm/exe
+    # postinstall uses import.meta.dirname) needs Node >= 20.11, and the
+    # self-hosted runner's system Node is 18. Store caching lives on
+    # pnpm/action-setup rather than setup-node's `cache: pnpm`, which probes
+    # `pnpm store path` and would fail with pnpm not yet installed.
     - name: Setup Node
       uses: actions/setup-node@v7
       with:
         node-version: 24
-        cache: pnpm
+
+    - name: Setup pnpm
+      uses: pnpm/action-setup@v6
+      with:
+        cache: true
+        # Per-job temp dir avoids cwd-deleted races between concurrent matrix
+        # jobs sharing the runner's $HOME/setup-pnpm.
+        dest: ${{ runner.temp }}/setup-pnpm
 
     - name: Install dependencies
       shell: bash
