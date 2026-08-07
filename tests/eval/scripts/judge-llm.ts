@@ -11,9 +11,16 @@
  *     --models /Users/weaxs/Desktop/Workspace/pi-agent/.pi/models.json \
  *     --concurrency 4
  */
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
+import {
+  chatCompletion,
+  getFlag,
+  type JudgeConfig,
+  loadJudgeConfig,
+  runPool,
+} from '../src/judge-client.js';
 
 interface Args {
   input: string;
@@ -40,26 +47,18 @@ interface Bundle {
   rows: Row[];
 }
 
-interface ModelsJson {
-  providers: Record<string, { apiKey: string; baseUrl?: string }>;
-}
-
 function parseArgs(): Args {
   const argv = process.argv.slice(2);
-  const get = (flag: string, dflt: string) => {
-    const i = argv.indexOf(flag);
-    return i >= 0 ? argv[i + 1] : dflt;
-  };
   return {
-    input: get('--input', 'results/mem0-locomo-oss.json'),
+    input: getFlag(argv, '--input', 'results/mem0-locomo-oss.json'),
     modelsPath:
-      get('--models', '') ||
+      getFlag(argv, '--models', '') ||
       process.env.PI_MODELS_PATH ||
       path.join(os.homedir(), '.pi', 'agent', 'models.json'),
-    llmProvider: get('--llm-provider', 'amaster'),
-    llmModel: get('--llm-model', 'deepseek-v4-flash'),
-    concurrency: Number(get('--concurrency', '4')),
-    limit: Number(get('--limit', '0')),
+    llmProvider: getFlag(argv, '--llm-provider', 'amaster'),
+    llmModel: getFlag(argv, '--llm-model', 'deepseek-v4-flash'),
+    concurrency: Number(getFlag(argv, '--concurrency', '4')),
+    limit: Number(getFlag(argv, '--limit', '0')),
   };
 }
 
@@ -83,77 +82,29 @@ function buildUserPrompt(question: string, gold: string, blob: string): string {
   ].join('\n');
 }
 
-interface JudgeConfig {
-  apiKey: string;
-  baseUrl: string;
-  model: string;
-}
-
-async function loadJudge(args: Args): Promise<JudgeConfig> {
-  const raw = await readFile(args.modelsPath, 'utf8');
-  const models = JSON.parse(raw) as ModelsJson;
-  const entry = models.providers?.[args.llmProvider];
-  if (!entry?.apiKey || !entry?.baseUrl) {
-    throw new Error(`provider ${args.llmProvider} missing apiKey/baseUrl in ${args.modelsPath}`);
-  }
-  return { apiKey: entry.apiKey, baseUrl: entry.baseUrl, model: args.llmModel };
-}
-
-function isTransient(err: unknown): boolean {
-  const msg = err instanceof Error ? err.message : String(err);
-  const cause = err instanceof Error && err.cause instanceof Error ? err.cause.message : '';
-  const haystack = `${msg}\n${cause}`;
-  return /\b(5\d\d|429|overloaded|timeout|timed out|ETIMEDOUT|ECONN|EAI_AGAIN|ENOTFOUND|getaddrinfo|fetch failed|socket|Connection error|APIConnection)\b/i.test(
-    haystack,
-  );
-}
-
 async function callJudge(cfg: JudgeConfig, prompt: string): Promise<'YES' | 'NO'> {
-  const delays = [1000, 4000, 16000];
-  let lastErr: unknown;
-  for (let attempt = 0; attempt <= delays.length; attempt++) {
-    try {
-      const res = await fetch(`${cfg.baseUrl}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${cfg.apiKey}`,
-        },
-        body: JSON.stringify({
-          model: cfg.model,
-          temperature: 0,
-          // deepseek-v4-flash is a reasoning model — reasoning_tokens eat the
-          // budget before content is emitted. Give it enough headroom.
-          max_tokens: 512,
-          messages: [
-            { role: 'system', content: JUDGE_SYSTEM },
-            { role: 'user', content: prompt },
-          ],
-        }),
-      });
-      if (!res.ok) {
-        const body = await res.text();
-        throw new Error(`HTTP ${res.status}: ${body.slice(0, 200)}`);
-      }
-      const data = (await res.json()) as {
-        choices?: Array<{ message?: { content?: string } }>;
-      };
-      const text = (data.choices?.[0]?.message?.content ?? '').trim().toUpperCase();
-      // Reasoning models sometimes prepend their scratchpad. Find the last
-      // clear YES / NO signal in the response.
-      const yesIdx = text.lastIndexOf('YES');
-      const noIdx = text.lastIndexOf('NO');
-      if (yesIdx < 0 && noIdx < 0) {
-        throw new Error(`unexpected judge reply: ${text.slice(-120)}`);
-      }
-      return yesIdx > noIdx ? 'YES' : 'NO';
-    } catch (err) {
-      lastErr = err;
-      if (attempt === delays.length || !isTransient(err)) break;
-      await new Promise((r) => setTimeout(r, delays[attempt]));
-    }
+  // deepseek-v4-flash is a reasoning model — reasoning_tokens eat the budget
+  // before content is emitted. 512 gives it enough headroom.
+  const text = (
+    await chatCompletion(cfg, {
+      maxTokens: 512,
+      temperature: 0,
+      messages: [
+        { role: 'system', content: JUDGE_SYSTEM },
+        { role: 'user', content: prompt },
+      ],
+    })
+  )
+    .trim()
+    .toUpperCase();
+  // Reasoning models sometimes prepend their scratchpad. Find the last clear
+  // YES / NO signal in the response.
+  const yesIdx = text.lastIndexOf('YES');
+  const noIdx = text.lastIndexOf('NO');
+  if (yesIdx < 0 && noIdx < 0) {
+    throw new Error(`unexpected judge reply: ${text.slice(-120)}`);
   }
-  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
+  return yesIdx > noIdx ? 'YES' : 'NO';
 }
 
 async function main() {
@@ -171,32 +122,23 @@ async function main() {
     );
   }
 
-  const cfg = await loadJudge(args);
+  const cfg = loadJudgeConfig(args.modelsPath, args.llmProvider, args.llmModel);
   process.stderr.write(`[judge:llm] model=${cfg.model} concurrency=${args.concurrency}\n`);
 
-  let cursor = 0;
   let done = 0;
-  const worker = async (): Promise<void> => {
-    while (true) {
-      const idx = cursor++;
-      if (idx >= rows.length) return;
-      const r = rows[idx];
-      try {
-        const verdict = await callJudge(cfg, buildUserPrompt(r.question, r.gold, r.blob!));
-        r.judge = verdict === 'YES' ? 1 : 0;
-      } catch (err) {
-        r.judge = 0;
-        r.judgeError = err instanceof Error ? err.message.slice(0, 200) : String(err);
-      }
-      done++;
-      if (done % 20 === 0 || done === rows.length) {
-        process.stderr.write(`[judge:llm]   ${done}/${rows.length}\n`);
-      }
+  await runPool(rows, args.concurrency, async (r) => {
+    try {
+      const verdict = await callJudge(cfg, buildUserPrompt(r.question, r.gold, r.blob!));
+      r.judge = verdict === 'YES' ? 1 : 0;
+    } catch (err) {
+      r.judge = 0;
+      r.judgeError = err instanceof Error ? err.message.slice(0, 200) : String(err);
     }
-  };
-  await Promise.all(
-    Array.from({ length: Math.max(1, Math.min(args.concurrency, rows.length)) }, worker),
-  );
+    done++;
+    if (done % 20 === 0 || done === rows.length) {
+      process.stderr.write(`[judge:llm]   ${done}/${rows.length}\n`);
+    }
+  });
 
   const judged = rows.filter((r) => r.judgeError === undefined);
   const recallJudge = judged.reduce((a, r) => a + (r.judge ?? 0), 0) / Math.max(1, judged.length);
