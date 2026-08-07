@@ -104,7 +104,10 @@ async function githubNotes() {
 async function modelSummary(sourceNotes) {
   const baseUrl = (process.env.PI_INTEGRATION_BASE_URL || '').replace(/\/+$/, '');
   const apiKey = process.env.PI_INTEGRATION_API_KEY || '';
-  if (!baseUrl || !apiKey) return undefined;
+  if (!baseUrl || !apiKey) {
+    console.error('::warning::PI_INTEGRATION_BASE_URL / PI_INTEGRATION_API_KEY not set — using fallback release notes');
+    return undefined;
+  }
 
   const prompt = await readFile(new URL('../release-summary-prompt.md', import.meta.url), 'utf8');
   const releaseData = {
@@ -134,7 +137,11 @@ async function modelSummary(sourceNotes) {
   if (!response.ok) throw new Error(`release summary gateway returned ${response.status}`);
   const data = await response.json();
   const content = data?.choices?.[0]?.message?.content;
-  return typeof content === 'string' && content.trim() ? stripCodeFence(content) : undefined;
+  if (typeof content !== 'string' || !content.trim()) {
+    console.error('::warning::release summary model returned empty content — using fallback release notes');
+    return undefined;
+  }
+  return stripCodeFence(content);
 }
 
 let generatedNotes;
@@ -169,7 +176,12 @@ const metadata = [
   '',
 ].join('\n');
 
-await writeFile(output, `${summary || fallback}\n\n${metadata}`, 'utf8');
+// The model narrative and GitHub's generated PR list complement each other —
+// keep both when the summary succeeds so releases don't flip between formats.
+const body = [...(summary ? [summary, generatedNotes] : [fallback]), metadata]
+  .filter(Boolean)
+  .join('\n\n');
+await writeFile(output, body, 'utf8');
 console.error(
-  `Release notes written to ${output} (${previousTag || 'initial release'} -> ${currentTag}, ${summary ? 'model summary' : 'fallback'})`,
+  `Release notes written to ${output} (${previousTag || 'initial release'} -> ${currentTag}, ${summary ? `model summary${generatedNotes ? ' + GitHub notes' : ''}` : 'fallback'})`,
 );
