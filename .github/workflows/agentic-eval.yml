@@ -13,10 +13,10 @@ on:
   workflow_dispatch:
     inputs:
       target:
-        description: Which eval to run
+        description: Which eval to run (both = browser + computer; video is paid, always explicit)
         type: choice
         default: browser
-        options: [browser, computer, both]
+        options: [browser, computer, both, video]
       model:
         description: Model (provider is deepseek-integration)
         type: string
@@ -30,6 +30,15 @@ on:
         description: Limit to first N tasks (0 = all)
         type: string
         default: '0'
+      samples:
+        description: Video eval only — number of ViMax stories (each is 8-16 PAID clips)
+        type: string
+        default: '2'
+      tier:
+        description: Video eval only — story tier
+        type: choice
+        default: medium
+        options: [medium, long, all]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -216,5 +225,112 @@ jobs:
         with:
           name: computer-eval-results
           path: tests/eval/results/computer-tasks.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  video-eval:
+    name: Video eval (ViMax-Bench render quality)
+    if: inputs.target == 'video'
+    runs-on:
+      - instance-hnpsq9go
+      - linux
+      - x64
+    # One Medium story ≈ 9 paid clips + frames — tens of minutes per story.
+    timeout-minutes: 120
+    env:
+      PI_INTEGRATION_BASE_URL: ${{ secrets.PI_INTEGRATION_BASE_URL }}
+      PI_INTEGRATION_API_KEY: ${{ secrets.PI_INTEGRATION_API_KEY }}
+      # Same gateway image model integration.yml uses for pi-image-gen.
+      PI_EVAL_IMAGE_MODEL: doubao-seedream-5-0-lite-260128
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pi build environment
+        uses: ./.github/actions/setup-pi-build
+        with:
+          install-pi-cli: 'true'
+          set-pi-agent-dir: 'true'
+          install-video-tools: 'true'
+
+      - name: Guard — require provider secrets
+        run: |
+          set -euo pipefail
+          if [ -z "${PI_INTEGRATION_BASE_URL}" ] || [ -z "${PI_INTEGRATION_API_KEY}" ]; then
+            echo "::error::PI_INTEGRATION_BASE_URL / PI_INTEGRATION_API_KEY not set — cannot run eval"
+            exit 1
+          fi
+
+      - name: Write eval models.json from secrets
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/eval"
+          # apiKey is written literally from the secret; the file lives under
+          # RUNNER_TEMP and is not uploaded (same convention as the browser job).
+          cat > "$RUNNER_TEMP/eval/models.json" <<EOF
+          {
+            "providers": {
+              "deepseek-integration": {
+                "baseUrl": "${PI_INTEGRATION_BASE_URL}",
+                "api": "openai-completions",
+                "apiKey": "${PI_INTEGRATION_API_KEY}",
+                "models": [
+                  { "id": "${{ inputs.model }}", "name": "${{ inputs.model }}", "input": ["text"] }
+                ]
+              }
+            }
+          }
+          EOF
+          echo "MODELS_PATH=$RUNNER_TEMP/eval/models.json" >> "$GITHUB_ENV"
+
+      - name: Fetch ViMax-Bench
+        run: pnpm --filter @amaster.ai/pi-eval fetch:vimax
+
+      - name: Eval — pi-video-gen (ViMax-Bench slice)
+        run: |
+          set -euo pipefail
+          # --timeout caps ONE story at 45min so samples*N stays under the
+          # 120min job limit and results get written even if a story hangs.
+          pnpm --filter @amaster.ai/pi-eval eval:video -- \
+            --provider deepseek-integration \
+            --model "${{ inputs.model }}" \
+            --thinking "${{ inputs.thinking }}" \
+            --samples "${{ inputs.samples }}" \
+            --tier "${{ inputs.tier }}" \
+            --timeout 2700000 \
+            --models "$MODELS_PATH"
+
+      - name: Summarize
+        if: always()
+        run: |
+          set -euo pipefail
+          f=tests/eval/results/video-vimax.json
+          [ -f "$f" ] || { echo "no results"; exit 0; }
+          {
+            echo "## Video eval — ViMax-Bench render"
+            node -e '
+              const d = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+              const s = d.summary || {};
+              console.log("");
+              console.log(`- model: \`${s.model ?? "?"}\` + video \`${s.videoModel ?? "?"}\``);
+              console.log(`- completionRate: **${(s.completionRate ?? 0).toFixed(3)}** (${s.completed ?? 0}/${s.n ?? 0} stories)`);
+              console.log(`- specViolations (LLM re-planned the shot book): ${s.specViolations ?? 0}`);
+              console.log(`- avgTurns: ${(s.avgTurns ?? 0).toFixed(1)}`);
+              console.log(`- failureMix: \`${JSON.stringify(s.failureMix ?? {})}\``);
+              console.log("");
+              for (const r of d.rows ?? []) {
+                console.log(`- ${r.completed ? "✅" : "❌"} ${r.story} (type ${r.type}, ${r.shots} shots) — ${r.failureMode}`);
+              }
+              console.log("");
+              console.log("Quality scores: run `judge:video` locally with a vision model (see tests/eval/README).");
+            ' "$f"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: video-eval-results
+          path: tests/eval/results/video-vimax.json
           if-no-files-found: warn
           retention-days: 14
