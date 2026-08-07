@@ -7,6 +7,7 @@ import {
   classifyImageOutput,
   MAX_IMAGE_BYTES,
   resolveImageInputs,
+  sniffMime,
   toDataUri,
 } from '../image-input.js';
 
@@ -210,6 +211,30 @@ describe('resolveImageInputs', () => {
     expect(out).toHaveLength(2);
     expect(out[0]?.mimeType).toBe('image/png');
     expect(out[1]?.mimeType).toBe('image/jpeg');
+  });
+});
+
+describe('sniffMime', () => {
+  it('detects BMP and both TIFF endiannesses', () => {
+    expect(sniffMime(Buffer.concat([Buffer.from([0x42, 0x4d]), Buffer.alloc(20)]))).toBe(
+      'image/bmp',
+    );
+    expect(
+      sniffMime(Buffer.concat([Buffer.from([0x49, 0x49, 0x2a, 0x00]), Buffer.alloc(20)])),
+    ).toBe('image/tiff');
+    expect(
+      sniffMime(Buffer.concat([Buffer.from([0x4d, 0x4d, 0x00, 0x2a]), Buffer.alloc(20)])),
+    ).toBe('image/tiff');
+  });
+
+  it('detects HEIC/HEIF via the ftyp brand and rejects AVIF/MP4', () => {
+    const ftyp = (brand: string) =>
+      Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from(`ftyp${brand}`), Buffer.alloc(8)]);
+    expect(sniffMime(ftyp('heic'))).toBe('image/heic');
+    expect(sniffMime(ftyp('heix'))).toBe('image/heic');
+    expect(sniffMime(ftyp('mif1'))).toBe('image/heif');
+    expect(sniffMime(ftyp('avif'))).toBeUndefined();
+    expect(sniffMime(ftyp('mp42'))).toBeUndefined();
   });
 });
 

@@ -36,6 +36,13 @@ export type CustomImageModel = {
   alias?: string;
   /** Optional display name. */
   name?: string;
+  /**
+   * Capability declaration driving the tool schema and pre-flight validation.
+   * Every field is optional; omitted fields fall back to the built-in registry
+   * entry of the same id when one exists, else to the generic (unconstrained)
+   * schema. Mirrors pi-video-gen's custom-model capability inheritance.
+   */
+  capabilities?: Partial<ImageModelCapabilities>;
 };
 
 /** Per-built-in-provider override (api key, base url, custom headers). */
@@ -76,6 +83,17 @@ export type GenerateImageParams = {
   n?: number;
   /** Image size hint (e.g. "1024x1024"). Provider may ignore. */
   size?: string;
+  /**
+   * Gemini-style aspect ratio (e.g. "16:9"). Only honored when the active
+   * model's capabilities declare `aspectRatios` (Gemini image models have no
+   * pixel-size knob); rejected by validation otherwise.
+   */
+  aspectRatio?: string;
+  /**
+   * Gemini-style size tier (e.g. "2K"). Only honored when the active model's
+   * capabilities declare `imageSizes`; rejected by validation otherwise.
+   */
+  imageSize?: string;
   /**
    * Quality hint (e.g. "low" | "medium" | "high" | "auto" for OpenAI gpt-image).
    * Provider-specific: forwarded on OpenAI-shaped providers, ignored by adapters
@@ -130,6 +148,71 @@ export type ResolvedModel = {
   remoteId: string;
   /** The id the user asked for (alias or remoteId). */
   requestedId: string;
+  /**
+   * The model's capability contract, when known (built-in registry entry or a
+   * custom model inheriting/overriding one). Absent for slash-routed and
+   * catch-all custom models — callers must fall back to the generic schema and
+   * skip capability validation.
+   */
+  capabilities?: ImageModelCapabilities;
+};
+
+/**
+ * Per-model capability contract, sourced from official provider docs (the
+ * registry in models.ts quotes the values). Drives the tool schema shape at
+ * registration time and pre-flight validation before any paid call — mirrors
+ * pi-video-gen's `VideoModelCapabilities`.
+ */
+export type ImageModelCapabilities = {
+  /**
+   * Discrete allowed `size` values (DALL·E-style fixed lists). Mutually
+   * exclusive with `sizeRange`; when present, `size` is a string enum.
+   */
+  sizes?: string[];
+  /** Range-based `size` validation for "<width><sep><height>" pixel strings. */
+  sizeRange?: {
+    /** Separator the provider's API expects: qwen uses "*", everyone else "x". */
+    separator: 'x' | '*';
+    /** Tier tokens accepted instead of a pixel string (Seedream: "1K"/"2K"/…). */
+    tiers?: string[];
+    /** The literal "auto" is accepted (model picks the size; gpt-image-2). */
+    allowAuto?: boolean;
+    /** Inclusive total-pixel (width × height) bounds. */
+    minArea: number;
+    maxArea: number;
+    /** Inclusive width/height ratio bounds. */
+    minRatio?: number;
+    maxRatio?: number;
+    /** Both dimensions must be divisible by this (gpt-image-2: 16). */
+    divisibleBy?: number;
+    /** Longest-edge ceiling in px (gpt-image-2: 3840). */
+    maxEdge?: number;
+  };
+  /**
+   * Gemini-style aspect-ratio vocabulary. Its presence means the model has NO
+   * pixel-size knob: the schema hides `size` and exposes `aspectRatio` instead.
+   */
+  aspectRatios?: string[];
+  /**
+   * Gemini-style `imageSize` tiers (e.g. ["1K","2K","4K"]). A single entry
+   * means a fixed tier — the param is hidden from the schema. Absent means the
+   * model has no tier knob at all (gemini-2.5-flash-image is fixed at 1024px).
+   */
+  imageSizes?: string[];
+  /** Max images per request via `n`. 1 = the model has no count knob; `n` is hidden. */
+  nMax: number;
+  /** Max reference images per request. */
+  maxReferenceImages: number;
+  /** Accepted reference-image formats as display labels (e.g. "PNG", "JPEG"). */
+  inputFormats: string[];
+  /** Per-reference-image byte ceiling. */
+  inputMaxBytes: number;
+  /**
+   * Documented advisory for reference-image dimensions (e.g. "both dimensions
+   * between 384 and 2048 px"). Surfaced in the `image` param description only —
+   * it is a provider recommendation, never hard-validated.
+   */
+  inputDimAdvice?: string;
 };
 
 /** Adapter interface implemented by each api shape. */

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { resolveModel } from '../config.js';
 import type { ImageGenSettings } from '../types.js';
 
@@ -182,5 +182,121 @@ describe('resolveModel', () => {
     const b = resolveModel('something-else', settings);
     if ('error' in b) throw new Error(b.error);
     expect(b.provider.id).toBe('wide');
+  });
+});
+
+describe('resolveModel — capability attachment', () => {
+  it('attaches the registry contract for built-in models', () => {
+    process.env.OPENAI_API_KEY = 'oa-test';
+    const result = resolveModel('gpt-image-2', {});
+    if ('error' in result) throw new Error(result.error);
+    expect(result.capabilities?.sizeRange?.allowAuto).toBe(true);
+    expect(result.capabilities?.nMax).toBe(10);
+  });
+
+  it('a custom model whose id names a built-in inherits the registry contract', () => {
+    const settings: ImageGenSettings = {
+      customProviders: {
+        gateway: {
+          api: 'dashscope',
+          baseUrl: 'https://gateway.example/v1',
+          apiKey: 'k',
+          models: ['qwen-image-3.0'],
+        },
+      },
+    };
+    const result = resolveModel('qwen-image-3.0', settings);
+    if ('error' in result) throw new Error(result.error);
+    expect(result.provider.id).toBe('gateway');
+    expect(result.capabilities?.sizeRange?.separator).toBe('*');
+    expect(result.capabilities?.maxReferenceImages).toBe(3);
+  });
+
+  it('explicit per-field declarations win over the inherited contract', () => {
+    const settings: ImageGenSettings = {
+      customProviders: {
+        gateway: {
+          api: 'dashscope',
+          baseUrl: 'https://gateway.example/v1',
+          apiKey: 'k',
+          models: [{ id: 'qwen-image-3.0', capabilities: { nMax: 2 } }],
+        },
+      },
+    };
+    const result = resolveModel('qwen-image-3.0', settings);
+    if ('error' in result) throw new Error(result.error);
+    expect(result.capabilities?.nMax).toBe(2);
+    // Untouched fields still come from the registry entry.
+    expect(result.capabilities?.sizeRange?.separator).toBe('*');
+    expect(result.capabilities?.maxReferenceImages).toBe(3);
+  });
+
+  it('explicit capabilities for an unknown custom model merge over the generic contract', () => {
+    const settings: ImageGenSettings = {
+      customProviders: {
+        gateway: {
+          api: 'openai',
+          baseUrl: 'https://gateway.example/v1',
+          apiKey: 'k',
+          models: [{ id: 'my-finetune', capabilities: { nMax: 4 } }],
+        },
+      },
+    };
+    const result = resolveModel('my-finetune', settings);
+    if ('error' in result) throw new Error(result.error);
+    expect(result.capabilities?.nMax).toBe(4);
+    expect(result.capabilities?.maxReferenceImages).toBe(8);
+    expect(result.capabilities?.inputMaxBytes).toBe(20 * 1024 * 1024);
+  });
+
+  it('drops malformed capability fields instead of letting them reach the schema', () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const settings: ImageGenSettings = {
+        customProviders: {
+          gateway: {
+            api: 'openai',
+            baseUrl: 'https://gateway.example/v1',
+            apiKey: 'k',
+            models: [
+              {
+                id: 'my-finetune',
+                capabilities: { nMax: 'six', maxReferenceImages: 2 } as never,
+              },
+            ],
+          },
+        },
+      };
+      const result = resolveModel('my-finetune', settings);
+      if ('error' in result) throw new Error(result.error);
+      // The valid field wins; the malformed one falls back to the generic contract.
+      expect(result.capabilities?.maxReferenceImages).toBe(2);
+      expect(result.capabilities?.nMax).toBe(8);
+      const logged = errSpy.mock.calls.map((c) => String(c[0])).join('\n');
+      expect(logged).toContain('[pi-image-gen]');
+      expect(logged).toContain('capabilities.nMax');
+    } finally {
+      errSpy.mockRestore();
+    }
+  });
+
+  it('leaves capabilities undefined for unknown custom models and slash routes', () => {
+    const custom = resolveModel('sd-3-large', {
+      customProviders: {
+        'my-sd': {
+          api: 'openai',
+          baseUrl: 'https://api.my-sd.test/v1',
+          apiKey: 'sd-key',
+          models: ['sd-3-large'],
+        },
+      },
+    });
+    if ('error' in custom) throw new Error(custom.error);
+    expect(custom.capabilities).toBeUndefined();
+
+    process.env.OPENROUTER_API_KEY = 'or-test';
+    const slash = resolveModel('openrouter/google/gemini-2.5-flash-image', {});
+    if ('error' in slash) throw new Error(slash.error);
+    expect(slash.capabilities).toBeUndefined();
   });
 });

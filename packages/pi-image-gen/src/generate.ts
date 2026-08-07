@@ -1,6 +1,7 @@
 import { mkdir, open, unlink } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
 import { readResponseBytes, safeFetch } from '@amaster.ai/pi-shared';
+import { validateGenerateParams } from './capabilities.js';
 import { resolveModel } from './config.js';
 import {
   cancelledError,
@@ -64,6 +65,13 @@ export async function generateImage(
 
   const resolved = resolveModel(requested, options.settings);
   if ('error' in resolved) throw new ImageGenError(resolved.error, 'model did not resolve');
+
+  // Pre-flight guards only against parameter combinations our adapters would
+  // silently drop (see capabilities.ts) — documented numeric limits are
+  // schema-description advice, and the provider's error is the backstop.
+  if (resolved.capabilities) {
+    validateGenerateParams(params, resolved.capabilities, resolved.requestedId);
+  }
 
   const adapter = getAdapter(resolved.provider.api);
   const inputs = await resolveImageInputs(params.image, options.cwd, safeFetch, options.signal);

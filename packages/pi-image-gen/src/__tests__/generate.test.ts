@@ -685,4 +685,46 @@ describe('generateImage', () => {
     expect(refs).toHaveLength(1);
     expect(refs[0]?.image_url.url.startsWith('data:image/png;base64,')).toBe(true);
   });
+
+  it('passes out-of-documented-range size and n through to the provider (advisory, not gated)', async () => {
+    const cwd = makeTmpDir();
+    vi.stubEnv('DASHSCOPE_API_KEY', 'ds-test');
+    const settings: ImageGenSettings = { defaultModel: 'qwen-image-3.0' };
+
+    const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
+    const fetchImpl: typeof fetch = (async (input, init) => {
+      const url = typeof input === 'string' ? input : (input as URL).toString();
+      calls.push({ url, body: JSON.parse(String((init as RequestInit)?.body ?? '{}')) });
+      return fakeJsonResponse({
+        output: { choices: [{ message: { content: [{ image: 'https://cdn.test/out.png' }] } }] },
+      });
+    }) as typeof fetch;
+    // The url-style result is downloaded through safeFetch — serve the bytes.
+    safeFetchMock.mockImplementation(
+      async () =>
+        new Response(PNG_BYTES, { status: 200, headers: { 'content-type': 'image/png' } }),
+    );
+
+    // 256*256 is below the documented 512*512 floor and n=42 exceeds the
+    // documented 1–6 — a private deployment may allow both; the provider's
+    // own error is the backstop, so the call must reach the wire unchanged.
+    await generateImage({ prompt: 'p', size: '256*256', n: 42 }, { cwd, settings, fetchImpl });
+
+    expect(calls).toHaveLength(1);
+    const parameters = calls[0]?.body.parameters as Record<string, unknown>;
+    expect(parameters.size).toBe('256*256');
+    expect(parameters.n).toBe(42);
+  });
+
+  it('rejects a pixel size on gemini-style models before any provider call', async () => {
+    const cwd = makeTmpDir();
+    vi.stubEnv('GEMINI_API_KEY', 'gem-test');
+    const settings: ImageGenSettings = { defaultModel: 'nano-banana-pro' };
+    const fetchImpl = vi.fn() as unknown as typeof fetch;
+
+    await expect(
+      generateImage({ prompt: 'p', size: '1024x1024' }, { cwd, settings, fetchImpl }),
+    ).rejects.toThrow(/no pixel-size knob/);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
 });
