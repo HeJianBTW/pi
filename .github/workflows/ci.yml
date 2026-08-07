@@ -10,11 +10,6 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  # Run JavaScript actions (checkout, setup-node, pnpm/action-setup, etc.) on
-  # Node 24 instead of the deprecated Node 20 the runner ships by default.
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
-
 jobs:
   lint:
     name: Lint
@@ -26,7 +21,7 @@ jobs:
       - linux
       - x64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: biomejs/setup-biome@v2
       - run: biome check .
 
@@ -40,7 +35,7 @@ jobs:
       - linux
       - x64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-pi-build
         with:
           build: 'false'
@@ -61,7 +56,7 @@ jobs:
           job_tmp="$RUNNER_TEMP/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-test"
           mkdir -p "$job_tmp"
           echo "TMPDIR=$job_tmp" >> "$GITHUB_ENV"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-pi-build
         with:
           build: 'false'
@@ -81,6 +76,6 @@ jobs:
       - x64
     needs: [lint, typecheck, test]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-pi-build
       - run: pnpm build

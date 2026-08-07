@@ -1,9 +1,11 @@
 import { loadPiSettings } from '@amaster.ai/pi-shared/settings';
+import { sanitizeCapabilities } from './capabilities.js';
 import {
   BUILT_IN_MODELS,
   DEFAULT_API_STYLE,
   DEFAULT_BASE_URL,
   ENV_VARS,
+  findBuiltInModel,
   PROVIDER_DISPLAY_NAME,
 } from './models.js';
 import type {
@@ -11,11 +13,52 @@ import type {
   CustomImageModel,
   CustomImageProvider,
   ImageGenSettings,
+  ImageModelCapabilities,
   ResolvedModel,
   ResolvedProvider,
 } from './types.js';
 
 const SETTINGS_KEY = 'pi-image-gen';
+
+/**
+ * Conservative capability fallback for custom models that declare partial
+ * capabilities (or inherit by id) but leave fields unset: today's generic
+ * contract — n up to 8, any sniffable format, the global byte ceiling.
+ * Custom models with neither an explicit declaration nor a built-in id match
+ * get NO capabilities at all (generic schema, no validation), so their
+ * behavior is unchanged.
+ */
+const GENERIC_CAPABILITIES: ImageModelCapabilities = {
+  nMax: 8,
+  maxReferenceImages: 8,
+  // Keep in sync with sniffMime's detectable set in image-input.ts.
+  inputFormats: ['PNG', 'JPEG', 'GIF', 'WEBP', 'BMP', 'TIFF', 'HEIC', 'HEIF'],
+  inputMaxBytes: 20 * 1024 * 1024,
+};
+
+/**
+ * Resolve a custom model's capabilities: explicit per-field declarations win
+ * (after a shape check — settings are a trust boundary), then the built-in
+ * registry entry of the same id, then the generic contract. Mirrors
+ * pi-video-gen's capability inheritance for custom models.
+ */
+function inheritCapabilities(
+  modelId: string,
+  explicit: Partial<ImageModelCapabilities> | undefined,
+  owner: string,
+): ImageModelCapabilities | undefined {
+  const builtIn = findBuiltInModel(modelId)?.capabilities;
+  if (!builtIn && !explicit) return undefined;
+  const merged: ImageModelCapabilities = { ...GENERIC_CAPABILITIES, ...builtIn };
+  if (explicit) {
+    for (const [key, value] of Object.entries(sanitizeCapabilities(explicit, owner))) {
+      if (value !== undefined) {
+        (merged as Record<string, unknown>)[key] = value;
+      }
+    }
+  }
+  return merged;
+}
 
 export function loadImageGenSettings(cwd: string, projectTrusted = false): ImageGenSettings {
   try {
@@ -64,13 +107,20 @@ function buildCustomProvider(name: string, raw: CustomImageProvider): ResolvedPr
   return provider;
 }
 
-function customModels(raw: CustomImageProvider): Array<{ id: string; alias: string }> {
+function customModels(
+  raw: CustomImageProvider,
+): Array<{ id: string; alias: string; capabilities?: Partial<ImageModelCapabilities> }> {
   const list = raw.models ?? [];
   return list.flatMap((entry) => {
     if (typeof entry === 'string') return [{ id: entry, alias: entry }];
     const m = entry as CustomImageModel;
     if (!m.id) return [];
-    return [{ id: m.id, alias: m.alias ?? m.id }];
+    const out: { id: string; alias: string; capabilities?: Partial<ImageModelCapabilities> } = {
+      id: m.id,
+      alias: m.alias ?? m.id,
+    };
+    if (m.capabilities) out.capabilities = m.capabilities;
+    return [out];
   });
 }
 
@@ -96,18 +146,29 @@ export function resolveModel(
     if (!provider) continue;
     for (const model of customModels(raw)) {
       if (model.alias === requested || model.id === requested) {
-        return { provider, remoteId: model.id, requestedId: requested };
+        const resolved: ResolvedModel = { provider, remoteId: model.id, requestedId: requested };
+        const capabilities = inheritCapabilities(
+          model.id,
+          model.capabilities,
+          `customProviders.${name} model "${model.id}"`,
+        );
+        if (capabilities) resolved.capabilities = capabilities;
+        return resolved;
       }
     }
   }
 
-  const builtIn = BUILT_IN_MODELS.find(
-    (entry) => entry.id === requested || entry.aliases?.includes(requested),
-  );
+  const builtIn = findBuiltInModel(requested);
   if (builtIn) {
     const provider = buildBuiltInProvider(builtIn.provider, settings);
     if (provider?.apiKey) {
-      return { provider, remoteId: builtIn.remoteId ?? builtIn.id, requestedId: requested };
+      const resolved: ResolvedModel = {
+        provider,
+        remoteId: builtIn.remoteId ?? builtIn.id,
+        requestedId: requested,
+      };
+      if (builtIn.capabilities) resolved.capabilities = builtIn.capabilities;
+      return resolved;
     }
     // Built-in match without a configured API key — fall through so a
     // catch-all customProvider can still pick this up.
