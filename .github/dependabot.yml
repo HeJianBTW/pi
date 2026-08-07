@@ -1,0 +1,12 @@
+version: 2
+updates:
+  # Keep action pins on node24-native majors so runner deprecations surface
+  # as PRs instead of warnings. Grouped into a single weekly PR.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns:
+          - '*'
