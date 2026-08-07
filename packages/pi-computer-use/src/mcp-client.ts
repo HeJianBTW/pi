@@ -22,6 +22,7 @@ import type { McpToolResult } from './tool-result.js';
 
 const MCP_TIMEOUT_MS = 60_000;
 const DAEMON_START_TIMEOUT_MS = 10_000;
+const PERMANENT_STATUS_ERROR_CODES = new Set(['EACCES', 'ENOENT', 'EPERM']);
 const DAEMON_LEASE_SCRIPT = `
 if IFS= read -r _; then exit 0; fi
 attempt=0
@@ -113,16 +114,25 @@ export async function waitForDaemonStatus(
     }),
 ): Promise<void> {
   const deadline = Date.now() + DAEMON_START_TIMEOUT_MS;
+  let lastError: unknown;
   while (Date.now() < deadline) {
     try {
       await checkStatus();
       return;
-    } catch {
+    } catch (error) {
       if (signal?.aborted) throw abortError(signal);
+      lastError = error;
+      const code =
+        error && typeof error === 'object' && 'code' in error && typeof error.code === 'string'
+          ? error.code
+          : undefined;
+      if (code && PERMANENT_STATUS_ERROR_CODES.has(code)) {
+        throw new Error(`Cua Driver status check failed (${code}).`, { cause: error });
+      }
     }
     await delay(50, signal);
   }
-  throw new Error('Cua Driver daemon did not respond to a status check.');
+  throw new Error('Cua Driver daemon did not respond to a status check.', { cause: lastError });
 }
 
 export interface DriverLayout {

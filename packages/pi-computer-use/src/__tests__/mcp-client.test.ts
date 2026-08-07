@@ -87,6 +87,19 @@ describe('CuaDriverClient', () => {
     expect(checkStatus).toHaveBeenCalledOnce();
   });
 
+  it('does not retry permanent Windows daemon status errors', async () => {
+    const cause = Object.assign(new Error('spawn failed'), { code: 'EACCES' });
+    const checkStatus = vi.fn().mockRejectedValue(cause);
+
+    await expect(
+      waitForDaemonStatus('cua-driver.exe', '\\\\.\\pipe\\pi-cua-test', undefined, checkStatus),
+    ).rejects.toMatchObject({
+      message: 'Cua Driver status check failed (EACCES).',
+      cause,
+    });
+    expect(checkStatus).toHaveBeenCalledOnce();
+  });
+
   it('constructs the MCP Client with the sanitizing schema validator', async () => {
     // biome-ignore lint/complexity/useArrowFunction: arrow functions are not constructible; the mock must survive `new Client(...)`.
     vi.mocked(Client).mockImplementation(function () {
