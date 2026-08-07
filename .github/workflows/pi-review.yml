@@ -150,7 +150,7 @@ jobs:
           AGENT
 
       - name: Prepare untrusted PR data for review
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         env:
           CONTEXT_PATH: ${{ runner.temp }}/pi-review-context.md
         with:
@@ -209,7 +209,7 @@ jobs:
         run: node .github/scripts/pi-review-trace.mjs "$PI_REVIEW_FULL"
 
       - name: Combine structured axis review outputs
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const { pathToFileURL } = require('node:url');
@@ -222,7 +222,7 @@ jobs:
             });
 
       - name: Publish review comment
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         env:
           REVIEW_PATH: ${{ runner.temp }}/pi-review-output.json
         with:
