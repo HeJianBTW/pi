@@ -7,6 +7,7 @@ import {
   resolveUnixSocketPath,
   SanitizingJsonSchemaValidator,
   sanitizeSchemaFormats,
+  waitForDaemonStatus,
 } from '../mcp-client.js';
 
 vi.mock('@modelcontextprotocol/sdk/client/index.js', () => ({ Client: vi.fn() }));
@@ -53,6 +54,37 @@ describe('CuaDriverClient', () => {
       '/tmp/pi-cua-123-deadbeef.sock',
     );
     expect(Buffer.byteLength(resolveUnixSocketPath('/tmp', '123-deadbeef'))).toBeLessThan(91);
+  });
+
+  it('waits until the Windows daemon responds before opening the MCP proxy', async () => {
+    const checkStatus = vi
+      .fn<() => Promise<void>>()
+      .mockRejectedValueOnce(new Error('named pipe is not ready'))
+      .mockRejectedValueOnce(new Error('named pipe is not ready'))
+      .mockResolvedValue(undefined);
+
+    await waitForDaemonStatus('cua-driver.exe', '\\\\.\\pipe\\pi-cua-test', undefined, checkStatus);
+
+    expect(checkStatus).toHaveBeenCalledTimes(3);
+  });
+
+  it('stops Windows daemon status retries when the session is aborted', async () => {
+    const controller = new AbortController();
+    const reason = new Error('session stopped');
+    const checkStatus = vi.fn(async () => {
+      controller.abort(reason);
+      throw new Error('named pipe is not ready');
+    });
+
+    await expect(
+      waitForDaemonStatus(
+        'cua-driver.exe',
+        '\\\\.\\pipe\\pi-cua-test',
+        controller.signal,
+        checkStatus,
+      ),
+    ).rejects.toBe(reason);
+    expect(checkStatus).toHaveBeenCalledOnce();
   });
 
   it('constructs the MCP Client with the sanitizing schema validator', async () => {

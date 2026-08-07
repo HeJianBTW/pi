@@ -101,6 +101,30 @@ export function resolveUnixSocketPath(tempDir: string, suffix: string): string {
     : path.join('/tmp', filename);
 }
 
+export async function waitForDaemonStatus(
+  binaryPath: string,
+  socket: string,
+  signal?: AbortSignal,
+  checkStatus: () => Promise<unknown> = () =>
+    execFileAsync(binaryPath, ['status', '--socket', socket], {
+      signal,
+      timeout: 250,
+      windowsHide: true,
+    }),
+): Promise<void> {
+  const deadline = Date.now() + DAEMON_START_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    try {
+      await checkStatus();
+      return;
+    } catch {
+      if (signal?.aborted) throw abortError(signal);
+    }
+    await delay(50, signal);
+  }
+  throw new Error('Cua Driver daemon did not respond to a status check.');
+}
+
 export interface DriverLayout {
   binaryPath: string;
   appPath?: string;
@@ -420,6 +444,9 @@ export class CuaDriverClient {
     });
     this.daemonProcess = daemon;
     await this.waitForDaemonReady(daemon, socket, signal);
+    if (process.platform === 'win32') {
+      await waitForDaemonStatus(layout.binaryPath, socket, signal);
+    }
     return socket;
   }
 
