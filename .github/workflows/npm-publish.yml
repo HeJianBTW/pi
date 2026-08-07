@@ -23,11 +23,6 @@ concurrency:
   group: npm-publish-${{ github.ref }}
   cancel-in-progress: false
 
-env:
-  # Run JavaScript actions (checkout, setup-node, pnpm/action-setup, etc.) on
-  # Node 24 instead of the deprecated Node 20 the runner ships by default.
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
-
 jobs:
   build-video-ffmpeg:
     name: build pi-video-gen FFmpeg (${{ matrix.target }})
@@ -55,7 +50,7 @@ jobs:
 
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install build dependencies
         run: |
@@ -220,7 +215,7 @@ jobs:
             bin LICENSE GPLv2.txt ZLIB_LICENSE.txt SOURCE.md source
 
       - name: Upload platform package payload
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: pi-video-gen-ffmpeg-${{ matrix.target }}
           path: pi-video-gen-ffmpeg-${{ matrix.target }}.tar.gz
@@ -243,36 +238,36 @@ jobs:
 
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
       - name: Download darwin-arm64 FFmpeg
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: pi-video-gen-ffmpeg-darwin-arm64
           path: .release-artifacts/darwin-arm64
 
       - name: Download darwin-x64 FFmpeg
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: pi-video-gen-ffmpeg-darwin-x64
           path: .release-artifacts/darwin-x64
 
       - name: Download linux-arm64 FFmpeg
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: pi-video-gen-ffmpeg-linux-arm64
           path: .release-artifacts/linux-arm64
 
       - name: Download linux-x64 FFmpeg
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: pi-video-gen-ffmpeg-linux-x64
           path: .release-artifacts/linux-x64
 
       - name: Download win32-x64 FFmpeg
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: pi-video-gen-ffmpeg-win32-x64
           path: .release-artifacts/win32-x64
@@ -291,7 +286,7 @@ jobs:
             -C packages/pi-video-gen/platforms/ffmpeg-win32-x64
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "24"
           registry-url: https://registry.npmjs.org

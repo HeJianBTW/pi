@@ -7,11 +7,6 @@ on:
 permissions:
   contents: read
 
-env:
-  # Run JavaScript actions (checkout, setup-node, pnpm/action-setup, etc.) on
-  # Node 24 instead of the deprecated Node 20 the runner ships by default.
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
-
 jobs:
   build-checks:
     name: build checks
@@ -32,7 +27,7 @@ jobs:
           echo "TMPDIR=$job_tmp" >> "$GITHUB_ENV"
 
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup pi build environment
         uses: ./.github/actions/setup-pi-build
