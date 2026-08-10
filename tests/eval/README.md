@@ -27,6 +27,8 @@ tests/eval/
   computer/
     run-computer.ts     # pi-computer-use L3 runner (real cua-driver via pi CLI; macOS-only)
     tasks.ts            # desktop task set + deterministic success predicates
+  video/
+    run-video.ts        # pi-video-gen ViMax-Bench runner (real shot-book pipeline via pi CLI)
 ```
 
 ## Quick start
@@ -174,9 +176,59 @@ The **Agentic Eval** workflow includes a `computer-eval` job (run it via the
 Linux runner it no-ops via the graceful skip above. Point the job's `runs-on` at
 a macOS runner with the TCC grants to get real numbers.
 
+## Video (pi-video-gen on ViMax-Bench — render quality + cross-shot consistency)
+
+Answers "how good is the video our shot-book pipeline actually produces" — a
+**quality** eval, unlike the L3 task-completion runners above. Input data is
+[HKUDS/ViMax](https://github.com/HKUDS/ViMax)'s `vimax_benchmark/` (MIT): 35
+multi-shot story specs (Type A = character persistence, B = background
+persistence, C = multi-person separability; Medium = 2 scenes/8-10 shots,
+Long = 3-4 scenes/12-16 shots). The runner converts each spec **deterministically**
+into a VideoProject shot book, then drives the real `pi` CLI to execute it
+(`image_generate` per shot frame → one `video_render`) — the LLM only executes
+the plan, so scores reflect render/orchestration quality, not planning variance.
+
+**COST WARNING: every story is 8-16 paid video clips + ~1 image per shot.**
+Always slice with `--samples`/`--tier`/`--story`.
+
+```bash
+pnpm --filter @amaster.ai/pi-eval fetch:vimax        # one-time, pinned commit
+
+# local: reuse your ~/.pi/agent video/image provider config
+pnpm --filter @amaster.ai/pi-eval eval:video -- --use-default-pi --model deepseek-v4-flash --samples 2 --tier medium
+
+# CI shape: generated extension settings from env (mirrors integration.yml's gateway)
+export PI_INTEGRATION_BASE_URL="https://your-gateway/v1"
+export PI_INTEGRATION_API_KEY="sk-..."
+export PI_EVAL_IMAGE_MODEL="doubao-seedream-5-0-lite-260128"
+pnpm --filter @amaster.ai/pi-eval eval:video -- --model deepseek-v4-flash --samples 2 --models "$MODELS"
+
+# VLM-judge the run (needs ffmpeg on PATH or FFMPEG_PATH, and a vision model)
+pnpm --filter @amaster.ai/pi-eval judge:video -- \
+  --input results/video-vimax.json --llm-model kimi-k2.6 --models "$MODELS"
+```
+
+Extra flags: `--tier medium|long|all`, `--story <id>`, `--video-model`
+(default `doubao-seedance-2-0-260128` via a newapi-shaped gateway),
+`--timeout` (default 2h per story — a full shot-book render takes tens of
+minutes). Artifacts (generated images, per-shot clips, `final_video.mp4`,
+judge frames) land in `results/artifacts/`.
+
+**Scoring.** `run-video.ts` reports pipeline health: `completionRate` (final
+video verified on disk), `specViolations` (runs where the LLM rewrote the shot
+book instead of executing it — the written `render-input.json`'s shot ids/order
+are compared against the spec), `avgTurns`, `failureMix`. `judge-video.ts`
+reports quality: a VLM scores `consistency` (1-5, rubric keyed to the story's
+ViMax type) and per-shot `prompt_following` from probed mid-clip frames,
+aggregated overall and by type. The VLM judge reimplements the *spirit* of the
+paper's ViCLIP consistency metric — **scores are comparable across providers
+and across our own releases, not to the ViMax paper numbers** (that would
+require reimplementing ViCLIP; out of scope, see Status).
+
 ## Datasets
 
 - **LoCoMo** — multi-session conversational QA. Pulled from [snap-research/locomo](https://github.com/snap-research/locomo) (MIT). ~600 samples; runner takes `--samples N` for a slice.
+- **ViMax-Bench** — 35 multi-shot story specs for video consistency. Pulled from [HKUDS/ViMax](https://github.com/HKUDS/ViMax) (MIT), pinned commit in `scripts/fetch-vimax.ts`. Data only — scoring is ours.
 - LongMemEval / MemBench — TODO. Same fetch-on-demand pattern.
 
 We deliberately do **not** consume [OpenDataBox/MemoryData](https://github.com/OpenDataBox/MemoryData) directly — that repo has no license. We borrow its evaluation taxonomy (recall / conflict / multi-session / update) and pull data from each upstream.
@@ -227,6 +279,8 @@ Notes:
 Working, run manually (no CI hook). Open items:
 
 - Only LoCoMo wired; LongMemEval / MemBench are TODO (same fetch-on-demand pattern).
+- Video eval v1 executes pre-planned shot books only; LLM-planned runs (planning
+  quality) and a ViCLIP reimplementation (paper-comparable numbers) are TODO.
 - Multi-sample averaging to shrink variance (currently 2 samples).
 - Judge variance reduction (multi-pass majority vote).
 - Reasoning models need generous `max_tokens` (write loop uses 4096, judge 512) —

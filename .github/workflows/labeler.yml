@@ -38,11 +38,6 @@ permissions:
   issues: write
   pull-requests: write
 
-env:
-  # Run JavaScript actions (checkout, setup-node, pnpm/action-setup, etc.) on
-  # Node 24 instead of the deprecated Node 20 the runner ships by default.
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
-
 jobs:
   label:
     name: Sync PR labels
@@ -57,7 +52,7 @@ jobs:
 
     steps:
       - name: Sync labels
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             // ── Label catalog ─────────────────────────────────────────────

@@ -15,7 +15,6 @@ permissions:
   pull-requests: write
 
 env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
   PI_REVIEW_MODEL: deepseek-v4-flash
   PI_OFFLINE: '1'
   PI_SUBAGENT_MAX_DEPTH: '1'
@@ -37,14 +36,14 @@ jobs:
       # pull_request_target provides secrets, so only the trusted base commit is
       # checked out. PR files are never executed or loaded as configuration.
       - name: Check out trusted base revision
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.base.sha }}
           fetch-depth: 1
           persist-credentials: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 24
 
@@ -151,7 +150,7 @@ jobs:
           AGENT
 
       - name: Prepare untrusted PR data for review
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           CONTEXT_PATH: ${{ runner.temp }}/pi-review-context.md
         with:
@@ -210,7 +209,7 @@ jobs:
         run: node .github/scripts/pi-review-trace.mjs "$PI_REVIEW_FULL"
 
       - name: Combine structured axis review outputs
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const { pathToFileURL } = require('node:url');
@@ -223,7 +222,7 @@ jobs:
             });
 
       - name: Publish review comment
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           REVIEW_PATH: ${{ runner.temp }}/pi-review-output.json
         with:
@@ -237,7 +236,7 @@ jobs:
       # streaming thinking and large tool args), Pi stderr, and the combined review.
       - name: Upload Pi review execution artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: pi-review-execution-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: ignore

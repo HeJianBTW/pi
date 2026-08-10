@@ -14,11 +14,6 @@ concurrency:
 permissions:
   contents: read
 
-env:
-  # Run JavaScript actions (checkout, setup-node, pnpm/action-setup, etc.) on
-  # Node 24 instead of the deprecated Node 20 the runner ships by default.
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
-
 jobs:
   detect-extension-matrix:
     name: Detect extension E2E matrix
@@ -33,7 +28,7 @@ jobs:
       matrix: ${{ steps.select.outputs.matrix }}
       has_extensions: ${{ steps.select.outputs.has_extensions }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Select changed extension scenarios
@@ -64,7 +59,7 @@ jobs:
       PI_OFFLINE: '0'
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Setup pi build environment
         uses: ./.github/actions/setup-pi-build
         with:
@@ -124,7 +119,7 @@ jobs:
       PI_OFFLINE: '0'
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Setup pi build environment
         uses: ./.github/actions/setup-pi-build
         with:
@@ -250,7 +245,7 @@ jobs:
           mkdir -p "$job_tmp"
           echo "TMPDIR=$job_tmp" >> "$GITHUB_ENV"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Setup pi build environment
         uses: ./.github/actions/setup-pi-build
         with:
@@ -643,7 +638,7 @@ jobs:
 
       - name: Upload preview promo (pi-video-gen only)
         if: matrix.extension == 'pi-video-gen'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: pi-video-gen-preview-promo
           path: |

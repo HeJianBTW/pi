@@ -297,6 +297,26 @@ export async function drivePrompt(
   }
 
   const events = parseEvents(out.stdout);
+  // pi can exit 0 while printing a plain-text fatal (e.g. "No API key found
+  // for provider X") and emitting ZERO events. Without this, the run reads as
+  // a silent check-failed instead of the crash it is.
+  if (events.length === 0) {
+    const text = out.stdout
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l && !l.startsWith('{'))
+      .join(' ')
+      .slice(0, 300);
+    return {
+      answer: '',
+      observed: '',
+      turns: 0,
+      toolCalls: 0,
+      sawToolError: false,
+      failureMode: 'crash',
+      error: text || `pi produced no events (exit ${out.code})`,
+    };
+  }
   const answerParts: string[] = [];
   const observedParts: string[] = [];
   let turns = 0;
