@@ -36,6 +36,12 @@ function textResult(text: string): AgentToolResult<unknown> {
   };
 }
 
+function rethrowIfCancelled(signal?: AbortSignal): void {
+  if (signal?.aborted) {
+    throw signal.reason instanceof Error ? signal.reason : new Error('Mem0 request cancelled.');
+  }
+}
+
 export function createMem0Tools(provider: Mem0Provider, userId: string): ToolDefinition[] {
   const searchTool: ToolDefinition = {
     name: 'mem0_search',
@@ -47,14 +53,18 @@ export function createMem0Tools(provider: Mem0Provider, userId: string): ToolDef
       query: Type.String({ description: 'What to search for.' }),
       top_k: Type.Optional(Type.Number({ description: 'Max results (default: 10, max: 50).' })),
     }),
-    async execute(_toolCallId, params) {
+    async execute(_toolCallId, params, signal) {
       const query = String(params.query ?? '');
       const topK = Math.min(Number(params.top_k) || 10, 50);
 
       if (!query) return textResult(JSON.stringify({ error: 'Query cannot be empty.' }));
 
       try {
-        const results = await provider.search(query, { userId, topK });
+        const results = await provider.search(query, {
+          userId,
+          topK,
+          ...(signal ? { signal } : {}),
+        });
         if (results.length === 0) {
           return textResult(JSON.stringify({ result: 'No relevant memories found.' }));
         }
@@ -67,12 +77,9 @@ export function createMem0Tools(provider: Mem0Provider, userId: string): ToolDef
             count: results.length,
           }),
         );
-      } catch (err) {
-        return textResult(
-          JSON.stringify({
-            error: `Search failed: ${err instanceof Error ? err.message : String(err)}`,
-          }),
-        );
+      } catch {
+        rethrowIfCancelled(signal);
+        throw new Error('Mem0 search failed.');
       }
     },
   };
@@ -83,9 +90,9 @@ export function createMem0Tools(provider: Mem0Provider, userId: string): ToolDef
     description: 'Retrieve all stored long-term memories about the user.',
     promptSnippet: 'Full dump of all stored user memories.',
     parameters: Type.Object({}),
-    async execute() {
+    async execute(_toolCallId, _params, signal) {
       try {
-        const memories = await provider.getAll({ userId });
+        const memories = await provider.getAll({ userId, ...(signal ? { signal } : {}) });
         if (memories.length === 0) {
           return textResult(JSON.stringify({ result: 'No memories stored yet.' }));
         }
@@ -94,12 +101,9 @@ export function createMem0Tools(provider: Mem0Provider, userId: string): ToolDef
           .filter(Boolean)
           .map(formatRecalledMemory);
         return textResult(JSON.stringify({ result: lines.join('\n'), count: lines.length }));
-      } catch (err) {
-        return textResult(
-          JSON.stringify({
-            error: `Profile failed: ${err instanceof Error ? err.message : String(err)}`,
-          }),
-        );
+      } catch {
+        rethrowIfCancelled(signal);
+        throw new Error('Mem0 profile failed.');
       }
     },
   };
@@ -113,7 +117,7 @@ export function createMem0Tools(provider: Mem0Provider, userId: string): ToolDef
     parameters: Type.Object({
       fact: Type.String({ description: 'The fact to store.' }),
     }),
-    async execute(_toolCallId, params) {
+    async execute(_toolCallId, params, signal) {
       const fact = String(params.fact ?? '').trim();
       if (!fact) return textResult(JSON.stringify({ error: 'Fact cannot be empty.' }));
 
@@ -121,16 +125,14 @@ export function createMem0Tools(provider: Mem0Provider, userId: string): ToolDef
         const result = await provider.add([{ role: 'user', content: redactMemoryText(fact) }], {
           userId,
           infer: false,
+          ...(signal ? { signal } : {}),
         });
         return textResult(
           JSON.stringify(result ? { result: 'Fact stored.' } : { error: 'Failed to store.' }),
         );
-      } catch (err) {
-        return textResult(
-          JSON.stringify({
-            error: `Save failed: ${err instanceof Error ? err.message : String(err)}`,
-          }),
-        );
+      } catch {
+        rethrowIfCancelled(signal);
+        throw new Error('Mem0 save failed.');
       }
     },
   };

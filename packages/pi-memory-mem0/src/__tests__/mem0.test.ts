@@ -53,6 +53,41 @@ describe('createMem0Tools', () => {
     expect(parsed).toMatchObject({ truncated: true });
     expect(parsed.preview).toContain('[UNTRUSTED MEMORY DATA]');
   });
+
+  it.each([
+    ['mem0_search', { query: 'pets' }, 'search'],
+    ['mem0_profile', {}, 'getAll'],
+    ['mem0_save', { fact: 'likes cats' }, 'add'],
+  ] as const)('propagates cancellation from %s', async (toolName, params, method) => {
+    const controller = new AbortController();
+    const reason = new Error('caller cancelled');
+    const operation = vi.fn((...args: unknown[]) => {
+      const opts = args.at(-1) as { signal?: AbortSignal };
+      return new Promise((_resolve, reject) => {
+        opts.signal?.addEventListener('abort', () => reject(opts.signal?.reason), { once: true });
+      });
+    });
+    const provider = mockProvider({ [method]: operation });
+    const tool = createMem0Tools(provider, 'u').find((candidate) => candidate.name === toolName)!;
+    const pending = tool.execute('c', params, controller.signal);
+    await vi.waitFor(() => expect(operation).toHaveBeenCalledOnce());
+
+    controller.abort(reason);
+
+    await expect(pending).rejects.toBe(reason);
+  });
+
+  it('throws a sanitized provider failure for the runtime to mark as an error', async () => {
+    const provider = mockProvider({
+      search: vi.fn().mockRejectedValue(new Error('request failed')),
+    });
+    const tool = createMem0Tools(provider, 'u').find(
+      (candidate) => candidate.name === 'mem0_search',
+    )!;
+
+    await expect(tool.execute('c', { query: 'pets' })).rejects.toThrow('Mem0 search failed.');
+    await expect(tool.execute('c', { query: 'pets' })).rejects.not.toThrow('request failed');
+  });
 });
 
 describe('mem0_search tool', () => {
@@ -99,8 +134,8 @@ describe('mem0_search tool', () => {
     const provider = mockProvider({
       search: vi.fn().mockRejectedValue(new Error('fail')),
     });
-    const result = await run(provider, { query: 'test' });
-    expect(result.error).toContain('fail');
+    const tool = createMem0Tools(provider, 'u').find((t) => t.name === 'mem0_search')!;
+    await expect(tool.execute('c', { query: 'test' })).rejects.toThrow('Mem0 search failed.');
   });
 });
 
@@ -132,8 +167,8 @@ describe('mem0_save tool', () => {
     const provider = mockProvider({
       add: vi.fn().mockRejectedValue(new Error('network')),
     });
-    const result = await run(provider, { fact: 'something' });
-    expect(result.error).toContain('network');
+    const tool = createMem0Tools(provider, 'u').find((t) => t.name === 'mem0_save')!;
+    await expect(tool.execute('c', { fact: 'something' })).rejects.toThrow('Mem0 save failed.');
   });
 });
 
@@ -274,7 +309,7 @@ describe('createMem0Provider with resolveProvider', () => {
 
     await create({
       config: {
-        mode: 'open-source',
+        mode: 'embedded',
         oss: {
           embedder: { provider: 'amaster', config: { model: 'text-embedding-v4' } },
           llm: { provider: 'amaster', config: { model: 'deepseek-v4-pro' } },
@@ -310,12 +345,22 @@ describe('createMem0Provider with resolveProvider', () => {
     expect(llm.config.model).toBe('deepseek-v4-pro');
   });
 
+  it('keeps the historical open-source mode as an embedded runtime alias', async () => {
+    const { createMem0Provider: create } = await import('../provider.js');
+
+    await create({
+      config: { mode: 'open-source' as never },
+    });
+
+    expect(__capturedMem0Config).toBeDefined();
+  });
+
   it('falls back to resolveKey when resolveProvider is not provided', async () => {
     const { createMem0Provider: create } = await import('../provider.js');
 
     await create({
       config: {
-        mode: 'open-source',
+        mode: 'embedded',
         oss: {
           embedder: { provider: 'openai', config: { model: 'text-embedding-3-small' } },
         },
@@ -341,7 +386,7 @@ describe('createMem0Provider with resolveProvider', () => {
 
     await create({
       config: {
-        mode: 'open-source',
+        mode: 'embedded',
         oss: {
           embedder: { provider: 'ollama', config: { model: 'nomic-embed' } },
         },
@@ -371,7 +416,7 @@ describe('createMem0Provider additional scenarios', () => {
     const { createMem0Provider: create } = await import('../provider.js');
 
     await create({
-      config: { mode: 'open-source' },
+      config: { mode: 'embedded' },
     });
 
     expect(__capturedMem0Config).toBeDefined();
@@ -393,7 +438,7 @@ describe('createMem0Provider additional scenarios', () => {
     const { createMem0Provider: create } = await import('../provider.js');
 
     await create({
-      config: { mode: 'open-source' },
+      config: { mode: 'embedded' },
     });
 
     expect(__capturedMem0Config).toBeDefined();
@@ -410,7 +455,7 @@ describe('createMem0Provider additional scenarios', () => {
 
     await create({
       config: {
-        mode: 'open-source',
+        mode: 'embedded',
         oss: {
           vectorStore: { provider: 'memory', config: { collectionName: 'custom' } },
         },
@@ -430,7 +475,7 @@ describe('createMem0Provider additional scenarios', () => {
 
     await create({
       config: {
-        mode: 'open-source',
+        mode: 'embedded',
         oss: {
           vectorStore: { provider: 'memory', config: { dbPath: ':memory:' } },
         },
@@ -449,7 +494,7 @@ describe('createMem0Provider additional scenarios', () => {
 
     await create({
       config: {
-        mode: 'open-source',
+        mode: 'embedded',
         oss: {
           vectorStore: { provider: 'qdrant', config: { url: 'http://localhost:6333' } },
         },
@@ -469,7 +514,7 @@ describe('createMem0Provider additional scenarios', () => {
     const { createMem0Provider: create } = await import('../provider.js');
 
     await create({
-      config: { mode: 'open-source' },
+      config: { mode: 'embedded' },
     });
 
     expect(__capturedMem0Config).toBeDefined();
@@ -488,7 +533,7 @@ describe('createMem0Provider additional scenarios', () => {
 
     await create({
       config: {
-        mode: 'open-source',
+        mode: 'embedded',
         oss: {
           historyStore: {
             provider: 'sqlite',
@@ -512,7 +557,7 @@ describe('createMem0Provider additional scenarios', () => {
 
     await create({
       config: {
-        mode: 'open-source',
+        mode: 'embedded',
         oss: {
           embedder: { provider: 'custom' },
         },
@@ -535,7 +580,7 @@ describe('createMem0Provider additional scenarios', () => {
 
     await create({
       config: {
-        mode: 'open-source',
+        mode: 'embedded',
         oss: {
           embedder: { provider: 'openai', config: { apiKey: 'explicit-key' } },
         },
@@ -564,7 +609,7 @@ describe('createMem0Provider additional scenarios', () => {
 
     await create({
       config: {
-        mode: 'open-source',
+        mode: 'embedded',
         oss: { disableHistory: true },
       },
     });

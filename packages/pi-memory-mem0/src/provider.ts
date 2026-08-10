@@ -1,19 +1,21 @@
 /**
- * Mem0 provider abstraction — supports both Platform (cloud) and OSS (local SQLite) modes.
+ * Mem0 provider abstraction for Platform, embedded, and self-hosted REST modes.
  *
  * Uses the `mem0ai` npm SDK which handles:
  * - Platform mode: REST API calls to api.mem0.ai
- * - OSS mode: vector storage + LLM extraction via configured providers
+ * - Embedded mode: vector storage + LLM extraction via configured providers
+ * - Self-hosted mode: direct HTTP calls to a separately deployed Mem0 server
  *
- * The mem0 OSS `memory` vector store is itself SQLite-backed. This extension
+ * The embedded mem0 `memory` vector store is itself SQLite-backed. This extension
  * configures it with a file under Pi home by default and lets mem0 own persistence
  * directly.
  */
 
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { resolveHome } from '@amaster.ai/pi-shared/settings';
-import type { AddResult, Mem0ExtensionConfig, MemoryItem } from './types.js';
+import type { AddResult, Mem0ExtensionConfig, Mem0Mode, MemoryItem } from './types.js';
 
 // ---------------------------------------------------------------------------
 // Provider Interface
@@ -22,14 +24,24 @@ import type { AddResult, Mem0ExtensionConfig, MemoryItem } from './types.js';
 export interface Mem0Provider {
   add(
     messages: Array<{ role: string; content: string }>,
-    opts: { userId: string; infer?: boolean; observedAt?: Date | string },
+    opts: { userId: string; infer?: boolean; observedAt?: Date | string; signal?: AbortSignal },
   ): Promise<AddResult | null>;
 
-  search(query: string, opts: { userId: string; topK?: number }): Promise<MemoryItem[]>;
+  search(
+    query: string,
+    opts: { userId: string; topK?: number; signal?: AbortSignal },
+  ): Promise<MemoryItem[]>;
 
-  getAll(opts: { userId: string }): Promise<MemoryItem[]>;
+  getAll(opts: { userId: string; signal?: AbortSignal }): Promise<MemoryItem[]>;
 
-  delete(memoryId: string): Promise<void>;
+  delete(memoryId: string, opts?: { signal?: AbortSignal }): Promise<void>;
+}
+
+export function normalizeMem0Mode(mode: unknown): Mem0Mode {
+  if (mode === undefined || mode === null) return 'platform';
+  if (mode === 'open-source') return 'embedded';
+  if (mode === 'platform' || mode === 'embedded' || mode === 'self-hosted') return mode;
+  throw new Error(`Unsupported Mem0 mode: ${String(mode)}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -88,13 +100,53 @@ function normalizeResults(raw: unknown): MemoryItem[] {
   return [];
 }
 
+function cancellationReason(signal: AbortSignal): Error {
+  return signal.reason instanceof Error ? signal.reason : new Error('Mem0 request cancelled.');
+}
+
+/**
+ * Stop awaiting SDK promises promptly when Pi cancels the tool call. Platform
+ * and direct REST requests also propagate the signal to fetch; the embedded
+ * SDK has no AbortSignal hook, so only the caller's wait can be cancelled.
+ */
+function waitWithCancellation<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.reject(cancellationReason(signal));
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(cancellationReason(signal));
+    signal.addEventListener('abort', onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener('abort', onAbort);
+        reject(error);
+      },
+    );
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Platform Provider
 // ---------------------------------------------------------------------------
 
+interface PlatformClient {
+  _fetchWithErrorHandling(url: string, init: RequestInit): Promise<unknown>;
+  add(
+    messages: Array<{ role: string; content: string }>,
+    opts: Record<string, unknown>,
+  ): Promise<unknown>;
+  search(query: string, opts: Record<string, unknown>): Promise<unknown>;
+  getAll(opts: Record<string, unknown>): Promise<unknown>;
+  delete(memoryId: string): Promise<unknown>;
+}
+
 class PlatformProvider implements Mem0Provider {
-  private client: unknown;
+  private client: PlatformClient | undefined;
   private initPromise: Promise<void> | null = null;
+  private readonly requestSignal = new AsyncLocalStorage<AbortSignal>();
 
   constructor(
     private readonly apiKey: string,
@@ -112,14 +164,30 @@ class PlatformProvider implements Mem0Provider {
     const { MemoryClient } = await import('mem0ai');
     const opts: Record<string, unknown> = { apiKey: this.apiKey };
     if (this.baseUrl) opts.host = this.baseUrl;
-    this.client = new MemoryClient(opts as never);
+    // mem0ai does not expose RequestInit on its public methods, but its fetch
+    // helper is intentionally an instance method. Add the per-call signal at
+    // that boundary; AsyncLocalStorage keeps concurrent requests isolated.
+    const client = new MemoryClient(opts as never) as unknown as PlatformClient;
+    const originalFetch = client._fetchWithErrorHandling.bind(client);
+    client._fetchWithErrorHandling = (url: string, init: RequestInit = {}) => {
+      const signal = this.requestSignal.getStore();
+      return originalFetch(url, signal ? { ...init, signal } : init);
+    };
+    this.client = client;
+  }
+
+  private runWithSignal<T>(
+    signal: AbortSignal | undefined,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    return signal ? this.requestSignal.run(signal, operation) : operation();
   }
 
   async add(
     messages: Array<{ role: string; content: string }>,
-    opts: { userId: string; infer?: boolean; observedAt?: Date | string },
+    opts: { userId: string; infer?: boolean; observedAt?: Date | string; signal?: AbortSignal },
   ): Promise<AddResult | null> {
-    await this.ensureClient();
+    await waitWithCancellation(this.ensureClient(), opts.signal);
     const addOpts: Record<string, unknown> = { userId: opts.userId };
     if (opts.infer === false) addOpts.infer = false;
     // Platform mem0 exposes a `timestamp` field on add(); pass observedAt
@@ -129,39 +197,159 @@ class PlatformProvider implements Mem0Provider {
       const d = new Date(opts.observedAt);
       if (!Number.isNaN(d.getTime())) addOpts.timestamp = d.toISOString();
     }
-    // biome-ignore lint/suspicious/noExplicitAny: mem0ai/oss lacks type definitions
-    const result = await (this.client as any).add(messages, addOpts);
+    const result = await waitWithCancellation(
+      this.runWithSignal(opts.signal, () => this.client!.add(messages, addOpts)),
+      opts.signal,
+    );
     return result as AddResult;
   }
 
-  async search(query: string, opts: { userId: string; topK?: number }): Promise<MemoryItem[]> {
-    await this.ensureClient();
+  async search(
+    query: string,
+    opts: { userId: string; topK?: number; signal?: AbortSignal },
+  ): Promise<MemoryItem[]> {
+    await waitWithCancellation(this.ensureClient(), opts.signal);
     const searchOpts: Record<string, unknown> = {
       filters: { user_id: opts.userId },
     };
     if (opts.topK) searchOpts.topK = opts.topK;
-    // biome-ignore lint/suspicious/noExplicitAny: mem0ai/oss lacks type definitions
-    const results = await (this.client as any).search(query, searchOpts);
+    const results = await waitWithCancellation(
+      this.runWithSignal(opts.signal, () => this.client!.search(query, searchOpts)),
+      opts.signal,
+    );
     return normalizeResults(results);
   }
 
-  async getAll(opts: { userId: string }): Promise<MemoryItem[]> {
-    await this.ensureClient();
-    // biome-ignore lint/suspicious/noExplicitAny: mem0ai/oss lacks type definitions
-    const results = await (this.client as any).getAll({
-      filters: { user_id: opts.userId },
-    });
+  async getAll(opts: { userId: string; signal?: AbortSignal }): Promise<MemoryItem[]> {
+    await waitWithCancellation(this.ensureClient(), opts.signal);
+    const results = await waitWithCancellation(
+      this.runWithSignal(opts.signal, () =>
+        this.client!.getAll({
+          filters: { user_id: opts.userId },
+        }),
+      ),
+      opts.signal,
+    );
     return normalizeResults(results);
   }
 
-  async delete(memoryId: string): Promise<void> {
-    await this.ensureClient();
-    // biome-ignore lint/suspicious/noExplicitAny: mem0ai/oss lacks type definitions
-    await (this.client as any).delete(memoryId);
+  async delete(memoryId: string, opts?: { signal?: AbortSignal }): Promise<void> {
+    await waitWithCancellation(this.ensureClient(), opts?.signal);
+    await waitWithCancellation(
+      this.runWithSignal(opts?.signal, () => this.client!.delete(memoryId)),
+      opts?.signal,
+    );
   }
 }
 
-// Open-Source Provider
+// Self-Hosted Provider
+// ---------------------------------------------------------------------------
+
+class SelfHostedProvider implements Mem0Provider {
+  private readonly baseUrl: string;
+
+  constructor(
+    baseUrl: string,
+    private readonly apiKey?: string,
+    private readonly requestTimeoutMs = 30_000,
+  ) {
+    if (!Number.isFinite(requestTimeoutMs) || requestTimeoutMs <= 0) {
+      throw new Error('Self-hosted requestTimeoutMs must be a positive number.');
+    }
+    const url = new URL(baseUrl);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      throw new Error('Self-hosted mode requires an HTTP(S) baseUrl.');
+    }
+    this.baseUrl = url.toString().replace(/\/$/, '');
+  }
+
+  private async request(
+    path: string,
+    init: RequestInit,
+    callerSignal?: AbortSignal,
+  ): Promise<unknown> {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (this.apiKey) headers['X-API-Key'] = this.apiKey;
+    const timeoutSignal = AbortSignal.timeout(this.requestTimeoutMs);
+    const signal = callerSignal ? AbortSignal.any([callerSignal, timeoutSignal]) : timeoutSignal;
+    let response: Response;
+    try {
+      response = await fetch(`${this.baseUrl}${path}`, { ...init, headers, signal });
+    } catch {
+      if (callerSignal?.aborted) {
+        throw callerSignal.reason instanceof Error
+          ? callerSignal.reason
+          : new Error('Mem0 request cancelled.');
+      }
+      if (timeoutSignal.aborted) throw new Error('Mem0 request timed out.');
+      throw new Error('Mem0 request failed.');
+    }
+    if (!response.ok) throw new Error(`Mem0 request failed (${response.status}).`);
+    try {
+      return await response.json();
+    } catch {
+      if (callerSignal?.aborted) throw cancellationReason(callerSignal);
+      if (timeoutSignal.aborted) throw new Error('Mem0 request timed out.');
+      throw new Error('Mem0 returned an invalid response.');
+    }
+  }
+
+  async add(
+    messages: Array<{ role: string; content: string }>,
+    opts: { userId: string; infer?: boolean; observedAt?: Date | string; signal?: AbortSignal },
+  ): Promise<AddResult | null> {
+    return (await this.request(
+      '/memories',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          messages,
+          user_id: opts.userId,
+          ...(opts.infer === undefined ? {} : { infer: opts.infer }),
+        }),
+      },
+      opts.signal,
+    )) as AddResult;
+  }
+
+  async search(
+    query: string,
+    opts: { userId: string; topK?: number; signal?: AbortSignal },
+  ): Promise<MemoryItem[]> {
+    const result = await this.request(
+      '/search',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          query,
+          filters: { user_id: opts.userId },
+          ...(opts.topK === undefined ? {} : { top_k: opts.topK }),
+        }),
+      },
+      opts.signal,
+    );
+    return normalizeResults(result);
+  }
+
+  async getAll(opts: { userId: string; signal?: AbortSignal }): Promise<MemoryItem[]> {
+    const result = await this.request(
+      `/memories?user_id=${encodeURIComponent(opts.userId)}`,
+      { method: 'GET' },
+      opts.signal,
+    );
+    return normalizeResults(result);
+  }
+
+  async delete(memoryId: string, opts?: { signal?: AbortSignal }): Promise<void> {
+    await this.request(
+      `/memories/${encodeURIComponent(memoryId)}`,
+      { method: 'DELETE' },
+      opts?.signal,
+    );
+  }
+}
+
+// Embedded Provider
 // ---------------------------------------------------------------------------
 
 /** Optional key resolver — pulls API keys from pi's model registry. */
@@ -360,9 +548,9 @@ class OSSProvider implements Mem0Provider {
 
   async add(
     messages: Array<{ role: string; content: string }>,
-    opts: { userId: string; infer?: boolean; observedAt?: Date | string },
+    opts: { userId: string; infer?: boolean; observedAt?: Date | string; signal?: AbortSignal },
   ): Promise<AddResult | null> {
-    await this.ensureMemory();
+    await waitWithCancellation(this.ensureMemory(), opts.signal);
     const addOpts: Record<string, unknown> = { userId: opts.userId };
     if (opts.infer === false) addOpts.infer = false;
 
@@ -376,11 +564,12 @@ class OSSProvider implements Mem0Provider {
     this.addMutex = new Promise((res) => {
       release = res;
     });
+    let operation: Promise<AddResult> | undefined;
+    let restoreLlm: (() => void) | undefined;
     try {
-      await gate;
+      await waitWithCancellation(gate, opts.signal);
       // biome-ignore lint/suspicious/noExplicitAny: mem0ai/oss lacks type definitions
       const mem = this.memory as any;
-      let restoreLlm: (() => void) | undefined;
       if (opts.observedAt) {
         const dateStr = formatObservedAt(opts.observedAt);
         const llm = mem.llm;
@@ -400,41 +589,56 @@ class OSSProvider implements Mem0Provider {
           llm.generateResponse = originalGenerate;
         };
       }
-      try {
-        const result = await mem.add(messages, addOpts);
-        return result as AddResult;
-      } finally {
-        restoreLlm?.();
-      }
+      operation = Promise.resolve(mem.add(messages, addOpts)).finally(() => restoreLlm?.());
+      void operation.then(
+        () => release(undefined),
+        () => release(undefined),
+      );
+      return await waitWithCancellation(operation, opts.signal);
     } finally {
-      release(undefined);
+      if (!operation) {
+        restoreLlm?.();
+        void gate.then(
+          () => release(undefined),
+          () => release(undefined),
+        );
+      }
     }
   }
 
-  async search(query: string, opts: { userId: string; topK?: number }): Promise<MemoryItem[]> {
-    await this.ensureMemory();
+  async search(
+    query: string,
+    opts: { userId: string; topK?: number; signal?: AbortSignal },
+  ): Promise<MemoryItem[]> {
+    await waitWithCancellation(this.ensureMemory(), opts.signal);
     const searchOpts: Record<string, unknown> = {
       filters: { user_id: opts.userId },
     };
     if (opts.topK) searchOpts.topK = opts.topK;
-    // biome-ignore lint/suspicious/noExplicitAny: mem0ai/oss lacks type definitions
-    const results = await (this.memory as any).search(query, searchOpts);
+    const results = await waitWithCancellation(
+      // biome-ignore lint/suspicious/noExplicitAny: mem0ai/oss lacks type definitions
+      (this.memory as any).search(query, searchOpts),
+      opts.signal,
+    );
     return normalizeResults(results);
   }
 
-  async getAll(opts: { userId: string }): Promise<MemoryItem[]> {
-    await this.ensureMemory();
-    // biome-ignore lint/suspicious/noExplicitAny: mem0ai/oss lacks type definitions
-    const results = await (this.memory as any).getAll({
-      filters: { user_id: opts.userId },
-    });
+  async getAll(opts: { userId: string; signal?: AbortSignal }): Promise<MemoryItem[]> {
+    await waitWithCancellation(this.ensureMemory(), opts.signal);
+    const results = await waitWithCancellation(
+      // biome-ignore lint/suspicious/noExplicitAny: mem0ai/oss lacks type definitions
+      (this.memory as any).getAll({
+        filters: { user_id: opts.userId },
+      }),
+      opts.signal,
+    );
     return normalizeResults(results);
   }
 
-  async delete(memoryId: string): Promise<void> {
-    await this.ensureMemory();
+  async delete(memoryId: string, opts?: { signal?: AbortSignal }): Promise<void> {
+    await waitWithCancellation(this.ensureMemory(), opts?.signal);
     // biome-ignore lint/suspicious/noExplicitAny: mem0ai/oss lacks type definitions
-    await (this.memory as any).delete(memoryId);
+    await waitWithCancellation((this.memory as any).delete(memoryId), opts?.signal);
   }
 }
 
@@ -452,9 +656,9 @@ export interface CreateProviderOptions {
 
 export async function createMem0Provider(opts: CreateProviderOptions): Promise<Mem0Provider> {
   const { config, resolveKey, resolveProvider } = opts;
-  const mode = config.mode ?? 'platform';
+  const mode = normalizeMem0Mode(config.mode);
 
-  if (mode === 'open-source') {
+  if (mode === 'embedded') {
     const useRegistry = config.useRegistryKeys !== false;
     const provider = new OSSProvider(
       config.oss,
@@ -464,6 +668,15 @@ export async function createMem0Provider(opts: CreateProviderOptions): Promise<M
     // biome-ignore lint/suspicious/noExplicitAny: mem0ai/oss lacks type definitions
     await (provider as any).ensureMemory();
     return provider;
+  }
+
+  if (mode === 'self-hosted') {
+    if (!config.baseUrl?.trim()) throw new Error('Self-hosted mode requires baseUrl.');
+    return new SelfHostedProvider(
+      config.baseUrl.trim(),
+      config.apiKey?.trim() || undefined,
+      config.requestTimeoutMs,
+    );
   }
 
   if (!config.apiKey?.trim()) {

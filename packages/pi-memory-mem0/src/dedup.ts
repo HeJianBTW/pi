@@ -4,7 +4,7 @@
  * Normalizes content, identifies exact duplicates (case-insensitive, whitespace-collapsed),
  * deletes the older entries, and keeps only the most recently updated.
  *
- * Both Platform and OSS modes use the provider API. In OSS mode the configured
+ * All modes use the provider interface. In embedded mode the configured
  * vector store is the source of truth and its IDs remain stable across restarts.
  */
 import { createMem0Provider, type ProviderResolver } from './provider.js';
@@ -29,7 +29,7 @@ export async function dedupMemories(opts: DedupOptions): Promise<DedupResult> {
     config,
     ...(resolveProvider ? { resolveProvider } : {}),
   });
-  const allMemories = await provider.getAll({ userId });
+  const allMemories = await provider.getAll({ userId, ...(signal ? { signal } : {}) });
 
   if (allMemories.length === 0) {
     return { total: 0, duplicatesRemoved: 0 };
@@ -41,7 +41,7 @@ export async function dedupMemories(opts: DedupOptions): Promise<DedupResult> {
   for (const id of duplicateIds) {
     if (signal?.aborted) break;
     try {
-      await provider.delete(id);
+      await (signal ? provider.delete(id, { signal }) : provider.delete(id));
       removed++;
     } catch {
       // best-effort

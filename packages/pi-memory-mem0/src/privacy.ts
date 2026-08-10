@@ -1,8 +1,14 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { scanForThreats } from '@amaster.ai/pi-shared/threat-patterns';
+import type { MemoryUserIdScope } from './types.js';
 
-export function scopeMemoryUserId(baseUserId: string, cwd: string): string {
+export function scopeMemoryUserId(
+  baseUserId: string,
+  cwd: string,
+  scope: MemoryUserIdScope = 'project',
+): string {
+  if (scope === 'exact') return baseUserId;
   const project = createHash('sha256').update(path.resolve(cwd)).digest('hex').slice(0, 12);
   return `${baseUserId}:project:${project}`;
 }

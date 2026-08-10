@@ -1,9 +1,10 @@
 /**
  * pi-memory-mem0 — Explicit semantic memory extension powered by Mem0.
  *
- * Two modes:
+ * Modes:
  * - **platform**: Uses Mem0 Cloud API (needs MEM0_API_KEY)
- * - **open-source**: Runs locally with SQLite vector store (needs OPENAI_API_KEY or Ollama)
+ * - **embedded**: Runs Mem0 OSS in-process
+ * - **self-hosted**: Calls a remote Mem0 OSS REST server
  *
  * Configuration via settings.json key "pi-memory-mem0".
  * Supports ${ENV_VAR:-fallback} in user and agent settings.
@@ -13,9 +14,9 @@
 import { isProjectTrusted, loadPiSettings } from '@amaster.ai/pi-shared/settings';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { formatRecalledMemory, scopeMemoryUserId } from './privacy.js';
-import { createMem0Provider, type Mem0Provider } from './provider.js';
+import { createMem0Provider, type Mem0Provider, normalizeMem0Mode } from './provider.js';
 import { createMem0Tools } from './tools.js';
-import type { Mem0ExtensionConfig } from './types.js';
+import type { Mem0ExtensionConfig, MemoryUserIdScope } from './types.js';
 
 const SETTINGS_KEY = 'pi-memory-mem0';
 const STATUS_KEY = 'mem0';
@@ -31,8 +32,9 @@ function loadConfig(cwd: string, projectTrusted = false): Mem0ExtensionConfig {
   }
 }
 
-function resolveUserId(configUserId?: string): string {
+function resolveUserId(configUserId?: string, scope: MemoryUserIdScope = 'project'): string {
   if (configUserId?.trim()) return configUserId.trim();
+  if (scope === 'exact') throw new Error('Mem0 exact userId resolved to an empty value.');
   if (process.env.USER) return process.env.USER;
   if (process.env.USERNAME) return process.env.USERNAME;
   return 'default-user';
@@ -41,19 +43,18 @@ function resolveUserId(configUserId?: string): string {
 export default function mem0Extension(pi: ExtensionAPI): void {
   let provider: Mem0Provider | undefined;
   let userId = '';
+  let activeMode = '';
 
   pi.on('session_start', async (_event, ctx) => {
     provider = undefined;
     const config = loadConfig(ctx.cwd, isProjectTrusted(ctx));
-    const mode = config.mode ?? 'platform';
-
-    // Platform mode requires apiKey; OSS mode requires an LLM provider (env key)
-    if (mode === 'platform' && !config.apiKey?.trim()) {
-      ctx.ui.setStatus(STATUS_KEY, 'mem0: disabled (no API key)');
-      return;
-    }
-
     try {
+      const mode = normalizeMem0Mode(config.mode);
+      if (mode === 'platform' && !config.apiKey?.trim()) {
+        ctx.ui.setStatus(STATUS_KEY, 'mem0: disabled (no API key)');
+        return;
+      }
+      const resolvedUserId = resolveUserId(config.userId, config.userIdScope);
       provider = await createMem0Provider({
         config,
         resolveProvider: async (providerName: string) => {
@@ -81,6 +82,8 @@ export default function mem0Extension(pi: ExtensionAPI): void {
           return result;
         },
       });
+      userId = scopeMemoryUserId(resolvedUserId, ctx.cwd, config.userIdScope);
+      activeMode = mode;
     } catch (err) {
       ctx.ui.setStatus(STATUS_KEY, 'mem0: init failed');
       ctx.ui.notify(
@@ -90,9 +93,7 @@ export default function mem0Extension(pi: ExtensionAPI): void {
       return;
     }
 
-    userId = scopeMemoryUserId(resolveUserId(config.userId), ctx.cwd);
-
-    ctx.ui.setStatus(STATUS_KEY, `mem0: ${mode}`);
+    ctx.ui.setStatus(STATUS_KEY, `mem0: ${activeMode}`);
 
     for (const tool of createMem0Tools(provider, userId)) {
       pi.registerTool(tool as never);
@@ -107,15 +108,13 @@ export default function mem0Extension(pi: ExtensionAPI): void {
         return;
       }
 
-      const config = loadConfig(ctx.cwd, isProjectTrusted(ctx));
-      const userId = scopeMemoryUserId(resolveUserId(config.userId), ctx.cwd);
       const parts = args.trim().split(/\s+/).filter(Boolean);
       const subcommand = parts[0]?.toLowerCase() ?? 'status';
       const rest = parts.slice(1).join(' ').trim();
 
       switch (subcommand) {
         case 'status': {
-          ctx.ui.notify(`Mem0: active (mode: ${config.mode ?? 'platform'})`, 'info');
+          ctx.ui.notify(`Mem0: active (mode: ${activeMode})`, 'info');
           break;
         }
         case 'search': {
@@ -123,7 +122,11 @@ export default function mem0Extension(pi: ExtensionAPI): void {
             ctx.ui.notify('Usage: /mem0 search <query>', 'warning');
             break;
           }
-          const results = await provider.search(rest, { userId, topK: 10 });
+          const results = await provider.search(rest, {
+            userId,
+            topK: 10,
+            ...(ctx.signal ? { signal: ctx.signal } : {}),
+          });
           if (results.length === 0) {
             ctx.ui.notify('No relevant memories found.', 'info');
           } else {
@@ -133,7 +136,10 @@ export default function mem0Extension(pi: ExtensionAPI): void {
           break;
         }
         case 'profile': {
-          const all = await provider.getAll({ userId });
+          const all = await provider.getAll({
+            userId,
+            ...(ctx.signal ? { signal: ctx.signal } : {}),
+          });
           if (all.length === 0) {
             ctx.ui.notify('No memories stored yet.', 'info');
           } else {
