@@ -2,19 +2,22 @@
  * Configuration types for pi-memory-mem0.
  */
 
-export type Mem0Mode = 'platform' | 'open-source';
+export type Mem0Mode = 'platform' | 'embedded' | 'self-hosted';
+export type MemoryUserIdScope = 'project' | 'exact';
 
 export interface Mem0ExtensionConfig {
-  /** "platform" (Mem0 Cloud) or "open-source" (local SQLite). Default: "platform". */
+  /** Mem0 Cloud, in-process OSS, or a remote OSS server. Default: "platform". */
   mode?: Mem0Mode;
 
-  // ── Platform mode ───────────────────────────────────────────────────────
-  /** Mem0 Platform API key. Supports ${MEM0_API_KEY}. */
+  // ── Remote modes ─────────────────────────────────────────────────────────
+  /** Mem0 API key. Supports ${MEM0_API_KEY}. */
   apiKey?: string;
-  /** Custom API base URL. Default: https://api.mem0.ai */
+  /** Platform override or required self-hosted OSS server URL. */
   baseUrl?: string;
+  /** Remote request timeout in milliseconds. Default: 30000. */
+  requestTimeoutMs?: number;
 
-  // ── Open-source mode ────────────────────────────────────────────────────
+  // ── Embedded mode ───────────────────────────────────────────────────────
   oss?: {
     embedder?: { provider: string; config?: Record<string, unknown> };
     llm?: { provider: string; config?: Record<string, unknown> };
@@ -29,11 +32,13 @@ export interface Mem0ExtensionConfig {
   // ── Shared ──────────────────────────────────────────────────────────────
   /** User identifier for memory scoping. Supports ${USER}. */
   userId?: string;
+  /** Append a cwd hash (default) or use userId verbatim. */
+  userIdScope?: MemoryUserIdScope;
   /** Max recalled memories per turn. Default: 5 */
   topK?: number;
 
   /**
-   * When true (default), OSS mode will attempt to resolve API keys from
+   * When true (default), embedded mode will attempt to resolve API keys from
    * pi's model registry instead of requiring separate env vars.
    * Falls back to OPENAI_API_KEY / DEEPSEEK_API_KEY env vars if registry lookup fails.
    */

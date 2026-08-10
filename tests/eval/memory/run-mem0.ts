@@ -29,7 +29,7 @@ import { loadLocomo } from '../src/loaders/locomo.js';
 import { tokenF1 } from '../src/judge.js';
 
 // Re-declare structurally — mem0 root package doesn't re-export these types.
-type Mem0Mode = 'platform' | 'open-source';
+type Mem0Mode = 'platform' | 'embedded';
 interface Mem0Config {
   mode?: Mem0Mode;
   apiKey?: string;
@@ -155,7 +155,7 @@ function buildConfig(args: Args): Mem0Config {
     return { mode: 'platform', apiKey, topK: args.topk };
   }
   return {
-    mode: 'open-source',
+    mode: 'embedded',
     topK: args.topk,
     useRegistryKeys: true,
     oss: {

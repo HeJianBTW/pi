@@ -2,22 +2,23 @@
 
 ![pi-memory-mem0 preview](https://raw.githubusercontent.com/TGYD-helige/pi/master/packages/pi-memory-mem0/preview.png)
 
-Explicit semantic memory tools powered by [Mem0](https://mem0.ai), with support for both Platform (cloud) and Open-Source (local) modes.
+Explicit semantic memory tools powered by [Mem0](https://mem0.ai), with Platform, embedded, and self-hosted modes.
 
 ## How It Works
 
-Memories are saved and recalled through explicit tools. They are project-namespaced, and stored text is not injected into the system prompt.
+Memories are saved and recalled through explicit tools. They are project-namespaced by default, and stored text is not injected into the system prompt. Set `userIdScope: "exact"` when one identity must be shared across projects.
 
 Use `mem0_save` and the search/profile tools when memory should be stored or retrieved.
 
-## Two Modes
+## Modes
 
 | Mode | Vector Store | Persistence | Dependencies | Use Case |
 |------|-------------|-------------|--------------|----------|
 | `platform` | Mem0 Cloud | Cloud-managed | `MEM0_API_KEY` | Quick start, multi-device sync |
-| `open-source` | Mem0 OSS vector store | Vector-store managed | LLM + Embedding API | Data privacy, no Mem0 Cloud |
+| `embedded` | Mem0 OSS vector store | Vector-store managed | LLM + Embedding API | Data privacy, no Mem0 Cloud |
+| `self-hosted` | Mem0 OSS REST server | Server-managed | Server URL, optional API key | Shared infrastructure |
 
-## Architecture (Open-Source Mode)
+## Architecture (Embedded Mode)
 
 ```
 User ←→ Agent ←→ Mem0 OSS Memory
@@ -50,20 +51,38 @@ in user or agent settings.
 }
 ```
 
-### Open-Source Mode (Recommended)
+### Embedded Mode (Recommended)
 
 Reuses API keys and base URLs from pi's configured model providers — **no extra environment variables needed**.
 
 ```json
 {
   "pi-memory-mem0": {
-    "mode": "open-source",
+    "mode": "embedded",
     "userId": "${USER}"
   }
 }
 ```
 
 Defaults to OpenAI `text-embedding-3-small` (embedding) + `gpt-4.1-nano` (extraction). API keys and base URLs are automatically resolved from pi's model registry.
+
+Existing settings with `mode: "open-source"` continue to load as `embedded`, but `open-source` is not part of the supported configuration interface. New settings should use `embedded`.
+
+### Self-Hosted Mode
+
+Calls the OSS REST server directly. The server uses `/memories` and `/search`, not the Mem0 Platform `/v1` paths.
+
+```json
+{
+  "pi-memory-mem0": {
+    "mode": "self-hosted",
+    "baseUrl": "${MEM0_BASE_URL}",
+    "apiKey": "${MEM0_API_KEY}",
+    "userId": "${PAPERCLIP_COMPANY_ID}",
+    "userIdScope": "exact"
+  }
+}
+```
 
 ### Custom Provider
 
@@ -72,7 +91,7 @@ When your model registry defines a custom provider with `api: "openai-completion
 ```json
 {
   "pi-memory-mem0": {
-    "mode": "open-source",
+    "mode": "embedded",
     "oss": {
       "llm": {
         "provider": "my-provider",
@@ -97,7 +116,7 @@ The extension automatically:
 ```json
 {
   "pi-memory-mem0": {
-    "mode": "open-source",
+    "mode": "embedded",
     "userId": "${USER}",
     "oss": {
       "llm": {
@@ -121,7 +140,7 @@ For production workloads that need a dedicated vector database:
 ```json
 {
   "pi-memory-mem0": {
-    "mode": "open-source",
+    "mode": "embedded",
     "oss": {
       "vectorStore": {
         "provider": "qdrant",
@@ -140,10 +159,12 @@ The configured vector store always owns persistence. To request an intentionally
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `mode` | `"platform"` \| `"open-source"` | `"platform"` | Operating mode |
-| `apiKey` | string | — | Required for platform mode. Supports `${MEM0_API_KEY}` |
-| `baseUrl` | string | `https://api.mem0.ai` | Custom platform endpoint |
+| `mode` | `"platform"` \| `"embedded"` \| `"self-hosted"` | `"platform"` | Operating mode |
+| `apiKey` | string | — | Platform or self-hosted API key. Supports `${MEM0_API_KEY}` |
+| `baseUrl` | string | `https://api.mem0.ai` | Platform override; required for self-hosted mode |
+| `requestTimeoutMs` | number | `30000` | Self-hosted request timeout |
 | `userId` | string | `$USER` or `"default-user"` | Memory scoping identifier |
+| `userIdScope` | `"project"` \| `"exact"` | `"project"` | Append the cwd hash or use `userId` verbatim |
 | `topK` | number | `5` | Max recalled memories per turn |
 | `useRegistryKeys` | boolean | `true` | Whether OSS mode resolves keys from pi registry |
 | `oss.llm` | object | OpenAI gpt-4.1-nano | OSS extraction model |
@@ -158,9 +179,10 @@ The configured vector store always owns persistence. To request an intentionally
 | Mode | Vector Data | History |
 |------|-------------|---------|
 | Platform | Mem0 Cloud | Cloud-managed |
-| Open-Source (default) | `<home>/memories/mem0-vectors.db` | `<home>/memories/mem0-history.db` |
-| Open-Source (`memory`, `dbPath: ":memory:"`) | Process-local SQLite; lost on restart | `<home>/memories/mem0-history.db` |
-| Open-Source (Qdrant) | Qdrant server | `<home>/memories/mem0-history.db` |
+| Embedded (default paths) | `<home>/memories/mem0-vectors.db` | `<home>/memories/mem0-history.db` |
+| Embedded (`memory`, `dbPath: ":memory:"`) | Process-local SQLite; lost on restart | `<home>/memories/mem0-history.db` |
+| Embedded (Qdrant) | Qdrant server | `<home>/memories/mem0-history.db` |
+| Self-hosted | Remote server | Remote server |
 
 The `home` directory is resolved via `resolveHome()` from `@amaster.ai/pi-shared/settings` (defaults to `~/.pi/agent`).
 
@@ -179,7 +201,7 @@ This happens transparently — just configure the provider name as it appears in
 
 ## Installation Notes
 
-The default Open-Source mode depends on `better-sqlite3` (native addon, transitive dependency of `mem0ai`) for both the vector store and history. This remains true for `dbPath: ":memory:"`: it changes where SQLite stores pages, not which vector-store implementation is used.
+The default Embedded configuration depends on `better-sqlite3` (native addon, transitive dependency of `mem0ai`) for both the vector store and history. This remains true for `dbPath: ":memory:"`: it changes where SQLite stores pages, not which vector-store implementation is used.
 
 **For pi-agent users**: pi-agent's `package.json` includes `better-sqlite3` in `pnpm.onlyBuiltDependencies` — it compiles automatically during `pnpm install`. No extra steps needed.
 

@@ -147,11 +147,11 @@ describe('dedupMemories', () => {
 
     const result = await dedupMemories({
       userId: 'test-user',
-      config: { mode: 'open-source' },
+      config: { mode: 'embedded' },
     });
 
     expect(result).toEqual({ total: 3, duplicatesRemoved: 1 });
     expect(deleteMock).toHaveBeenCalledWith('1');
-    expect(mockCreateProvider).toHaveBeenCalledWith({ config: { mode: 'open-source' } });
+    expect(mockCreateProvider).toHaveBeenCalledWith({ config: { mode: 'embedded' } });
   });
 });
