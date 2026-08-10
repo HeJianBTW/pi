@@ -1,0 +1,65 @@
+{
+  "skill_name": "video-gen",
+  "evals": [
+    {
+      "id": "compatible-mp4-concat",
+      "prompt": "I have three compatible MP4 clips and only want them joined in order without transitions, overlays, trimming, or re-encoding. Describe the exact Pi video workflow, output mode, and whether a paid-model confirmation is needed. Do not call tools or create files.",
+      "expected_output": "Route to the local video_compose C0 flow with copy mode and no paid-model confirmation.",
+      "expectations": [
+        {
+          "text": "Routes to video_compose",
+          "includes": ["video_compose"]
+        },
+        {
+          "text": "Uses lossless copy mode",
+          "includes_any": ["mode: copy", "mode `copy`", "\"copy\""]
+        },
+        {
+          "text": "Treats the operation as local rather than paid generation",
+          "includes": ["local"],
+          "includes_any": ["no paid", "does not need paid", "no paid-model"]
+        }
+      ]
+    },
+    {
+      "id": "single-ai-shot",
+      "prompt": "Create one five-second AI-generated shot of a paper boat moving through a rainy gutter. No multi-shot film is needed. Explain which Pi video flow and preflight you would use and what confirmation is required, but do not call tools.",
+      "expected_output": "Use video_capabilities, then one video_generate call after explicit paid confirmation.",
+      "expectations": [
+        {
+          "text": "Chooses the single-shot generation tool",
+          "includes": ["video_generate"]
+        },
+        {
+          "text": "Runs capability preflight",
+          "includes": ["video_capabilities"]
+        },
+        {
+          "text": "Requires confirmation before the paid call",
+          "includes": ["paid"],
+          "includes_any": ["confirmation", "confirm", "go-ahead", "approval"]
+        }
+      ]
+    },
+    {
+      "id": "multi-shot-film",
+      "prompt": "I want a short three-shot AI film with a recurring character and visual continuity between shots. Describe the planning, frame, confirmation, and render stages in Pi, including how many times the final render tool is invoked. Do not call tools.",
+      "expected_output": "Use a shot book, generate character/shot frames with image_generate, obtain confirmations, then call video_render once.",
+      "expectations": [
+        {
+          "text": "Uses a shot book for the multi-shot plan",
+          "includes_any": ["shot book", "shot-book"]
+        },
+        {
+          "text": "Generates frames through image_generate",
+          "includes": ["image_generate"]
+        },
+        {
+          "text": "Calls video_render only once",
+          "includes": ["video_render"],
+          "includes_any": ["call once", "once", "one call"]
+        }
+      ]
+    }
+  ]
+}
