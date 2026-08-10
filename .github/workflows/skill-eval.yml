@@ -1,0 +1,226 @@
+name: Skill Eval
+
+on:
+  pull_request_target:
+    branches: [master]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+concurrency:
+  group: skill-eval-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+  PI_OFFLINE: '1'
+  SKILL_EVAL_MODEL: deepseek-v4-flash
+  SKILL_EVAL_RUNS: '3'
+  SKILL_EVAL_TIMEOUT_MS: '120000'
+
+jobs:
+  evaluate:
+    name: skill eval
+    if: github.event.pull_request.draft == false
+    runs-on:
+      - instance-hnpsq9go
+      - linux
+      - x64
+    timeout-minutes: 45
+
+    steps:
+      # Secrets are available to pull_request_target, so only trusted base code
+      # is checked out and executed. PR skill files are read later as git blobs.
+      - name: Check out trusted base revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 1
+
+      - name: Fetch PR revision as data
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin \
+            "+refs/pull/${{ github.event.pull_request.number }}/head:refs/remotes/pull/${{ github.event.pull_request.number }}/head"
+          git cat-file -e "${{ github.event.pull_request.head.sha }}^{commit}"
+
+      - name: Detect skill changes
+        id: changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          files="$(git diff --name-only --no-renames "$BASE_SHA" "$HEAD_SHA" -- 'packages/*/skills/**')"
+          if [ -n "$files" ]; then
+            echo 'has_skills=true' >> "$GITHUB_OUTPUT"
+            printf '%s\n' "$files"
+          else
+            echo 'has_skills=false' >> "$GITHUB_OUTPUT"
+            echo 'No version-controlled skill changes.'
+          fi
+
+      - name: Set up Node.js
+        if: steps.changes.outputs.has_skills == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Verify eval credentials
+        if: steps.changes.outputs.has_skills == 'true'
+        env:
+          PI_INTEGRATION_BASE_URL: ${{ secrets.PI_INTEGRATION_BASE_URL }}
+          PI_INTEGRATION_API_KEY: ${{ secrets.PI_INTEGRATION_API_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$PI_INTEGRATION_BASE_URL" || { echo '::error::PI_INTEGRATION_BASE_URL is not configured'; exit 1; }
+          test -n "$PI_INTEGRATION_API_KEY" || { echo '::error::PI_INTEGRATION_API_KEY is not configured'; exit 1; }
+
+      - name: Install pinned Pi and prepare isolated config
+        if: steps.changes.outputs.has_skills == 'true'
+        env:
+          PI_INTEGRATION_BASE_URL: ${{ secrets.PI_INTEGRATION_BASE_URL }}
+        run: |
+          set -euo pipefail
+          npm install --global --ignore-scripts @earendil-works/pi-coding-agent@0.83.0
+          echo "PI_CODING_AGENT_DIR=$RUNNER_TEMP/pi-skill-eval-agent" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/pi-skill-eval-agent"
+          PI_CODING_AGENT_DIR="$RUNNER_TEMP/pi-skill-eval-agent" node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const models = {
+            providers: {
+              'deepseek-integration': {
+                baseUrl: process.env.PI_INTEGRATION_BASE_URL,
+                api: 'openai-completions',
+                apiKey: '$PI_INTEGRATION_API_KEY',
+                authHeader: true,
+                models: [{
+                  id: process.env.SKILL_EVAL_MODEL,
+                  name: 'DS V4 Flash',
+                  reasoning: true,
+                  input: ['text'],
+                  contextWindow: 1000000,
+                  maxTokens: 384000,
+                  thinkingLevelMap: { minimal: null, low: null, medium: null, high: 'high', xhigh: 'max', max: 'max' },
+                  compat: {
+                    thinkingFormat: 'deepseek',
+                    requiresReasoningContentOnAssistantMessages: true,
+                    supportsDeveloperRole: false,
+                  },
+                }],
+              },
+            },
+          };
+          fs.writeFileSync(
+            path.join(process.env.PI_CODING_AGENT_DIR, 'models.json'),
+            `${JSON.stringify(models, null, 2)}\n`,
+            { mode: 0o600 },
+          );
+          NODE
+          pi --version
+
+      - name: Run paired skill evaluation
+        id: eval
+        if: steps.changes.outputs.has_skills == 'true'
+        continue-on-error: true
+        env:
+          PI_INTEGRATION_API_KEY: ${{ secrets.PI_INTEGRATION_API_KEY }}
+          SKILL_EVAL_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          SKILL_EVAL_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SKILL_EVAL_OUTPUT_DIR: skill-eval-results
+          SKILL_EVAL_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SKILL_EVAL_ARTIFACT: skill-eval-${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          unset HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY
+          unset http_proxy https_proxy all_proxy no_proxy
+          node .github/scripts/skill-eval.mjs
+
+      - name: Generate static eval viewer
+        if: always() && steps.changes.outputs.has_skills == 'true'
+        run: |
+          set -euo pipefail
+          viewer="$RUNNER_TEMP/anthropic-skill-eval-viewer"
+          mkdir -p "$viewer"
+          base='https://raw.githubusercontent.com/anthropics/skills/f17010c9bb483898c1d9c9f42dde2b3a98889434/skills/skill-creator/eval-viewer'
+          curl --fail --silent --show-error --location "$base/generate_review.py" -o "$viewer/generate_review.py"
+          curl --fail --silent --show-error --location "$base/viewer.html" -o "$viewer/viewer.html"
+          echo 'fc9d1b9243fe5ab6012ebd579bd76d0035de1b79fd3b969de114defab26478fb  '"$viewer/generate_review.py" | shasum -a 256 -c -
+          echo 'a53213426ee1100441d701a3a0d49cda7a842f992d2c36463f4d3cc0258575fa  '"$viewer/viewer.html" | shasum -a 256 -c -
+
+          VIEWER_DIR="$viewer" python3 <<'PY'
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ['VIEWER_DIR'])
+          generator = root / 'generate_review.py'
+          source = generator.read_text()
+          needle = '    data_json = json.dumps(embedded)\n'
+          replacement = r'    data_json = json.dumps(embedded).replace("<", "\\u003c")' + '\n'
+          if source.count(needle) != 1:
+              raise SystemExit('unexpected Anthropic viewer generator shape')
+          generator.write_text(source.replace(needle, replacement))
+
+          viewer = root / 'viewer.html'
+          html = '\n'.join(
+              line for line in viewer.read_text().splitlines()
+              if 'fonts.googleapis.com' not in line
+              and 'fonts.gstatic.com' not in line
+              and 'cdn.sheetjs.com' not in line
+          )
+          csp = "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'\">"
+          html = html.replace('<meta charset="UTF-8">', '<meta charset="UTF-8">\n  ' + csp)
+          viewer.write_text(html + '\n')
+          PY
+
+          for benchmark in skill-eval-results/*/benchmark.json; do
+            [ -f "$benchmark" ] || continue
+            workspace="$(dirname "$benchmark")"
+            python3 "$viewer/generate_review.py" "$workspace" \
+              --skill-name "$(basename "$workspace")" \
+              --benchmark "$benchmark" \
+              --static "$workspace/review.html"
+          done
+
+      - name: Format PR comment body
+        if: always() && steps.changes.outputs.has_skills == 'true'
+        run: |
+          set -euo pipefail
+          if [ ! -f skill-eval-results/comment.md ]; then
+            mkdir -p skill-eval-results
+            printf '%s\n' \
+              '### ❌ Skill Eval — failed' \
+              '' \
+              'Evaluation stopped before producing a report. See the workflow logs.' \
+              > skill-eval-results/comment.md
+          fi
+          {
+            echo 'BODY<<SKILLEVALEOF'
+            cat skill-eval-results/comment.md
+            echo 'SKILLEVALEOF'
+          } >> "$GITHUB_ENV"
+
+      - name: Post PR comment
+        if: always() && steps.changes.outputs.has_skills == 'true'
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          body: ${{ env.BODY }}
+
+      - name: Upload eval artifacts
+        if: always() && steps.changes.outputs.has_skills == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: skill-eval-${{ github.run_id }}
+          path: skill-eval-results
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Enforce gate outcome
+        if: always() && steps.changes.outputs.has_skills == 'true' && steps.eval.outcome != 'success'
+        run: |
+          echo 'skill eval failed; see the PR comment and uploaded artifacts' >&2
+          exit 1
