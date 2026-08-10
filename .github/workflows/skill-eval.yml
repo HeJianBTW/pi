@@ -28,7 +28,7 @@ jobs:
       - instance-hnpsq9go
       - linux
       - x64
-    timeout-minutes: 45
+    timeout-minutes: 120
 
     steps:
       # Secrets are available to pull_request_target, so only trusted base code
@@ -49,17 +49,17 @@ jobs:
       - name: Detect skill changes
         id: changes
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SKILL_EVAL_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          SKILL_EVAL_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          files="$(git diff --name-only --no-renames "$BASE_SHA" "$HEAD_SHA" -- 'packages/*/skills/**')"
-          if [ -n "$files" ]; then
+          changes="$(node .github/scripts/skill-eval.mjs --detect)"
+          if [ -n "$changes" ]; then
             echo 'has_skills=true' >> "$GITHUB_OUTPUT"
-            printf '%s\n' "$files"
+            printf '%s\n' "$changes"
           else
             echo 'has_skills=false' >> "$GITHUB_OUTPUT"
-            echo 'No version-controlled skill changes.'
+            echo 'No added or modified skill content.'
           fi
 
       - name: Set up Node.js

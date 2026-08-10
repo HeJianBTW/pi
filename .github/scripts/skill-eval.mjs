@@ -2,6 +2,7 @@
 
 import { execFileSync, spawn } from 'node:child_process';
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -20,6 +21,9 @@ export function selectSkillChanges(changedFiles, hasPath) {
   ].sort();
 
   return roots.flatMap((path) => {
+    if (!changedFiles.some((file) => file.startsWith(`${path}/`) && file !== `${path}/evals.json`)) {
+      return [];
+    }
     const skillFile = `${path}/SKILL.md`;
     const inBase = hasPath('base', skillFile);
     const inHead = hasPath('head', skillFile);
@@ -68,8 +72,8 @@ export function validateEvalSet(value) {
     ids.add(id);
     requireString(item.prompt, `evals[${index}].prompt`);
     requireString(item.expected_output, `evals[${index}].expected_output`);
-    if (!Array.isArray(item.expectations) || item.expectations.length === 0) {
-      throw new Error(`evals[${index}].expectations must be a non-empty array`);
+    if (!Array.isArray(item.expectations) || item.expectations.length === 0 || item.expectations.length > 20) {
+      throw new Error(`evals[${index}].expectations must be a non-empty array with at most 20 entries`);
     }
     for (const [expectationIndex, expectation] of item.expectations.entries()) {
       const label = `evals[${index}].expectations[${expectationIndex}]`;
@@ -94,14 +98,14 @@ export function selectRegressionEvalSet(base, head) {
 }
 
 export function gradeExpectations(answer, expectations) {
-  const haystack = answer.toLocaleLowerCase();
+  const haystack = answer.toLowerCase();
   const graded = expectations.map((expectation) => {
     const includes = expectation.includes ?? [];
     const includesAny = expectation.includes_any ?? [];
     const excludes = expectation.excludes ?? [];
-    const missing = includes.filter((value) => !haystack.includes(value.toLocaleLowerCase()));
-    const matchedAny = includesAny.filter((value) => haystack.includes(value.toLocaleLowerCase()));
-    const unexpected = excludes.filter((value) => haystack.includes(value.toLocaleLowerCase()));
+    const missing = includes.filter((value) => !haystack.includes(value.toLowerCase()));
+    const matchedAny = includesAny.filter((value) => haystack.includes(value.toLowerCase()));
+    const unexpected = excludes.filter((value) => haystack.includes(value.toLowerCase()));
     const passed = missing.length === 0 && (includesAny.length === 0 || matchedAny.length > 0) && unexpected.length === 0;
 
     const evidence = passed
@@ -176,8 +180,8 @@ export function evaluateGate({
   return { passed: reasons.length === 0, candidateScore, baselineScore, delta, reasons };
 }
 
-export function formatComment(results, { runUrl, artifactName }) {
-  const passed = results.length > 0 && results.every((result) => result.gate.passed);
+export function formatComment(results, { runUrl, artifactName, error }) {
+  const passed = !error && results.length > 0 && results.every((result) => result.gate.passed);
   const lines = [
     `### ${passed ? '✅ Skill Eval — passed' : '❌ Skill Eval — failed'}`,
     '',
@@ -194,6 +198,7 @@ export function formatComment(results, { runUrl, artifactName }) {
     result.gate.reasons.map((reason) => `- \`${result.skill}\`: ${reason}`),
   );
   if (failures.length) lines.push('', '**Failures**', '', ...failures);
+  if (error) lines.push('', '**Infrastructure failure**', '', error);
   lines.push(
     '',
     'New skills require score ≥ 0.800 and delta ≥ +0.100. Modified skills must not regress on any master eval.',
@@ -289,7 +294,6 @@ function runPi({ cwd, skillDir, prompt, timeoutMs }) {
 
     const child = spawn('pi', args, { cwd, env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
-    let stderr = '';
     let killedForSize = false;
     const timer = setTimeout(() => child.kill('SIGKILL'), timeoutMs);
     child.stdout.on('data', (chunk) => {
@@ -299,9 +303,7 @@ function runPi({ cwd, skillDir, prompt, timeoutMs }) {
         child.kill('SIGKILL');
       }
     });
-    child.stderr.on('data', (chunk) => {
-      if (stderr.length < 16_000) stderr += chunk;
-    });
+    child.stderr.resume();
     child.on('error', (error) => {
       clearTimeout(timer);
       resolve({ answer: '', failure_mode: 'crash', error: error.message.slice(0, 300), duration_ms: Date.now() - started });
@@ -310,7 +312,7 @@ function runPi({ cwd, skillDir, prompt, timeoutMs }) {
       clearTimeout(timer);
       const answer = stdout.trim().slice(0, 20_000);
       const failure =
-        killedForSize ? 'Pi output exceeded 256 KiB' : signal === 'SIGKILL' ? `Pi timed out after ${timeoutMs}ms` : code !== 0 ? `Pi exited ${code}: ${stderr.slice(-200)}` : !answer ? 'Pi returned no assistant text' : '';
+        killedForSize ? 'Pi output exceeded 256 KiB' : signal === 'SIGKILL' ? `Pi timed out after ${timeoutMs}ms` : code !== 0 ? `Pi exited with code ${code}` : !answer ? 'Pi returned no assistant text' : '';
       resolve({
         answer,
         failure_mode: failure ? 'crash' : 'ok',
@@ -332,13 +334,19 @@ function writeRun(workspace, evalItem, configuration, runNumber, run) {
   mkdirSync(outputsDir, { recursive: true });
   writeFileSync(
     path.join(runDir, 'eval_metadata.json'),
-    `${JSON.stringify({ eval_id: evalItem.id, eval_name: evalItem.id, prompt: evalItem.prompt }, null, 2)}\n`,
+    `${JSON.stringify({
+      eval_id: evalItem.id,
+      eval_name: evalItem.id,
+      prompt: evalItem.prompt,
+      expected_output: evalItem.expected_output,
+    }, null, 2)}\n`,
   );
   writeFileSync(path.join(outputsDir, 'response.md'), `${run.answer || `Evaluation failed: ${run.error ?? 'unknown error'}`}\n`);
   writeFileSync(
     path.join(runDir, 'grading.json'),
     `${JSON.stringify(
       {
+        expected_output: evalItem.expected_output,
         expectations: run.grading.expectations,
         summary: {
           passed: run.grading.passed,
@@ -372,10 +380,15 @@ function stats(values) {
   };
 }
 
+function viewerConfiguration(type, configuration) {
+  if (type === 'added') return configuration === 'candidate' ? 'with_skill' : 'without_skill';
+  return configuration === 'candidate' ? 'new_skill' : 'old_skill';
+}
+
 function buildBenchmark({ skill, skillPath, type, runs, runCount, gate }) {
-  const candidate = type === 'added' ? 'with_skill' : 'new_skill';
-  const baseline = type === 'added' ? 'without_skill' : 'old_skill';
-  const label = (configuration) => (configuration === 'candidate' ? candidate : baseline);
+  const candidate = viewerConfiguration(type, 'candidate');
+  const baseline = viewerConfiguration(type, 'baseline');
+  const label = (configuration) => viewerConfiguration(type, configuration);
   const grouped = Object.fromEntries(
     [candidate, baseline].map((configuration) => {
       const values = runs.filter((run) => label(run.configuration) === configuration);
@@ -441,11 +454,10 @@ async function evaluateSkill({ change, base, head, tempRoot, outputRoot, cwd, ru
   if (change.type === 'modified') {
     baselineDir = path.join(tempRoot, 'baseline', change.path);
     materializeSkill(base, change.path, baselineDir);
-    if (revisionHasPath(base, evalPath)) {
-      const baseEvals = validateEvalSet(readJsonAt(base, evalPath));
-      evalSet = selectRegressionEvalSet(baseEvals, headEvals);
-      baseEvalIds = baseEvals.evals.map((item) => String(item.id));
-    }
+    if (!revisionHasPath(base, evalPath)) throw new Error(`modified skills require ${evalPath} on the base revision`);
+    const baseEvals = validateEvalSet(readJsonAt(base, evalPath));
+    evalSet = selectRegressionEvalSet(baseEvals, headEvals);
+    baseEvalIds = baseEvals.evals.map((item) => String(item.id));
   }
 
   const workspace = path.join(outputRoot, safeSegment(skill));
@@ -482,9 +494,7 @@ async function evaluateSkill({ change, base, head, tempRoot, outputRoot, cwd, ru
           grading,
         };
         runs.push(run);
-        const viewerConfig = configuration === 'candidate'
-          ? change.type === 'added' ? 'with_skill' : 'new_skill'
-          : change.type === 'added' ? 'without_skill' : 'old_skill';
+        const viewerConfig = viewerConfiguration(change.type, configuration);
         writeRun(workspace, evalItem, viewerConfig, runNumber, run);
       }
     }
@@ -503,10 +513,37 @@ async function evaluateSkill({ change, base, head, tempRoot, outputRoot, cwd, ru
   return { skill, type: change.type, path: change.path, gate };
 }
 
+function findSkillChanges(base, head) {
+  const changedFiles = git(['diff', '--name-only', '--no-renames', '-z', base, head])
+    .split('\0')
+    .filter(Boolean);
+  return selectSkillChanges(changedFiles, (revision, file) =>
+    revisionHasPath(revision === 'base' ? base : head, file),
+  );
+}
+
+function writeReport({ outputRoot, base, head, results, error }) {
+  const summary = { base, head, skills: results, ...(error ? { error: 'evaluation infrastructure failed' } : {}) };
+  writeFileSync(path.join(outputRoot, 'summary.json'), `${JSON.stringify(summary, null, 2)}\n`);
+  const comment = formatComment(results, {
+    runUrl: process.env.SKILL_EVAL_RUN_URL || '#',
+    artifactName: process.env.SKILL_EVAL_ARTIFACT || 'skill-eval-results',
+    error,
+  });
+  writeFileSync(path.join(outputRoot, 'comment.md'), comment);
+  if (process.env.GITHUB_STEP_SUMMARY) writeFileSync(process.env.GITHUB_STEP_SUMMARY, comment, { flag: 'a' });
+}
+
 async function main() {
   const base = process.env.SKILL_EVAL_BASE_SHA;
   const head = process.env.SKILL_EVAL_HEAD_SHA;
   if (!base || !head) throw new Error('SKILL_EVAL_BASE_SHA and SKILL_EVAL_HEAD_SHA are required');
+  const changes = findSkillChanges(base, head);
+  if (process.argv.includes('--detect')) {
+    process.stdout.write(changes.map((change) => `${change.type}\t${change.path}`).join('\n'));
+    return;
+  }
+
   const runCount = Number(process.env.SKILL_EVAL_RUNS || '3');
   const timeoutMs = Number(process.env.SKILL_EVAL_TIMEOUT_MS || '120000');
   if (!Number.isInteger(runCount) || runCount < 1 || runCount > 5) throw new Error('SKILL_EVAL_RUNS must be 1..5');
@@ -515,33 +552,29 @@ async function main() {
   const cwd = process.cwd();
   const outputRoot = path.resolve(process.env.SKILL_EVAL_OUTPUT_DIR || 'skill-eval-results');
   mkdirSync(outputRoot, { recursive: true });
-  const changedFiles = git(['diff', '--name-only', '--no-renames', '-z', base, head])
-    .split('\0')
-    .filter(Boolean);
-  const changes = selectSkillChanges(changedFiles, (revision, file) =>
-    revisionHasPath(revision === 'base' ? base : head, file),
-  );
   if (!changes.length) throw new Error('no added or modified skills found');
   if (changes.length > 3) throw new Error('a single PR may evaluate at most 3 skills');
 
   const tempRoot = mkdtempSync(path.join(os.tmpdir(), 'pi-skill-eval-'));
+  const results = [];
   try {
-    const results = [];
     for (const change of changes) {
       process.stderr.write(`[skill-eval] ${change.type} ${change.path}\n`);
       results.push(
         await evaluateSkill({ change, base, head, tempRoot, outputRoot, cwd, runCount, timeoutMs }),
       );
     }
-    const summary = { base, head, skills: results };
-    writeFileSync(path.join(outputRoot, 'summary.json'), `${JSON.stringify(summary, null, 2)}\n`);
-    const comment = formatComment(results, {
-      runUrl: process.env.SKILL_EVAL_RUN_URL || '#',
-      artifactName: process.env.SKILL_EVAL_ARTIFACT || 'skill-eval-results',
-    });
-    writeFileSync(path.join(outputRoot, 'comment.md'), comment);
-    if (process.env.GITHUB_STEP_SUMMARY) writeFileSync(process.env.GITHUB_STEP_SUMMARY, comment, { flag: 'a' });
+    writeReport({ outputRoot, base, head, results });
     if (results.some((result) => !result.gate.passed)) process.exitCode = 1;
+  } catch (error) {
+    writeReport({
+      outputRoot,
+      base,
+      head,
+      results,
+      error: 'Evaluation infrastructure failed before all skills completed. See the workflow logs.',
+    });
+    throw error;
   } finally {
     rmSync(tempRoot, { recursive: true, force: true });
   }
@@ -559,8 +592,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       `[Workflow logs](${process.env.SKILL_EVAL_RUN_URL || '#'})`,
       '',
     ].join('\n');
-    writeFileSync(path.join(outputRoot, 'comment.md'), comment);
-    writeFileSync(path.join(outputRoot, 'summary.json'), `${JSON.stringify({ error: 'evaluation infrastructure failed' }, null, 2)}\n`);
+    if (!existsSync(path.join(outputRoot, 'comment.md'))) writeFileSync(path.join(outputRoot, 'comment.md'), comment);
+    if (!existsSync(path.join(outputRoot, 'summary.json'))) {
+      writeFileSync(path.join(outputRoot, 'summary.json'), `${JSON.stringify({ error: 'evaluation infrastructure failed' }, null, 2)}\n`);
+    }
     console.error(`[skill-eval] ${error instanceof Error ? error.message : error}`);
     process.exitCode = 1;
   });
