@@ -952,14 +952,16 @@ jobs:
         if: matrix.extension == 'pi-memory' && env.PI_INTEGRATION_BASE_URL != ''
         run: |
           set -euo pipefail
-          # mem0 (open-source mode) writes vectors directly to the SQLite path
-          # configured in settings.json (oss.vectorStore.config.dbPath).
-          # The matrix prompt explicitly drives mem0_save (which awaits
-          # provider.add()) so by the time pi exits the memory should be
-          # persisted. Three assertions:
+          # pi-memory-mem0 is passive: its turn_end hook sends each
+          # user+assistant turn to mem0 (embedded mode) for fact extraction,
+          # and session_shutdown flushes the pending write before pi exits.
+          # Vectors land in the SQLite path configured in settings.json
+          # (oss.vectorStore.config.dbPath). Assertions:
           #   1. Vector db exists with non-trivial size
           #   2. `vectors` table exists (full OSS init succeeded)
-          #   3. The `ci-mem0-marker` row is actually written (mem0_save ran)
+          #   3. Passive capture persisted at least one extracted fact —
+          #      extraction rewrites turn text, so no verbatim marker is
+          #      asserted; the full dump below is the diagnostic.
           DB="${RUNNER_TEMP}/pi-mem0/mem0-vectors.db"
           if [ ! -f "$DB" ]; then
             echo "::error::mem0 vector db not created at $DB — mem0 OSS init failed."
@@ -984,11 +986,7 @@ jobs:
           ROWS=$(sqlite3 "$DB" 'SELECT COUNT(*) FROM vectors;')
           echo "Row count: $ROWS"
           if [ "$ROWS" -lt 1 ]; then
-            echo "::error::mem0 vectors table is empty — the mem0_save tool did not persist anything."
-            exit 1
-          fi
-          if ! sqlite3 "$DB" 'SELECT payload FROM vectors;' | grep -qi 'ci-mem0-marker'; then
-            echo "::error::Expected 'ci-mem0-marker' in mem0 stored memories — mem0_save tool wrote, but the marker is missing."
+            echo "::error::mem0 vectors table is empty — the passive turn_end capture did not persist anything."
             exit 1
           fi
           echo "✓ mem0 OSS pipeline verified end-to-end."

@@ -13,8 +13,8 @@ export const fullMatrix = [
   },
   {
     extension: 'pi-memory',
-    tools: 'memory_add,memory_read,mem0_save,mem0_search',
-    prompt: 'Step 1 — call memory_add with target=memory and content=ci-probe=alpha. Step 2 — call memory_read with target=memory and quote the saved entry verbatim. Step 3 — call mem0_save with fact=ci-mem0-marker is present. Step 4 — call mem0_search with query=ci-mem0-marker and quote the result. Use each tool exactly once.',
+    tools: 'memory_add,memory_read',
+    prompt: 'Step 1 — call memory_add with target=memory and content=ci-probe=alpha. Step 2 — call memory_read with target=memory and quote the saved entry verbatim. Use each tool exactly once.',
     assert_pattern: 'ci-probe=alpha',
   },
   {
