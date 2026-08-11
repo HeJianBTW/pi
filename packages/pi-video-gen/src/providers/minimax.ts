@@ -15,7 +15,7 @@ import type {
   VideoProviderAdapter,
 } from '../types.js';
 import { requestFingerprint } from './request.js';
-import { downloadFile, trustedHostsFor } from './task.js';
+import { downloadFile } from './task.js';
 
 /**
  * MiniMax video generation API v2 (MiniMax-H3).
@@ -234,13 +234,7 @@ export const minimaxAdapter: VideoProviderAdapter = {
     signal,
   ): Promise<VideoFileMeta> {
     // MiniMax result URLs are time-limited CDN links; download promptly.
-    return downloadFile({
-      url: videoUrl,
-      destPath,
-      fetchImpl,
-      signal,
-      trustedHosts: trustedHostsFor(provider),
-    });
+    return downloadFile({ url: videoUrl, destPath, fetchImpl, provider, signal });
   },
 
   // cancel: no documented task-cancellation endpoint on the v2 API.

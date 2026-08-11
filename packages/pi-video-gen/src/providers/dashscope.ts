@@ -15,7 +15,7 @@ import type {
   VideoProviderAdapter,
 } from '../types.js';
 import { requestFingerprint } from './request.js';
-import { downloadFile, trustedHostsFor } from './task.js';
+import { downloadFile } from './task.js';
 
 /**
  * Alibaba DashScope video generation (HappyHorse series).
@@ -230,13 +230,7 @@ export const dashscopeAdapter: VideoProviderAdapter = {
     signal,
   ): Promise<VideoFileMeta> {
     // DashScope result URLs are signed OSS links (24h expiry); download promptly.
-    return downloadFile({
-      url: videoUrl,
-      destPath,
-      fetchImpl,
-      signal,
-      trustedHosts: trustedHostsFor(provider),
-    });
+    return downloadFile({ url: videoUrl, destPath, fetchImpl, provider, signal });
   },
 
   /** Generic DashScope task cancellation: POST /api/v1/tasks/{id}/cancel. */

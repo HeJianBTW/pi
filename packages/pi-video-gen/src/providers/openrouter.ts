@@ -15,7 +15,7 @@ import type {
   VideoProviderAdapter,
 } from '../types.js';
 import { requestFingerprint } from './request.js';
-import { downloadFile, trustedHostsFor } from './task.js';
+import { downloadFile } from './task.js';
 
 /**
  * OpenRouter video generation (google/veo-3.1 and friends).
@@ -211,13 +211,7 @@ export const openrouterAdapter: VideoProviderAdapter = {
     fetchImpl,
     signal,
   ): Promise<VideoFileMeta> {
-    return downloadFile({
-      url: videoUrl,
-      destPath,
-      fetchImpl,
-      signal,
-      trustedHosts: trustedHostsFor(provider),
-    });
+    return downloadFile({ url: videoUrl, destPath, fetchImpl, provider, signal });
   },
 
   // cancel: not covered by the submitted docs; local stops are polling_stopped.
