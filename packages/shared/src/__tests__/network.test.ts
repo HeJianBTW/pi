@@ -5,6 +5,7 @@ import {
   hostFromUrl,
   readResponseBytes,
   safeFetch,
+  trustedHostsFromUrls,
 } from '../network.js';
 
 const publicLookup: DnsLookup = async () => [{ address: '93.184.216.34', family: 4 }];
@@ -138,6 +139,15 @@ describe('network', () => {
     ).rejects.toThrow(/public HTTP/i);
   });
 
+  it('matches bracketed IPv6-literal trusted hosts', async () => {
+    // ULA literals fail the public-IP check unless trusted; hostFromUrl keeps
+    // the brackets, so the pattern side must strip them too.
+    await expect(assertPublicHttpUrl('http://[fd00::1]/')).rejects.toThrow(/public HTTP/i);
+    await expect(
+      assertPublicHttpUrl('http://[fd00::1]/', { trustedHosts: ['[fd00::1]'] }),
+    ).resolves.toBeDefined();
+  });
+
   it('still applies protocol and localhost rules to trusted hosts', async () => {
     await expect(
       assertPublicHttpUrl('ftp://internal.example/path', {
@@ -199,5 +209,22 @@ describe('hostFromUrl', () => {
 
   it.each([[undefined], [''], ['not a url'], ['http://']])('returns undefined for %j', (input) => {
     expect(hostFromUrl(input)).toBeUndefined();
+  });
+});
+
+describe('trustedHostsFromUrls', () => {
+  it('collects hosts from valid URLs and skips the rest', () => {
+    expect(
+      trustedHostsFromUrls(
+        'https://credits.example.com/v1',
+        undefined,
+        'not a url',
+        'http://internal.example:8080/api',
+      ),
+    ).toEqual(['credits.example.com', 'internal.example']);
+  });
+
+  it('returns an empty list when nothing parses', () => {
+    expect(trustedHostsFromUrls(undefined, '')).toEqual([]);
   });
 });

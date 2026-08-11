@@ -101,7 +101,11 @@ function isTrustedHost(hostname: string, trustedHosts: TrustedHosts): boolean {
   if (trustedHosts.length === 0) return false;
   const lower = hostname.toLowerCase().replace(/^\[|\]$/g, '');
   for (const raw of trustedHosts) {
-    const pattern = raw.trim().toLowerCase().replace(/^\*\./, '');
+    const pattern = raw
+      .trim()
+      .toLowerCase()
+      .replace(/^\[|\]$/g, '')
+      .replace(/^\*\./, '');
     if (!pattern) continue;
     if (lower === pattern || lower.endsWith(`.${pattern}`)) return true;
   }
@@ -122,6 +126,19 @@ export function hostFromUrl(value: string | undefined): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Build a TrustedHosts list from configured URLs (provider baseUrls, or URLs
+ * returned by a configured provider). Malformed values are skipped.
+ */
+export function trustedHostsFromUrls(...values: Array<string | undefined>): TrustedHosts {
+  const hosts: string[] = [];
+  for (const value of values) {
+    const host = hostFromUrl(value);
+    if (host) hosts.push(host);
+  }
+  return hosts;
 }
 
 /**

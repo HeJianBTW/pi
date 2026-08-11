@@ -483,4 +483,5 @@ export {
   readResponseBytes,
   safeFetch,
   type TrustedHosts,
+  trustedHostsFromUrls,
 } from './network.js';

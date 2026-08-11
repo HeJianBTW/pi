@@ -233,7 +233,7 @@ describe('arkAdapter.downloadTo', () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it('passes the provider baseUrl host as trustedHosts to safeFetch', async () => {
+  it('passes the provider baseUrl and media URL hosts as trustedHosts to safeFetch', async () => {
     const dest = join(suiteDir, 'trusted.mp4');
     safeFetchMock.mockImplementation(mockFetch(mp4Response));
     await arkAdapter.downloadTo(
@@ -246,7 +246,7 @@ describe('arkAdapter.downloadTo', () => {
     expect(safeFetchMock).toHaveBeenCalledWith(
       'https://cdn.ark.example/v.mp4',
       expect.anything(),
-      expect.objectContaining({ trustedHosts: ['ark.example'] }),
+      expect.objectContaining({ trustedHosts: ['ark.example', 'cdn.ark.example'] }),
     );
   });
 

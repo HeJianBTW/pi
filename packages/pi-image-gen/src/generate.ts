@@ -1,10 +1,10 @@
 import { mkdir, open, unlink } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
 import {
-  hostFromUrl,
   readResponseBytes,
   safeFetch,
   type TrustedHosts,
+  trustedHostsFromUrls,
 } from '@amaster.ai/pi-shared';
 import { validateGenerateParams } from './capabilities.js';
 import { resolveModel } from './config.js';
@@ -110,9 +110,7 @@ export async function generateImage(
   const baseFilename = sanitizeFilename(params.filename ?? `${resolved.requestedId}-${stamp}`);
   // The image URL comes from the configured provider — trust its host (and
   // subdomains) so provider-side caches on private/fake-ip networks still work.
-  const trustedHosts: string[] = [];
-  const providerHost = hostFromUrl(resolved.provider.baseUrl);
-  if (providerHost) trustedHosts.push(providerHost);
+  const trustedHosts = trustedHostsFromUrls(resolved.provider.baseUrl);
   const images: GeneratedImage[] = [];
   try {
     for (let i = 0; i < raws.length; i++) {
