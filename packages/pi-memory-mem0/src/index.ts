@@ -110,7 +110,7 @@ export default function mem0Extension(pi: ExtensionAPI): void {
     if (!prefetch) return;
     const text = event.text ?? '';
     if (text) {
-      prefetch.queue(text);
+      prefetch.queue(redactMemoryText(text));
       lastUserText = text;
     }
   });
@@ -137,7 +137,11 @@ export default function mem0Extension(pi: ExtensionAPI): void {
           { userId: activeUserId },
         );
       })
-      .catch(() => {});
+      .catch((err) => {
+        console.error(
+          `[pi-memory-mem0] failed to store turn: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      });
   });
 
   pi.on('before_agent_start', async () => {

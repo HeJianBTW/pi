@@ -3,9 +3,15 @@
  * consumes the result on before_agent_start with a timeout.
  */
 
+import { truncateHead, truncateLine } from '@earendil-works/pi-coding-agent';
 import { formatRecalledMemory } from './privacy.js';
 import type { Mem0Provider } from './provider.js';
 import type { MemoryItem } from './types.js';
+
+/** Recalled entries land in per-turn model context — keep the block small. */
+const MAX_ENTRY_CHARS = 1_000;
+const MAX_BLOCK_BYTES = 8 * 1024;
+const MAX_BLOCK_LINES = 50;
 
 export class Prefetch {
   private readonly provider: Mem0Provider;
@@ -22,7 +28,10 @@ export class Prefetch {
   /** Phase 1: kick off a background search (called on input with user text). */
   queue(query: string): void {
     if (!query.trim()) return;
-    this.pending = this.provider.search(query, { userId: this.userId, topK: this.topK });
+    const search = this.provider.search(query, { userId: this.userId, topK: this.topK });
+    // A replaced or never-consumed search must not surface as an unhandled rejection.
+    search.catch(() => {});
+    this.pending = search;
   }
 
   /** Phase 2: consume the result with a timeout (called on before_agent_start). */
@@ -42,9 +51,15 @@ export class Prefetch {
 
       const lines = memories
         .filter((m) => m.memory?.trim())
-        .map((m) => `- ${formatRecalledMemory(m.memory.trim())}`);
+        .map(
+          (m) => `- ${formatRecalledMemory(truncateLine(m.memory.trim(), MAX_ENTRY_CHARS).text)}`,
+        );
 
-      return lines.length > 0 ? `## Recalled Memories (Mem0)\n${lines.join('\n')}` : '';
+      if (lines.length === 0) return '';
+      return truncateHead(`## Recalled Memories (Mem0)\n${lines.join('\n')}`, {
+        maxBytes: MAX_BLOCK_BYTES,
+        maxLines: MAX_BLOCK_LINES,
+      }).content;
     } catch {
       return '';
     }

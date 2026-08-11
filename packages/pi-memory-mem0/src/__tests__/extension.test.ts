@@ -279,6 +279,12 @@ describe('passive capture', () => {
     expect(JSON.stringify(messages)).not.toContain('abcdefghijklmnop');
     expect(JSON.stringify(messages)).toContain('[REDACTED]');
     expect(opts.userId).toMatch(/:project:/);
+
+    // The prefetch search query is redacted before it reaches the backend too.
+    expect(provider.search).toHaveBeenCalledWith(
+      'use api_key=[REDACTED] for the API',
+      expect.objectContaining({ topK: 5 }),
+    );
   });
 
   it('ignores non-assistant turn_end messages', async () => {
