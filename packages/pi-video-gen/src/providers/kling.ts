@@ -16,7 +16,7 @@ import type {
   VideoProviderAdapter,
 } from '../types.js';
 import { requestFingerprint } from './request.js';
-import { CancelledError, downloadFile } from './task.js';
+import { CancelledError, downloadFile, trustedHostsFor } from './task.js';
 
 /**
  * Kling (Kuaishou) video generation — official Kling API 2.0.
@@ -263,14 +263,20 @@ export const klingAdapter: VideoProviderAdapter = {
   },
 
   async downloadTo(
-    _provider,
+    provider,
     _handle,
     videoUrl,
     destPath,
     fetchImpl,
     signal,
   ): Promise<VideoFileMeta> {
-    return downloadFile({ url: videoUrl, destPath, fetchImpl, signal });
+    return downloadFile({
+      url: videoUrl,
+      destPath,
+      fetchImpl,
+      signal,
+      trustedHosts: trustedHostsFor(provider),
+    });
   },
 
   // cancel: no documented task-cancellation endpoint on Kling API 2.0.

@@ -16,7 +16,7 @@ import type {
   VideoProviderAdapter,
 } from '../types.js';
 import { requestFingerprint } from './request.js';
-import { downloadFile } from './task.js';
+import { downloadFile, trustedHostsFor } from './task.js';
 
 /**
  * Volcengine Ark video generation (ByteDance Seedance series).
@@ -208,7 +208,7 @@ export const arkAdapter: VideoProviderAdapter = {
   },
 
   async downloadTo(
-    _provider,
+    provider,
     _handle,
     videoUrl,
     destPath,
@@ -216,7 +216,13 @@ export const arkAdapter: VideoProviderAdapter = {
     signal,
   ): Promise<VideoFileMeta> {
     try {
-      return await downloadFile({ url: videoUrl, destPath, fetchImpl, signal });
+      return await downloadFile({
+        url: videoUrl,
+        destPath,
+        fetchImpl,
+        signal,
+        trustedHosts: trustedHostsFor(provider),
+      });
     } catch (error) {
       if (error instanceof VideoGenError) throw error;
       throw new VideoGenError(

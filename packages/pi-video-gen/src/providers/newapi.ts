@@ -15,7 +15,7 @@ import type {
   VideoProviderAdapter,
 } from '../types.js';
 import { requestFingerprint } from './request.js';
-import { downloadFile } from './task.js';
+import { downloadFile, trustedHostsFor } from './task.js';
 
 /**
  * NewAPI video generation format (self-hosted OpenAI-compatible relay:
@@ -243,14 +243,20 @@ export const newapiAdapter: VideoProviderAdapter = {
   },
 
   async downloadTo(
-    _provider,
+    provider,
     _handle,
     videoUrl,
     destPath,
     fetchImpl,
     signal,
   ): Promise<VideoFileMeta> {
-    return downloadFile({ url: videoUrl, destPath, fetchImpl, signal });
+    return downloadFile({
+      url: videoUrl,
+      destPath,
+      fetchImpl,
+      signal,
+      trustedHosts: trustedHostsFor(provider),
+    });
   },
 
   // cancel: no documented task-cancellation endpoint in the NewAPI video format.

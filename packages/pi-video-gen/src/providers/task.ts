@@ -2,7 +2,7 @@ import { createWriteStream, existsSync } from 'node:fs';
 import { lstat, rename, unlink } from 'node:fs/promises';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { safeFetch } from '@amaster.ai/pi-shared';
+import { hostFromUrl, safeFetch, type TrustedHosts } from '@amaster.ai/pi-shared';
 import {
   RemoteTaskFailedError,
   RetryableProviderError,
@@ -119,6 +119,15 @@ export async function pollTask(opts: {
 
 const DEFAULT_MAX_DOWNLOAD_BYTES = 2 * 1024 * 1024 * 1024; // 2 GiB ceiling for 4K clips
 
+/**
+ * The video URL comes from the configured provider — trust its baseUrl host
+ * (and subdomains) so provider-side storage on private/fake-ip networks works.
+ */
+export function trustedHostsFor(provider: { baseUrl: string }): TrustedHosts {
+  const host = hostFromUrl(provider.baseUrl);
+  return host ? [host] : [];
+}
+
 /** MP4 files carry an `ftyp` box at offset 4; reject anything else (error pages, XML). */
 function looksLikeMp4(header: Buffer): boolean {
   return header.length >= 8 && header.subarray(4, 8).toString('ascii') === 'ftyp';
@@ -137,6 +146,7 @@ export async function downloadFile(opts: {
   signal?: AbortSignal | undefined;
   maxBytes?: number | undefined;
   timeoutMs?: number | undefined;
+  trustedHosts?: TrustedHosts | undefined;
 }): Promise<VideoFileMeta> {
   const maxBytes = opts.maxBytes ?? DEFAULT_MAX_DOWNLOAD_BYTES;
   const timeoutMs = opts.timeoutMs ?? DEFAULT_DOWNLOAD_TIMEOUT_MS;
@@ -171,7 +181,7 @@ export async function downloadFile(opts: {
 
   let res: Response;
   try {
-    res = await safeFetch(opts.url, { signal });
+    res = await safeFetch(opts.url, { signal }, { trustedHosts: opts.trustedHosts });
   } catch (error) {
     if (error instanceof Error && /public HTTP|redirect limit/i.test(error.message)) {
       throw new VideoGenError(error.message, 'download: unsafe URL');

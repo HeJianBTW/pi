@@ -1,6 +1,11 @@
 import { mkdir, open, unlink } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
-import { readResponseBytes, safeFetch } from '@amaster.ai/pi-shared';
+import {
+  hostFromUrl,
+  readResponseBytes,
+  safeFetch,
+  type TrustedHosts,
+} from '@amaster.ai/pi-shared';
 import { validateGenerateParams } from './capabilities.js';
 import { resolveModel } from './config.js';
 import {
@@ -103,6 +108,11 @@ export async function generateImage(
 
   const stamp = formatStamp(now());
   const baseFilename = sanitizeFilename(params.filename ?? `${resolved.requestedId}-${stamp}`);
+  // The image URL comes from the configured provider — trust its host (and
+  // subdomains) so provider-side caches on private/fake-ip networks still work.
+  const trustedHosts: string[] = [];
+  const providerHost = hostFromUrl(resolved.provider.baseUrl);
+  if (providerHost) trustedHosts.push(providerHost);
   const images: GeneratedImage[] = [];
   try {
     for (let i = 0; i < raws.length; i++) {
@@ -111,7 +121,7 @@ export async function generateImage(
       // multi-image materialize/write would keep writing files and return success.
       if (options.signal?.aborted) throw cancelledError('image generation');
       const raw = raws[i]!;
-      const fetched = await materialize(raw, options.signal);
+      const fetched = await materialize(raw, options.signal, trustedHosts);
       if (options.signal?.aborted) throw cancelledError('image generation');
       const ext = MIME_TO_EXT[fetched.mimeType] ?? 'png';
       const suffix = raws.length > 1 ? `-${i + 1}` : '';
@@ -238,7 +248,8 @@ async function writeUnique(
 
 async function materialize(
   raw: RawImageResult,
-  signal?: AbortSignal,
+  signal: AbortSignal | undefined,
+  trustedHosts: TrustedHosts,
 ): Promise<{ bytes: Uint8Array; mimeType: string }> {
   if (raw.data.kind === 'base64') {
     if (raw.data.bytes.length > MAX_BASE64_IMAGE_CHARS) {
@@ -272,7 +283,7 @@ async function materialize(
   // redacts the URL (dropping ?token=…) and interpolates no raw fetch text.
   let res: Response;
   try {
-    res = await safeFetch(raw.data.url, { signal: signal ?? null });
+    res = await safeFetch(raw.data.url, { signal: signal ?? null }, { trustedHosts });
   } catch (error) {
     if (error instanceof Error && /public HTTP|redirect limit/i.test(error.message)) {
       throw new ImageGenError(error.message, 'generated image rejected (unsafe URL)');

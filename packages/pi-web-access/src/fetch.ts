@@ -1,4 +1,10 @@
-import { assertPublicHttpUrl, type DnsLookup, safeFetch } from '@amaster.ai/pi-shared';
+import {
+  assertPublicHttpUrl,
+  type DnsLookup,
+  hostFromUrl,
+  safeFetch,
+  type TrustedHosts,
+} from '@amaster.ai/pi-shared';
 import TurndownService from 'turndown';
 import { resolveFetchProvider } from './config.js';
 import type { FetchResponse } from './providers/index.js';
@@ -13,6 +19,16 @@ const USER_AGENT =
 
 export type WebFetchParams = { url: string };
 export type WebFetchResponse = FetchResponse;
+
+/** Hosts from user-configured provider baseUrls — trusted for SSRF purposes. */
+function trustedHostsFromSettings(settings: WebToolSettings): TrustedHosts {
+  const hosts: string[] = [];
+  for (const config of Object.values(settings.providers ?? {})) {
+    const host = hostFromUrl(config?.baseUrl);
+    if (host) hosts.push(host);
+  }
+  return hosts;
+}
 
 // ─── Jina Reader (free, supports JS rendering) ──────────────────────────────
 
@@ -41,6 +57,7 @@ async function fetchLocal(
   url: string,
   timeoutMs: number,
   lookup?: DnsLookup,
+  trustedHosts?: TrustedHosts,
 ): Promise<FetchResponse> {
   const response = await safeFetch(
     url,
@@ -51,7 +68,7 @@ async function fetchLocal(
       },
       signal: AbortSignal.timeout(timeoutMs),
     },
-    lookup ? { lookup } : {},
+    { lookup, trustedHosts },
   );
 
   if (!response.ok) {
@@ -80,12 +97,13 @@ async function fetchWithFallback(
   url: string,
   timeoutMs: number,
   lookup?: DnsLookup,
+  trustedHosts?: TrustedHosts,
 ): Promise<FetchResponse> {
-  await assertPublicHttpUrl(url, lookup);
+  await assertPublicHttpUrl(url, { lookup, trustedHosts });
   try {
     return await fetchViaJina(url, timeoutMs);
   } catch {
-    return fetchLocal(url, timeoutMs, lookup);
+    return fetchLocal(url, timeoutMs, lookup, trustedHosts);
   }
 }
 
@@ -97,15 +115,15 @@ export async function webFetch(
   lookup?: DnsLookup,
 ): Promise<FetchResponse> {
   const timeoutMs = settings.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const trustedHosts = trustedHostsFromSettings(settings);
   const resolved = resolveFetchProvider(settings);
   if (resolved) {
-    if (lookup) await assertPublicHttpUrl(params.url, lookup);
-    else await assertPublicHttpUrl(params.url);
+    await assertPublicHttpUrl(params.url, { lookup, trustedHosts });
     const provider = getProvider(resolved.id);
     if (!provider) {
       throw new Error(`Provider "${resolved.id}" is not registered.`);
     }
     return provider.fetch(params.url, resolved);
   }
-  return fetchWithFallback(params.url, timeoutMs, lookup);
+  return fetchWithFallback(params.url, timeoutMs, lookup, trustedHosts);
 }

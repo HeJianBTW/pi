@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
-import { assertPublicHttpUrl, type DnsLookup, readResponseBytes, safeFetch } from '../network.js';
+import {
+  assertPublicHttpUrl,
+  type DnsLookup,
+  hostFromUrl,
+  readResponseBytes,
+  safeFetch,
+} from '../network.js';
 
 const publicLookup: DnsLookup = async () => [{ address: '93.184.216.34', family: 4 }];
 
@@ -29,13 +35,15 @@ describe('network', () => {
     'http://[::ffff:169.254.169.254]/latest/meta-data',
     'file:///etc/passwd',
   ])('rejects non-public destination %s', async (url) => {
-    await expect(assertPublicHttpUrl(url, publicLookup)).rejects.toThrow(/public HTTP/i);
+    await expect(assertPublicHttpUrl(url, { lookup: publicLookup })).rejects.toThrow(
+      /public HTTP/i,
+    );
   });
 
   it('rejects a hostname when DNS returns a private address', async () => {
     const privateLookup: DnsLookup = async () => [{ address: '192.168.1.20', family: 4 }];
     await expect(
-      assertPublicHttpUrl('https://internal.example/path', privateLookup),
+      assertPublicHttpUrl('https://internal.example/path', { lookup: privateLookup }),
     ).rejects.toThrow(/public HTTP/i);
   });
 
@@ -44,25 +52,25 @@ describe('network', () => {
       { address: '64:ff9b::a9fe:a9fe', family: 6 },
     ];
     await expect(
-      assertPublicHttpUrl('https://internal.example/path', privateNat64Lookup),
+      assertPublicHttpUrl('https://internal.example/path', { lookup: privateNat64Lookup }),
     ).rejects.toThrow(/public HTTP/i);
   });
 
   it('allows a public HTTP URL', async () => {
     await expect(
-      assertPublicHttpUrl('https://example.com/path', publicLookup),
+      assertPublicHttpUrl('https://example.com/path', { lookup: publicLookup }),
     ).resolves.toMatchObject({ hostname: 'example.com', protocol: 'https:' });
     await expect(
-      assertPublicHttpUrl('http://[::ffff:93.184.216.34]/path', publicLookup),
+      assertPublicHttpUrl('http://[::ffff:93.184.216.34]/path', { lookup: publicLookup }),
     ).resolves.toMatchObject({ hostname: '[::ffff:5db8:d822]' });
     await expect(
-      assertPublicHttpUrl('http://[64:ff9b::5db8:d822]/path', publicLookup),
+      assertPublicHttpUrl('http://[64:ff9b::5db8:d822]/path', { lookup: publicLookup }),
     ).resolves.toMatchObject({ hostname: '[64:ff9b::5db8:d822]' });
     await expect(
-      assertPublicHttpUrl('https://[2606:4700:4700::1111]/path', publicLookup),
+      assertPublicHttpUrl('https://[2606:4700:4700::1111]/path', { lookup: publicLookup }),
     ).resolves.toMatchObject({ hostname: '[2606:4700:4700::1111]' });
     await expect(
-      assertPublicHttpUrl('https://[2001:3::1]/path', publicLookup),
+      assertPublicHttpUrl('https://[2001:3::1]/path', { lookup: publicLookup }),
     ).resolves.toMatchObject({ hostname: '[2001:3::1]' });
   });
 
@@ -81,6 +89,86 @@ describe('network', () => {
     }
   });
 
+  it('reports the host and resolved address when rejecting non-public DNS answers', async () => {
+    const fakeIpLookup: DnsLookup = async () => [{ address: '198.18.1.86', family: 4 }];
+    await expect(
+      assertPublicHttpUrl('https://gateway.internal.example/path', { lookup: fakeIpLookup }),
+    ).rejects.toThrow(/gateway\.internal\.example.*198\.18\.1\.86/s);
+  });
+
+  it('reports an unresolvable host distinctly', async () => {
+    const emptyLookup: DnsLookup = async () => [];
+    await expect(
+      assertPublicHttpUrl('https://gone.example/path', { lookup: emptyLookup }),
+    ).rejects.toThrow(/could not be resolved/i);
+  });
+
+  it.each([
+    'gateway.internal.example',
+    '*.internal.example',
+    'INTERNAL.example',
+    ' gateway.internal.example ',
+  ])('trusts %s past the public-IP check', async (trusted) => {
+    const fakeIpLookup: DnsLookup = async () => [{ address: '198.18.1.86', family: 4 }];
+    await expect(
+      assertPublicHttpUrl('https://gateway.internal.example/path', {
+        lookup: fakeIpLookup,
+        trustedHosts: [trusted],
+      }),
+    ).resolves.toMatchObject({ hostname: 'gateway.internal.example' });
+  });
+
+  it('trusts subdomains of a trusted host', async () => {
+    const fakeIpLookup: DnsLookup = async () => [{ address: '198.18.1.86', family: 4 }];
+    await expect(
+      assertPublicHttpUrl('https://cdn.internal.example/path', {
+        lookup: fakeIpLookup,
+        trustedHosts: ['internal.example'],
+      }),
+    ).resolves.toMatchObject({ hostname: 'cdn.internal.example' });
+  });
+
+  it('does not trust a mere suffix match', async () => {
+    const fakeIpLookup: DnsLookup = async () => [{ address: '198.18.1.86', family: 4 }];
+    await expect(
+      assertPublicHttpUrl('https://evil-internal.example/path', {
+        lookup: fakeIpLookup,
+        trustedHosts: ['internal.example'],
+      }),
+    ).rejects.toThrow(/public HTTP/i);
+  });
+
+  it('still applies protocol and localhost rules to trusted hosts', async () => {
+    await expect(
+      assertPublicHttpUrl('ftp://internal.example/path', {
+        lookup: publicLookup,
+        trustedHosts: ['internal.example'],
+      }),
+    ).rejects.toThrow(/public HTTP/i);
+    await expect(
+      assertPublicHttpUrl('https://localhost/path', {
+        lookup: publicLookup,
+        trustedHosts: ['localhost'],
+      }),
+    ).rejects.toThrow(/public HTTP/i);
+    await expect(
+      assertPublicHttpUrl('https://user:pass@internal.example/path', {
+        lookup: publicLookup,
+        trustedHosts: ['internal.example'],
+      }),
+    ).rejects.toThrow(/public HTTP/i);
+  });
+
+  it('still rejects a trusted host that cannot be resolved', async () => {
+    const emptyLookup: DnsLookup = async () => [];
+    await expect(
+      assertPublicHttpUrl('https://internal.example/path', {
+        lookup: emptyLookup,
+        trustedHosts: ['internal.example'],
+      }),
+    ).rejects.toThrow(/could not be resolved/i);
+  });
+
   it('cancels and rejects a response body that exceeds the byte ceiling', async () => {
     let cancelled = false;
     const response = new Response(
@@ -97,5 +185,19 @@ describe('network', () => {
 
     await expect(readResponseBytes(response, 10)).rejects.toThrow(/size ceiling/i);
     expect(cancelled).toBe(true);
+  });
+});
+
+describe('hostFromUrl', () => {
+  it.each([
+    ['https://credits.example.com/v1', 'credits.example.com'],
+    ['http://internal.example:8080/api', 'internal.example'],
+    ['https://[2001:3::1]/v1', '[2001:3::1]'],
+  ])('extracts the hostname from %s', (input, expected) => {
+    expect(hostFromUrl(input)).toBe(expected);
+  });
+
+  it.each([[undefined], [''], ['not a url'], ['http://']])('returns undefined for %j', (input) => {
+    expect(hostFromUrl(input)).toBeUndefined();
   });
 });

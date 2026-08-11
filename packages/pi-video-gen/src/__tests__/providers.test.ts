@@ -233,6 +233,23 @@ describe('arkAdapter.downloadTo', () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
+  it('passes the provider baseUrl host as trustedHosts to safeFetch', async () => {
+    const dest = join(suiteDir, 'trusted.mp4');
+    safeFetchMock.mockImplementation(mockFetch(mp4Response));
+    await arkAdapter.downloadTo(
+      provider,
+      handle,
+      'https://cdn.ark.example/v.mp4',
+      dest,
+      vi.fn<typeof fetch>(),
+    );
+    expect(safeFetchMock).toHaveBeenCalledWith(
+      'https://cdn.ark.example/v.mp4',
+      expect.anything(),
+      expect.objectContaining({ trustedHosts: ['ark.example'] }),
+    );
+  });
+
   it('refuses a pre-placed destination symlink (and never follows it)', async () => {
     const dir = join(suiteDir, `sym-${Math.random().toString(36).slice(2, 8)}`);
     mkdirSync(dir, { recursive: true });
