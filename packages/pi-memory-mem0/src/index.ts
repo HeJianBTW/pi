@@ -1,10 +1,15 @@
 /**
- * pi-memory-mem0 — Explicit semantic memory extension powered by Mem0.
+ * pi-memory-mem0 — Passive semantic memory extension powered by Mem0.
  *
  * Modes:
  * - **platform**: Uses Mem0 Cloud API (needs MEM0_API_KEY)
  * - **embedded**: Runs Mem0 OSS in-process
  * - **self-hosted**: Calls a remote Mem0 OSS REST server
+ *
+ * After each conversation turn, user + assistant messages are sent to Mem0
+ * for fact extraction and storage (credentials are redacted first). Recalled
+ * memories are injected as a custom message (delivered to the model on the
+ * user channel, never the system prompt) and wrapped as untrusted data.
  *
  * Configuration via settings.json key "pi-memory-mem0".
  * Supports ${ENV_VAR:-fallback} in user and agent settings.
@@ -13,9 +18,9 @@
 
 import { isProjectTrusted, loadPiSettings } from '@amaster.ai/pi-shared/settings';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
-import { formatRecalledMemory, scopeMemoryUserId } from './privacy.js';
+import { Prefetch } from './prefetch.js';
+import { formatRecalledMemory, redactMemoryText, scopeMemoryUserId } from './privacy.js';
 import { createMem0Provider, type Mem0Provider, normalizeMem0Mode } from './provider.js';
-import { createMem0Tools } from './tools.js';
 import type { Mem0ExtensionConfig, MemoryUserIdScope } from './types.js';
 
 const SETTINGS_KEY = 'pi-memory-mem0';
@@ -42,11 +47,15 @@ function resolveUserId(configUserId?: string, scope: MemoryUserIdScope = 'projec
 
 export default function mem0Extension(pi: ExtensionAPI): void {
   let provider: Mem0Provider | undefined;
+  let prefetch: Prefetch | undefined;
   let userId = '';
   let activeMode = '';
+  let lastUserText = '';
+  let pendingWrite: Promise<void> = Promise.resolve();
 
   pi.on('session_start', async (_event, ctx) => {
     provider = undefined;
+    prefetch = undefined;
     const config = loadConfig(ctx.cwd, isProjectTrusted(ctx));
     try {
       const mode = normalizeMem0Mode(config.mode);
@@ -84,6 +93,7 @@ export default function mem0Extension(pi: ExtensionAPI): void {
       });
       userId = scopeMemoryUserId(resolvedUserId, ctx.cwd, config.userIdScope);
       activeMode = mode;
+      prefetch = new Prefetch(provider, userId, { topK: config.topK ?? 5 });
     } catch (err) {
       ctx.ui.setStatus(STATUS_KEY, 'mem0: init failed');
       ctx.ui.notify(
@@ -94,10 +104,63 @@ export default function mem0Extension(pi: ExtensionAPI): void {
     }
 
     ctx.ui.setStatus(STATUS_KEY, `mem0: ${activeMode}`);
+  });
 
-    for (const tool of createMem0Tools(provider, userId)) {
-      pi.registerTool(tool as never);
+  pi.on('input', async (event) => {
+    if (!prefetch) return;
+    const text = event.text ?? '';
+    if (text) {
+      prefetch.queue(text);
+      lastUserText = text;
     }
+  });
+
+  pi.on('turn_end', async (event) => {
+    if (!provider || !lastUserText) return;
+
+    const msg = event.message as { role?: string; content?: unknown };
+    const text = extractText(msg);
+    if (!text || msg.role !== 'assistant') return;
+
+    const userText = lastUserText;
+    lastUserText = '';
+    const activeProvider = provider;
+    const activeUserId = userId;
+    pendingWrite = pendingWrite
+      .catch(() => {})
+      .then(async () => {
+        await activeProvider.add(
+          [
+            { role: 'user', content: redactMemoryText(userText) },
+            { role: 'assistant', content: redactMemoryText(text) },
+          ],
+          { userId: activeUserId },
+        );
+      })
+      .catch(() => {});
+  });
+
+  pi.on('before_agent_start', async () => {
+    if (!prefetch) return;
+
+    const recalled = await prefetch.consume();
+    if (!recalled) return;
+
+    return {
+      message: {
+        customType: 'mem0-recall',
+        content: recalled,
+        display: true,
+      },
+    };
+  });
+
+  pi.on('session_shutdown', async () => {
+    await pendingWrite;
+    provider = undefined;
+    prefetch = undefined;
+    lastUserText = '';
+    pendingWrite = Promise.resolve();
   });
 
   pi.registerCommand('mem0', {
@@ -153,4 +216,15 @@ export default function mem0Extension(pi: ExtensionAPI): void {
       }
     },
   });
+}
+
+function extractText(msg: { content?: unknown }): string {
+  if (typeof msg.content === 'string') return msg.content;
+  if (Array.isArray(msg.content)) {
+    return (msg.content as Array<{ type: string; text?: string }>)
+      .filter((c) => c.type === 'text' && c.text)
+      .map((c) => c.text!)
+      .join('\n');
+  }
+  return '';
 }

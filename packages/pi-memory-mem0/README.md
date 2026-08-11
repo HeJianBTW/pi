@@ -2,13 +2,18 @@
 
 ![pi-memory-mem0 preview](https://raw.githubusercontent.com/TGYD-helige/pi/master/packages/pi-memory-mem0/preview.png)
 
-Explicit semantic memory tools powered by [Mem0](https://mem0.ai), with Platform, embedded, and self-hosted modes.
+Passive semantic memory extension powered by [Mem0](https://mem0.ai), with Platform, embedded, and self-hosted modes.
 
 ## How It Works
 
-Memories are saved and recalled through explicit tools. They are project-namespaced by default, and stored text is not injected into the system prompt. Set `userIdScope: "exact"` when one identity must be shared across projects.
+After each conversation turn, the user + assistant messages are automatically sent to Mem0 for fact extraction and storage. When you send a prompt, a semantic search is prefetched in the background and relevant memories are recalled before the agent starts — **zero effort required**.
 
-Use `mem0_save` and the search/profile tools when memory should be stored or retrieved.
+Safety boundaries:
+
+- **Recall channel**: recalled memories are injected as a custom message delivered on the user channel — never into the system prompt. Each entry is wrapped as `[UNTRUSTED MEMORY DATA]` (JSON-quoted), and entries matching prompt-injection patterns are replaced with `[BLOCKED UNTRUSTED MEMORY: ...]`.
+- **Project namespacing**: memories are scoped to `userId:project:<cwd-hash>` by default, so one project's memories are not visible in another. Set `userIdScope: "exact"` when one identity must be shared across projects.
+- **Credential redaction**: private keys, bearer tokens, and `api_key=…`-style values are redacted before anything is stored.
+- **Platform mode disclosure**: in `platform` mode the captured turns leave your machine and are processed by Mem0 Cloud. Use `embedded` or `self-hosted` mode to keep memory traffic off third-party infrastructure.
 
 ## Modes
 
@@ -217,14 +222,6 @@ The default Embedded configuration depends on `better-sqlite3` (native addon, tr
 
 If `better-sqlite3` fails to load (for example, because of a Node ABI mismatch), the default `memory` vector store cannot start. An external vector store can still be used with history disabled or configured to a working provider.
 
-## Tools
-
-| Tool | Description |
-|------|-------------|
-| `mem0_search` | Semantic search over long-term memories |
-| `mem0_profile` | List all stored memories |
-| `mem0_save` | Store a fact verbatim (bypasses LLM extraction) |
-
 ## Commands
 
 ```
@@ -237,12 +234,12 @@ If `better-sqlite3` fails to load (for example, because of a Node ABI mismatch),
 
 `pi-memory-mem0` and `pi-memory` run **independently in parallel** as separate extensions:
 
-- `pi-memory`: Active memory — agent explicitly manages via tools, local `.md` files, hard char limits
-- `pi-memory-mem0`: Explicit semantic memory tools backed by Mem0
+- `pi-memory`: Active memory — the agent explicitly manages memories via tools, local `.md` files, hard char limits
+- `pi-memory-mem0`: Passive memory — automatic extraction/storage and semantic recall, no capacity limits
 
-They do not interfere with each other. `pi-memory-mem0` does not inject recalled
-text into the system prompt; the agent retrieves it through the search and
-profile tools.
+They do not interfere with each other. `pi-memory-mem0` injects recalled text as a
+custom user-channel message (never the system prompt); `pi-memory` injects its own
+context separately.
 
 ## Dedup API
 
