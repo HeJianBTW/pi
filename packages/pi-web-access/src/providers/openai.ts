@@ -48,19 +48,41 @@ export class OpenAIProvider extends BaseProvider {
     }
 
     const data = (await response.json()) as {
-      output: Array<{
+      status?: string;
+      error?: { message?: string } | null;
+      incomplete_details?: { reason?: string } | null;
+      output?: Array<{
         type: string;
+        status?: string;
         content?: Array<{
           type: string;
           text: string;
           annotations?: Array<{ type: string; url?: string; title?: string }>;
         }>;
+        action?: { type: string; url?: string };
       }>;
     };
 
+    if (data.status === 'failed') {
+      throw new Error(`${name} API response failed: ${data.error?.message ?? 'unknown error'}`);
+    }
+
     let answer = '';
     const results: SearchResult[] = [];
-    for (const item of data.output) {
+    const seen = new Map<string, SearchResult>();
+    const addResult = (title: string, url: string) => {
+      const existing = seen.get(url);
+      if (existing) {
+        // Annotations carry real titles but arrive after web_search_call items.
+        if (existing.title === existing.url && title !== url) existing.title = title;
+        return;
+      }
+      const result: SearchResult = { title, url, content: '' };
+      seen.set(url, result);
+      results.push(result);
+    };
+
+    for (const item of data.output ?? []) {
       if (item.type === 'message' && item.content) {
         for (const block of item.content) {
           if (block.type === 'output_text') {
@@ -68,12 +90,38 @@ export class OpenAIProvider extends BaseProvider {
             if (block.annotations) {
               for (const ann of block.annotations) {
                 if (ann.type === 'url_citation' && ann.url)
-                  results.push({ title: ann.title ?? ann.url, url: ann.url, content: '' });
+                  addResult(ann.title ?? ann.url, ann.url);
               }
             }
           }
         }
       }
+      // DeepSeek never emits url_citation annotations; opened pages are the only source trail.
+      // DeepSeek appends a tracking fragment (#ws_call_id=...) that must be stripped.
+      if (
+        item.type === 'web_search_call' &&
+        item.status !== 'failed' &&
+        item.action?.type === 'open_page' &&
+        item.action.url
+      ) {
+        const url = item.action.url.split('#ws_call_id=')[0]!;
+        addResult(url, url);
+      }
+    }
+
+    if (!answer && data.status && data.status !== 'completed') {
+      const reason = data.incomplete_details?.reason ?? 'no answer generated';
+      throw new Error(`${name} API response ${data.status}: ${reason}`);
+    }
+
+    if (!answer) {
+      const types = (data.output ?? [])
+        .map((i) => i.type)
+        .join(',')
+        .slice(0, 200);
+      console.error(
+        `[pi-web-access] ${name} response returned no answer (status: ${data.status ?? 'unknown'}, output types: ${types})`,
+      );
     }
 
     return { provider: provider.id, query: params.query, answer: answer || undefined, results };

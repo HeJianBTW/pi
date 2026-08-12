@@ -108,6 +108,11 @@ export default function piWebToolExtension(pi: ExtensionAPI): void {
             lines.push('### Answer');
             lines.push(response.answer);
             lines.push('');
+          } else if (response.results.length > 0) {
+            lines.push(
+              '_The provider did not generate an answer. Sources gathered during the search are listed below._',
+            );
+            lines.push('');
           }
 
           if (response.results.length > 0) {
@@ -117,6 +122,11 @@ export default function piWebToolExtension(pi: ExtensionAPI): void {
               if (r.score !== undefined) lines.push(`  *Relevance: ${r.score.toFixed(2)}*`);
               if (r.content) lines.push(`  ${r.content}`);
             }
+            lines.push('');
+          }
+
+          if (!response.answer && response.results.length === 0) {
+            lines.push('No results returned by the provider. Consider rephrasing the query.');
             lines.push('');
           }
 

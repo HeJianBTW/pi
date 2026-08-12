@@ -59,6 +59,7 @@ describe('search', () => {
 
   afterEach(() => {
     process.env = originalEnv;
+    vi.restoreAllMocks();
   });
 
   it('uses search.provider tavily', async () => {
@@ -404,6 +405,126 @@ describe('search', () => {
         model: 'deepseek-v4-flash',
         tools: [{ type: 'web_search' }],
       }),
+    );
+  });
+
+  it('extracts deepseek sources from web_search_call actions when no message is returned', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const settings: WebToolSettings = {
+      search: { provider: 'deepseek' },
+      providers: { deepseek: { apiKey: 'deepseek-key' } },
+    };
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        status: 'completed',
+        output: [
+          { type: 'reasoning' },
+          {
+            type: 'web_search_call',
+            status: 'completed',
+            action: { type: 'search', queries: ['q1'] },
+          },
+          {
+            type: 'web_search_call',
+            status: 'completed',
+            action: { type: 'open_page', url: 'https://example.com/page#ws_call_id=call_01_abc' },
+          },
+          {
+            type: 'web_search_call',
+            status: 'completed',
+            action: { type: 'open_page', url: 'https://example.com/page#ws_call_id=call_02_def' },
+          },
+          {
+            type: 'web_search_call',
+            status: 'failed',
+            action: { type: 'open_page', url: 'https://other.example.org/#ws_call_id=call_03_g' },
+          },
+        ],
+      }),
+    });
+
+    const result = await search({ query: 'obscure research query' }, settings);
+
+    expect(result.provider).toBe('deepseek');
+    expect(result.answer).toBeUndefined();
+    // deduped, fragment stripped, failed open_page excluded
+    expect(result.results).toEqual([
+      { title: 'https://example.com/page', url: 'https://example.com/page', content: '' },
+    ]);
+    expect(consoleError).toHaveBeenCalledOnce();
+  });
+
+  it('prefers annotation titles when deduping sources across items', async () => {
+    const settings: WebToolSettings = {
+      search: { provider: 'deepseek' },
+      providers: { deepseek: { apiKey: 'deepseek-key' } },
+    };
+    // Realistic ordering: web_search_call items precede the message item.
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        status: 'completed',
+        output: [
+          {
+            type: 'web_search_call',
+            action: { type: 'open_page', url: 'https://example.com/a#ws_call_id=call_01_x' },
+          },
+          {
+            type: 'message',
+            content: [
+              {
+                type: 'output_text',
+                text: 'answer',
+                annotations: [{ type: 'url_citation', url: 'https://example.com/a', title: 'A' }],
+              },
+            ],
+          },
+        ],
+      }),
+    });
+
+    const result = await search({ query: 'test' }, settings);
+
+    expect(result.answer).toBe('answer');
+    expect(result.results).toEqual([{ title: 'A', url: 'https://example.com/a', content: '' }]);
+  });
+
+  it('throws when deepseek response status is failed', async () => {
+    const settings: WebToolSettings = {
+      search: { provider: 'deepseek' },
+      providers: { deepseek: { apiKey: 'deepseek-key' } },
+    };
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        status: 'failed',
+        error: { message: 'internal error' },
+        output: [],
+      }),
+    });
+
+    await expect(search({ query: 'test' }, settings)).rejects.toThrow(
+      'DeepSeek API response failed: internal error',
+    );
+  });
+
+  it('throws when deepseek response is incomplete with no message', async () => {
+    const settings: WebToolSettings = {
+      search: { provider: 'deepseek' },
+      providers: { deepseek: { apiKey: 'deepseek-key' } },
+    };
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        status: 'incomplete',
+        incomplete_details: { reason: 'max_output_tokens' },
+        output: [{ type: 'reasoning' }],
+      }),
+    });
+
+    await expect(search({ query: 'test' }, settings)).rejects.toThrow(
+      'DeepSeek API response incomplete: max_output_tokens',
     );
   });
 
