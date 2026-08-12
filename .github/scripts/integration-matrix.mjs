@@ -14,7 +14,11 @@ export const fullMatrix = [
   {
     extension: 'pi-memory',
     tools: 'memory_add,memory_read',
-    prompt: 'Step 1 — call memory_add with target=memory and content=ci-probe=alpha. Step 2 — call memory_read with target=memory and quote the saved entry verbatim. Use each tool exactly once.',
+    // The closing statement gives mem0's fact extraction something explicit to
+    // catch — the captured turn pair feeds the extractor, and "my X is Y"
+    // phrasing is what it reliably keeps. "codeword" avoids the credential
+    // redaction patterns (token/api_key) in the capture path.
+    prompt: 'Step 1 — call memory_add with target=memory and content=ci-probe=alpha. Step 2 — call memory_read with target=memory and quote the saved entry verbatim. Use each tool exactly once. A fact about me: my CI probe codeword is ci-mem0-alpha-7749.',
     assert_pattern: 'ci-probe=alpha',
   },
   {

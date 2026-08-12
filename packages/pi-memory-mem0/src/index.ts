@@ -129,13 +129,19 @@ export default function mem0Extension(pi: ExtensionAPI): void {
     pendingWrite = pendingWrite
       .catch(() => {})
       .then(async () => {
-        await activeProvider.add(
+        const result = await activeProvider.add(
           [
             { role: 'user', content: redactMemoryText(userText) },
             { role: 'assistant', content: redactMemoryText(text) },
           ],
           { userId: activeUserId },
         );
+        // Extraction legitimately finds nothing in many turns, but a totally
+        // silent no-op makes a broken pipeline indistinguishable from a quiet
+        // one — gate a diagnostic behind DEBUG.
+        if (process.env.DEBUG?.includes('pi-memory-mem0') && !result?.results?.length) {
+          console.error('[pi-memory-mem0] turn capture stored no memories (extraction empty?)');
+        }
       })
       .catch((err) => {
         console.error(

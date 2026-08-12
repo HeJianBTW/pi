@@ -697,6 +697,9 @@ jobs:
           env.PI_INTEGRATION_API_KEY != ''
         env:
           EXTENSION_PROMPT: ${{ matrix.prompt }}
+          # Lets pi-memory-mem0 log turns whose extraction stored nothing —
+          # the difference between a quiet pipeline and a broken one.
+          DEBUG: 'pi-memory-mem0'
         run: |
           set -euo pipefail
           # The firecrawl matrix entry needs a real Firecrawl API key. Skip it
@@ -987,6 +990,13 @@ jobs:
           echo "Row count: $ROWS"
           if [ "$ROWS" -lt 1 ]; then
             echo "::error::mem0 vectors table is empty — the passive turn_end capture did not persist anything."
+            exit 1
+          fi
+          # The prompt carries "my CI probe codeword is ci-mem0-alpha-7749" so
+          # the extractor has an explicit preference-style fact to keep. Assert
+          # the codeword survives extraction (paraphrase-tolerant prefix).
+          if ! sqlite3 "$DB" 'SELECT payload FROM vectors;' | grep -qi 'ci-mem0'; then
+            echo "::error::Expected 'ci-mem0' in extracted memories — extraction ran but dropped the codeword fact."
             exit 1
           fi
           echo "✓ mem0 OSS pipeline verified end-to-end."
