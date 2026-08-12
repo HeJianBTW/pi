@@ -164,7 +164,7 @@ export ARK_API_KEY=...
 { "pi-image-gen": { "defaultModel": "seedream" } }
 ```
 
-> Supported `size` values are model-dependent, and the tool schema tells the agent the exact form for the active model: a tier token (`1K`/`1.5K`/`2K`/`3K`/`4K` — the list differs per model) or an explicit `"<w>x<h>"` pixel string, never mixed. Seedream 5.0 / 4.5 enforce a 2K pixel floor (`1024x1024` fails with `InvalidParameter`); 5.0 pro accepts `1K`/`1.5K`/`2K` down to 921,600 px; 4.0 accepts 1K. Full sizing matrix in the [official docs](https://www.volcengine.com/docs/82379/1824121). Seedream has **no `n` parameter** — the API generates one image per request (multi-image is the `sequential_image_generation` mechanism, not exposed here), so `n` is hidden for these models.
+> Supported `size` values are model-dependent, and the tool schema tells the agent the exact form for the active model: a tier token (`1K`/`1.5K`/`2K`/`3K`/`4K` — the list differs per model) or an explicit `"<w>x<h>"` pixel string, never mixed. Seedream 5.0 / 4.5 enforce a 2K pixel floor (`1024x1024` fails with `InvalidParameter`); 5.0 pro accepts `1K`/`1.5K`/`2K` down to 921,600 px; 4.0 accepts 1K. Full sizing matrix in the [official docs](https://www.volcengine.com/docs/82379/1824121). Seedream has **no `n` parameter** — the API generates one image per request (multi-image is the `sequential_image_generation` mechanism, not exposed here), so `n` is hidden for these models. The extension always sends `watermark: false` — Seedream's watermark switch defaults to `true` and would otherwise stamp an "AI 生成" badge in the corner of every image.
 
 The default base URL is `https://ark.cn-beijing.volces.com/api/v3`. To use a different region (e.g. `ap-southeast`), override it:
 

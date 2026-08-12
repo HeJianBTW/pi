@@ -39,6 +39,9 @@ export const arkAdapter: ImageProviderAdapter = {
     const body: Record<string, unknown> = {
       model: remoteModelId,
       prompt: params.prompt,
+      // Seedream's watermark switch defaults to true, stamping an "AI 生成"
+      // badge in the corner — opt out explicitly.
+      watermark: false,
     };
     if (params.size) body.size = params.size;
     // Seedream sizing is driven by `size` resolution tiers (1K/2K/4K), not an

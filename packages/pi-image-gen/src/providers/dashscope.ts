@@ -74,6 +74,9 @@ export const dashscopeAdapter: ImageProviderAdapter = {
           input: { messages: [{ role: 'user', content: userContent }] },
           parameters: {
             n: params.n ?? 1,
+            // Defaults to false upstream today, but pass it explicitly so a
+            // flipped default can't start stamping "Qwen-Image" badges.
+            watermark: false,
             ...(params.size ? { size: normalizeDashScopeSize(params.size) } : {}),
           },
         }),
