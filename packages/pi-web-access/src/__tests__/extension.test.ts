@@ -9,9 +9,19 @@ vi.mock('../config.js', async (importOriginal) => {
   };
 });
 
+vi.mock('../search.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../search.js')>();
+  return {
+    ...actual,
+    search: vi.fn(),
+  };
+});
+
 import { loadWebToolSettings } from '../config.js';
+import { search } from '../search.js';
 
 const mockLoadSettings = vi.mocked(loadWebToolSettings);
+const mockSearch = vi.mocked(search);
 
 function createMockPi() {
   const tools: Array<{ name: string }> = [];
@@ -191,5 +201,53 @@ describe('piWebToolExtension - tool registration', () => {
 
     expect(pi.tools.map((t) => t.name)).toContain('web_search');
     expect(pi.tools.map((t) => t.name)).toContain('x_search');
+  });
+});
+
+describe('piWebToolExtension - web_search output formatting', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockLoadSettings.mockReturnValue({
+      search: { provider: 'deepseek' },
+      providers: { deepseek: { apiKey: 'key' } },
+    });
+  });
+
+  async function executeWebSearch() {
+    const pi = createMockPi();
+    piWebToolExtension(pi as any);
+    await pi.triggerSessionStart();
+    const tool = pi.tools.find((t) => t.name === 'web_search') as any;
+    const result = await tool.execute('id', { query: 'q' }, undefined, undefined, {});
+    return result.content[0].text as string;
+  }
+
+  it('states explicitly when the provider returns no answer and no results', async () => {
+    mockSearch.mockResolvedValue({
+      provider: 'deepseek',
+      query: 'q',
+      answer: undefined,
+      results: [],
+    });
+
+    const text = await executeWebSearch();
+
+    expect(text).toContain('## Web Search Results (deepseek)');
+    expect(text).toContain('No results returned by the provider');
+  });
+
+  it('notes the missing answer when only sources were gathered', async () => {
+    mockSearch.mockResolvedValue({
+      provider: 'deepseek',
+      query: 'q',
+      answer: undefined,
+      results: [{ title: 'https://example.com/', url: 'https://example.com/', content: '' }],
+    });
+
+    const text = await executeWebSearch();
+
+    expect(text).toContain('did not generate an answer');
+    expect(text).toContain('### Sources');
+    expect(text).toContain('[https://example.com/](https://example.com/)');
   });
 });
