@@ -9,7 +9,13 @@ vi.mock('../config.js', async (importOriginal) => {
   };
 });
 
-vi.mock('../search.js', () => ({ search: vi.fn() }));
+vi.mock('../search.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../search.js')>();
+  return {
+    ...actual,
+    search: vi.fn(),
+  };
+});
 
 import { loadWebToolSettings } from '../config.js';
 import { search } from '../search.js';

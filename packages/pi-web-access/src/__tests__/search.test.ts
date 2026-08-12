@@ -491,6 +491,7 @@ describe('search', () => {
   });
 
   it('throws when deepseek response status is failed', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     const settings: WebToolSettings = {
       search: { provider: 'deepseek' },
       providers: { deepseek: { apiKey: 'deepseek-key' } },
@@ -505,11 +506,13 @@ describe('search', () => {
     });
 
     await expect(search({ query: 'test' }, settings)).rejects.toThrow(
-      'DeepSeek API response failed: internal error',
+      'DeepSeek API response failed.',
     );
+    expect(consoleError).toHaveBeenCalledWith(expect.stringContaining('internal error'));
   });
 
   it('throws when deepseek response is incomplete with no message', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     const settings: WebToolSettings = {
       search: { provider: 'deepseek' },
       providers: { deepseek: { apiKey: 'deepseek-key' } },
@@ -524,8 +527,41 @@ describe('search', () => {
     });
 
     await expect(search({ query: 'test' }, settings)).rejects.toThrow(
-      'DeepSeek API response incomplete: max_output_tokens',
+      'DeepSeek API response did not produce an answer (status: incomplete).',
     );
+    expect(consoleError).toHaveBeenCalledWith(expect.stringContaining('max_output_tokens'));
+  });
+
+  it('caps extracted sources at maxResults', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const settings: WebToolSettings = {
+      search: { provider: 'deepseek' },
+      providers: { deepseek: { apiKey: 'deepseek-key' } },
+    };
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        status: 'completed',
+        output: [
+          {
+            type: 'web_search_call',
+            status: 'completed',
+            action: { type: 'open_page', url: 'https://a.example/#ws_call_id=c1' },
+          },
+          {
+            type: 'web_search_call',
+            status: 'completed',
+            action: { type: 'open_page', url: 'https://b.example/#ws_call_id=c2' },
+          },
+        ],
+      }),
+    });
+
+    const result = await search({ query: 'test', maxResults: 1 }, settings);
+
+    expect(result.results).toEqual([
+      { title: 'https://a.example/', url: 'https://a.example/', content: '' },
+    ]);
   });
 
   it('uses search.provider zai', async () => {

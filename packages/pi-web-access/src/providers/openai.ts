@@ -64,7 +64,9 @@ export class OpenAIProvider extends BaseProvider {
     };
 
     if (data.status === 'failed') {
-      throw new Error(`${name} API response failed: ${data.error?.message ?? 'unknown error'}`);
+      const detail = (data.error?.message ?? 'unknown error').slice(0, 300);
+      console.error(`[pi-web-access] ${name} response failed: ${detail}`);
+      throw new Error(`${name} API response failed.`);
     }
 
     let answer = '';
@@ -110,8 +112,9 @@ export class OpenAIProvider extends BaseProvider {
     }
 
     if (!answer && data.status && data.status !== 'completed') {
-      const reason = data.incomplete_details?.reason ?? 'no answer generated';
-      throw new Error(`${name} API response ${data.status}: ${reason}`);
+      const reason = (data.incomplete_details?.reason ?? 'unknown').slice(0, 300);
+      console.error(`[pi-web-access] ${name} response ${data.status}: ${reason}`);
+      throw new Error(`${name} API response did not produce an answer (status: ${data.status}).`);
     }
 
     if (!answer) {
@@ -124,6 +127,11 @@ export class OpenAIProvider extends BaseProvider {
       );
     }
 
-    return { provider: provider.id, query: params.query, answer: answer || undefined, results };
+    return {
+      provider: provider.id,
+      query: params.query,
+      answer: answer || undefined,
+      results: results.slice(0, params.maxResults ?? 5),
+    };
   }
 }
