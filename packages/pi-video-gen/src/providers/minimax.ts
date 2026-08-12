@@ -226,7 +226,7 @@ export const minimaxAdapter: VideoProviderAdapter = {
   },
 
   async downloadTo(
-    _provider,
+    provider,
     _handle,
     videoUrl,
     destPath,
@@ -234,7 +234,7 @@ export const minimaxAdapter: VideoProviderAdapter = {
     signal,
   ): Promise<VideoFileMeta> {
     // MiniMax result URLs are time-limited CDN links; download promptly.
-    return downloadFile({ url: videoUrl, destPath, fetchImpl, signal });
+    return downloadFile({ url: videoUrl, destPath, fetchImpl, provider, signal });
   },
 
   // cancel: no documented task-cancellation endpoint on the v2 API.

@@ -204,14 +204,14 @@ export const openrouterAdapter: VideoProviderAdapter = {
   },
 
   async downloadTo(
-    _provider,
+    provider,
     _handle,
     videoUrl,
     destPath,
     fetchImpl,
     signal,
   ): Promise<VideoFileMeta> {
-    return downloadFile({ url: videoUrl, destPath, fetchImpl, signal });
+    return downloadFile({ url: videoUrl, destPath, fetchImpl, provider, signal });
   },
 
   // cancel: not covered by the submitted docs; local stops are polling_stopped.

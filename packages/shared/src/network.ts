@@ -89,18 +89,74 @@ function isPublicIp(address: string): boolean {
 }
 
 /**
+ * Hosts the caller explicitly trusts (typically from user-configured provider
+ * baseUrls). Matching is case-insensitive; an entry matches the host itself or
+ * any subdomain (`example.com` covers `cdn.example.com`). A leading `*.` is
+ * accepted and treated identically. Trusted hosts bypass only the public-IP
+ * check — protocol / userinfo / localhost rules still apply.
+ */
+export type TrustedHosts = readonly string[];
+
+function isTrustedHost(hostname: string, trustedHosts: TrustedHosts): boolean {
+  if (trustedHosts.length === 0) return false;
+  const lower = hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  for (const raw of trustedHosts) {
+    const pattern = raw
+      .trim()
+      .toLowerCase()
+      .replace(/^\[|\]$/g, '')
+      .replace(/^\*\./, '');
+    if (!pattern) continue;
+    if (lower === pattern || lower.endsWith(`.${pattern}`)) return true;
+  }
+  return false;
+}
+
+const PUBLIC_DESTINATION = 'Outbound URL must use a public HTTP(S) destination.';
+
+/**
+ * Extract the hostname from a configured baseUrl, returning undefined for
+ * missing or malformed values. Used by extensions to build `trustedHosts`
+ * from their provider settings.
+ */
+export function hostFromUrl(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  try {
+    return new URL(value).hostname || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Build a TrustedHosts list from configured URLs (provider baseUrls, or URLs
+ * returned by a configured provider). Malformed values are skipped.
+ */
+export function trustedHostsFromUrls(...values: Array<string | undefined>): TrustedHosts {
+  const hosts: string[] = [];
+  for (const value of values) {
+    const host = hostFromUrl(value);
+    if (host) hosts.push(host);
+  }
+  return hosts;
+}
+
+/**
  * Parse an outbound URL once using Node's WHATWG parser and require every DNS
- * answer to be globally routable. Call this again for every redirect target.
+ * answer to be globally routable — unless the hostname matches `trustedHosts`,
+ * in which case the public-IP check is skipped (the connection still pins the
+ * first resolved address). Call this again for every redirect target.
  */
 async function resolvePublicHttpUrl(
   value: string | URL,
-  lookup: DnsLookup = defaultLookup,
+  options: { lookup?: DnsLookup | undefined; trustedHosts?: TrustedHosts | undefined } = {},
 ): Promise<{ url: URL; addresses: Array<{ address: string; family: number }> }> {
+  const lookup = options.lookup ?? defaultLookup;
   let url: URL;
   try {
     url = value instanceof URL ? new URL(value) : new URL(value);
   } catch {
-    throw new Error('Outbound URL must use a public HTTP(S) destination.');
+    throw new Error(PUBLIC_DESTINATION);
   }
   if (
     (url.protocol !== 'http:' && url.protocol !== 'https:') ||
@@ -110,7 +166,7 @@ async function resolvePublicHttpUrl(
     url.hostname === 'localhost' ||
     url.hostname.endsWith('.localhost')
   ) {
-    throw new Error('Outbound URL must use a public HTTP(S) destination.');
+    throw new Error(PUBLIC_DESTINATION);
   }
 
   const hostname = url.hostname.replace(/^\[|\]$/g, '');
@@ -118,30 +174,42 @@ async function resolvePublicHttpUrl(
   const addresses = literalFamily
     ? [{ address: hostname, family: literalFamily }]
     : await lookup(hostname).catch(() => []);
-  if (addresses.length === 0 || addresses.some(({ address }) => !isPublicIp(address))) {
-    throw new Error('Outbound URL must use a public HTTP(S) destination.');
+  if (addresses.length === 0) {
+    throw new Error(`${PUBLIC_DESTINATION} Host "${hostname}" could not be resolved.`);
+  }
+  if (!isTrustedHost(hostname, options.trustedHosts ?? [])) {
+    const nonPublic = addresses.filter(({ address }) => !isPublicIp(address));
+    if (nonPublic.length > 0) {
+      const list = nonPublic.map(({ address }) => address).join(', ');
+      throw new Error(
+        `${PUBLIC_DESTINATION} Host "${hostname}" resolved to non-public address ${list}. ` +
+          'If this host is reached via a trusted proxy (e.g. fake-ip DNS), pass it via trustedHosts.',
+      );
+    }
   }
   return { url, addresses };
 }
 
 export async function assertPublicHttpUrl(
   value: string | URL,
-  lookup: DnsLookup = defaultLookup,
+  options: { lookup?: DnsLookup | undefined; trustedHosts?: TrustedHosts | undefined } = {},
 ): Promise<URL> {
-  return (await resolvePublicHttpUrl(value, lookup)).url;
+  return (await resolvePublicHttpUrl(value, options)).url;
 }
 
 export async function safeFetch(
   value: string | URL,
   init: RequestInit = {},
   options: {
-    lookup?: DnsLookup;
-    maxRedirects?: number;
+    lookup?: DnsLookup | undefined;
+    maxRedirects?: number | undefined;
+    trustedHosts?: TrustedHosts | undefined;
   } = {},
 ): Promise<Response> {
   const lookup = options.lookup ?? defaultLookup;
   const maxRedirects = options.maxRedirects ?? 5;
-  let resolved = await resolvePublicHttpUrl(value, lookup);
+  const trustedHosts = options.trustedHosts;
+  let resolved = await resolvePublicHttpUrl(value, { lookup, trustedHosts });
 
   for (let redirects = 0; ; redirects++) {
     const response = await pinnedFetch(resolved.url, resolved.addresses[0]!, init);
@@ -153,7 +221,7 @@ export async function safeFetch(
     }
     const next = new URL(location, resolved.url);
     await response.body?.cancel().catch(() => {});
-    resolved = await resolvePublicHttpUrl(next, lookup);
+    resolved = await resolvePublicHttpUrl(next, { lookup, trustedHosts });
   }
 }
 

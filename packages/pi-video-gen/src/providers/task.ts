@@ -1,8 +1,9 @@
 import { createWriteStream, existsSync } from 'node:fs';
 import { lstat, rename, unlink } from 'node:fs/promises';
+import { isIP } from 'node:net';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { safeFetch } from '@amaster.ai/pi-shared';
+import { hostFromUrl, safeFetch, trustedHostsFromUrls } from '@amaster.ai/pi-shared';
 import {
   RemoteTaskFailedError,
   RetryableProviderError,
@@ -134,6 +135,8 @@ export async function downloadFile(opts: {
   url: string;
   destPath: string;
   fetchImpl: typeof fetch;
+  /** The provider this download belongs to — its baseUrl host is trusted for SSRF. */
+  provider: { baseUrl: string };
   signal?: AbortSignal | undefined;
   maxBytes?: number | undefined;
   timeoutMs?: number | undefined;
@@ -169,9 +172,19 @@ export async function downloadFile(opts: {
     }
   }
 
+  // The video URL comes from the configured provider. Trust the configured
+  // baseUrl host outright (operator intent), plus the returned media host when
+  // it is a DNS name — under fake-ip DNS such hosts resolve to 198.18/16 and
+  // the proxy dials the real address upstream. An IP-literal media host (a
+  // loopback/private address the provider returned) keeps the full guard.
+  const mediaHost = hostFromUrl(opts.url);
+  const trustedHosts = trustedHostsFromUrls(
+    opts.provider.baseUrl,
+    mediaHost && !isIP(mediaHost.replace(/^\[|\]$/g, '')) ? opts.url : undefined,
+  );
   let res: Response;
   try {
-    res = await safeFetch(opts.url, { signal });
+    res = await safeFetch(opts.url, { signal }, { trustedHosts });
   } catch (error) {
     if (error instanceof Error && /public HTTP|redirect limit/i.test(error.message)) {
       throw new VideoGenError(error.message, 'download: unsafe URL');

@@ -161,6 +161,27 @@ describe('webFetch', () => {
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
+  it('passes configured provider hosts as trustedHosts to the local fetch', async () => {
+    const settings: WebToolSettings = {
+      providers: { deepseek: { apiKey: 'k', baseUrl: 'https://gateway.internal.example/v1' } },
+    };
+    // Jina fails → local fallback goes through safeFetch.
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 503 });
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      headers: new Map([['content-type', 'text/html']]),
+      text: async () => '<html><body>ok</body></html>',
+    });
+
+    await webFetch({ url: 'https://example.com' }, settings, publicLookup);
+
+    expect(safeFetchMock).toHaveBeenCalledWith(
+      'https://example.com',
+      expect.anything(),
+      expect.objectContaining({ trustedHosts: ['gateway.internal.example'] }),
+    );
+  });
+
   it('throws on HTTP error from zai', async () => {
     const settings: WebToolSettings = {
       fetch: { provider: 'zai' },

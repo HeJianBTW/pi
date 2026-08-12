@@ -222,7 +222,7 @@ export const dashscopeAdapter: VideoProviderAdapter = {
   },
 
   async downloadTo(
-    _provider,
+    provider,
     _handle,
     videoUrl,
     destPath,
@@ -230,7 +230,7 @@ export const dashscopeAdapter: VideoProviderAdapter = {
     signal,
   ): Promise<VideoFileMeta> {
     // DashScope result URLs are signed OSS links (24h expiry); download promptly.
-    return downloadFile({ url: videoUrl, destPath, fetchImpl, signal });
+    return downloadFile({ url: videoUrl, destPath, fetchImpl, provider, signal });
   },
 
   /** Generic DashScope task cancellation: POST /api/v1/tasks/{id}/cancel. */

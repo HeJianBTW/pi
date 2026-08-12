@@ -479,6 +479,9 @@ export type SandboxFileEntry = {
 export {
   assertPublicHttpUrl,
   type DnsLookup,
+  hostFromUrl,
   readResponseBytes,
   safeFetch,
+  type TrustedHosts,
+  trustedHostsFromUrls,
 } from './network.js';

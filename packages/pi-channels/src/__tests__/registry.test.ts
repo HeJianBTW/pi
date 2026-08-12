@@ -82,7 +82,7 @@ describe('ChannelRegistry', () => {
       }),
     ).resolves.toEqual({
       ok: false,
-      error: 'Outbound URL must use a public HTTP(S) destination.',
+      error: expect.stringContaining('Outbound URL must use a public HTTP(S) destination.'),
     });
     expect(fetchMock).not.toHaveBeenCalled();
   });
