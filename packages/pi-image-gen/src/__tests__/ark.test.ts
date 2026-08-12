@@ -95,6 +95,8 @@ describe('ark provider (Volcengine Seedream)', () => {
       model: 'doubao-seedream-5-0-260128',
       prompt: '一只猫',
       size: '2048x2048',
+      // Watermark defaults to true upstream — we always opt out.
+      watermark: false,
     });
     // Seedream documents no `n` parameter — it must not reach the wire.
     expect(calls[0]?.body.n).toBeUndefined();

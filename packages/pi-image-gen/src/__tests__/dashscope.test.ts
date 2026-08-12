@@ -74,4 +74,9 @@ describe('dashscope provider (Alibaba Qwen-Image)', () => {
     const body = await runCapture('2048x2048');
     expect((body.parameters as Record<string, unknown>).size).toBe('2048*2048');
   });
+
+  it('always opts out of the watermark', async () => {
+    const body = await runCapture('2048x2048');
+    expect((body.parameters as Record<string, unknown>).watermark).toBe(false);
+  });
 });
