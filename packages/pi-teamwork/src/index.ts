@@ -1,10 +1,8 @@
-import { spawn } from 'node:child_process';
 import { isProjectTrusted, loadPiSettings } from '@amaster.ai/pi-shared/settings';
 import { defineTool, type ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
-import { initAmasterProvider } from './adapters/amaster.js';
 import { initMulticaProvider } from './adapters/multica.js';
-import type { AmasterAdapterConfig, ExecFn, TeamworkConfig, TeamworkProvider } from './types.js';
+import type { ExecFn, TeamworkConfig, TeamworkProvider } from './types.js';
 
 const SETTINGS_KEY = 'pi-teamwork';
 const STATUS_KEY = 'pi-teamwork';
@@ -16,7 +14,6 @@ const TEAMWORK_TOOL_ORDER = [
   'issue_update',
   'issue_comment',
   'project_list',
-  'user_directory_list',
   'teamwork_status',
 ] as const;
 const TEAMWORK_TOOL_NAMES = new Set<string>(TEAMWORK_TOOL_ORDER);
@@ -55,16 +52,13 @@ export default function piTeamworkExtension(pi: ExtensionAPI): void {
 
   const teamworkTools = createTeamworkTools(ensureReady, getProvider);
 
-  function registerProviderTools(adapter: TeamworkProvider): void {
-    const supportedToolNames = supportedToolNamesForProvider(adapter);
+  function registerProviderTools(): void {
     for (const tool of teamworkTools) {
-      if (!supportedToolNames.has(tool.name) || registeredToolNames.has(tool.name)) {
-        continue;
-      }
+      if (registeredToolNames.has(tool.name)) continue;
       pi.registerTool(tool);
       registeredToolNames.add(tool.name);
     }
-    alignActiveTeamworkTools(pi, supportedToolNames, suspendedToolNames);
+    alignActiveTeamworkTools(pi, TEAMWORK_TOOL_NAMES, suspendedToolNames);
   }
 
   function suspendTeamworkTools(): void {
@@ -83,44 +77,30 @@ export default function piTeamworkExtension(pi: ExtensionAPI): void {
       return;
     }
 
-    const exec: ExecFn = async (command, args, options) => {
-      if (options?.env && Object.keys(options.env).length > 0) {
-        return execWithEnv(command, args, options.env, ctx.cwd);
-      }
-      const result = await pi.exec(command, args, { cwd: ctx.cwd });
-      return { stdout: result.stdout, stderr: result.stderr, code: result.code };
-    };
-
     const providerName = config.provider ?? 'multica';
-    if (providerName === 'amaster') {
-      const amasterConfig: AmasterAdapterConfig = { ...(config.amaster ?? {}) };
-      applyAmasterRuntimeAuth(amasterConfig, _event);
-      const adapter = await initAmasterProvider(amasterConfig, exec);
-      if (generation !== sessionGeneration) return;
-      provider = adapter;
-      registerProviderTools(adapter);
-      ctx.ui.setStatus(STATUS_KEY, 'teamwork: amaster');
-      return;
-    }
-
     if (providerName !== 'multica') {
       suspendTeamworkTools();
       ctx.ui.setStatus(STATUS_KEY, `teamwork: unknown provider "${providerName}"`);
       return;
     }
 
+    const exec: ExecFn = async (command, args) => {
+      const result = await pi.exec(command, args, { cwd: ctx.cwd });
+      return { stdout: result.stdout, stderr: result.stderr, code: result.code };
+    };
+
     readyPromise = (async () => {
       const { adapter, installResult } = await initMulticaProvider(config.multica ?? {}, exec);
       if (generation !== sessionGeneration) return;
       provider = adapter;
-      registerProviderTools(adapter);
+      registerProviderTools();
 
       if (!installResult.installed) {
         ctx.ui.notify(
           `multica CLI is unavailable: ${installResult.error ?? 'unknown error'}. Run "multica setup" after installing it.`,
           'warning',
         );
-        ctx.ui.setStatus(STATUS_KEY, 'teamwork: multica (not installed)');
+        ctx.ui.setStatus(STATUS_KEY, `teamwork: ${adapter.name} (not installed)`);
         return;
       }
 
@@ -138,7 +118,7 @@ export default function piTeamworkExtension(pi: ExtensionAPI): void {
         );
       }
 
-      ctx.ui.setStatus(STATUS_KEY, 'teamwork: multica');
+      ctx.ui.setStatus(STATUS_KEY, `teamwork: ${adapter.name}`);
     })().catch((err) => {
       if (generation !== sessionGeneration) return;
       ctx.ui.setStatus(
@@ -190,8 +170,7 @@ function createTeamworkTools(ensureReady: EnsureReadyFn, getProvider: GetProvide
     defineTool({
       name: 'workspace_list',
       label: 'Teamwork',
-      description:
-        'List all workspaces you belong to. Use this to discover or switch workspaces. For the AMaster provider, workspaceId is the canonical AMaster companyId passed to the CLI as -C.',
+      description: 'List all workspaces you belong to. Use this to discover or switch workspaces.',
       promptSnippet: 'List workspaces in the shared project tracker.',
       parameters: Type.Object({}),
       async execute() {
@@ -218,7 +197,7 @@ function createTeamworkTools(ensureReady: EnsureReadyFn, getProvider: GetProvide
         workspaceId: Type.Optional(
           Type.String({
             description:
-              'Workspace ID. For AMaster provider this is the canonical companyId from workspace_list and is passed to the CLI as -C. Optional when the account has exactly one workspace.',
+              'Workspace ID from workspace_list. Optional when the account has exactly one workspace.',
           }),
         ),
         status: Type.Optional(
@@ -250,7 +229,7 @@ function createTeamworkTools(ensureReady: EnsureReadyFn, getProvider: GetProvide
         workspaceId: Type.Optional(
           Type.String({
             description:
-              'Workspace ID. For AMaster provider this is the canonical companyId from workspace_list and is passed to the CLI as -C. Optional when the account has exactly one workspace.',
+              'Workspace ID from workspace_list. Optional when the account has exactly one workspace.',
           }),
         ),
         id: Type.String({ description: 'The issue ID.' }),
@@ -279,7 +258,7 @@ function createTeamworkTools(ensureReady: EnsureReadyFn, getProvider: GetProvide
         workspaceId: Type.Optional(
           Type.String({
             description:
-              'Workspace ID. For AMaster provider this is the canonical companyId from workspace_list and is passed to the CLI as -C. Optional when the account has exactly one workspace.',
+              'Workspace ID from workspace_list. Optional when the account has exactly one workspace.',
           }),
         ),
         title: Type.String({ description: 'Issue title.' }),
@@ -311,7 +290,7 @@ function createTeamworkTools(ensureReady: EnsureReadyFn, getProvider: GetProvide
         workspaceId: Type.Optional(
           Type.String({
             description:
-              'Workspace ID. For AMaster provider this is the canonical companyId from workspace_list and is passed to the CLI as -C. Optional when the account has exactly one workspace.',
+              'Workspace ID from workspace_list. Optional when the account has exactly one workspace.',
           }),
         ),
         id: Type.String({ description: 'The issue ID to update.' }),
@@ -349,16 +328,13 @@ function createTeamworkTools(ensureReady: EnsureReadyFn, getProvider: GetProvide
         workspaceId: Type.Optional(
           Type.String({
             description:
-              'Workspace ID. For AMaster provider this is the canonical companyId from workspace_list and is passed to the CLI as -C. Optional when the account has exactly one workspace.',
+              'Workspace ID from workspace_list. Optional when the account has exactly one workspace.',
           }),
         ),
         issueId: Type.String({ description: 'The issue ID to comment on.' }),
         content: Type.String({ description: 'Comment content.' }),
         parentId: Type.Optional(
-          Type.String({
-            description:
-              'Optional provider-specific parent comment ID. The AMaster provider currently creates top-level comments.',
-          }),
+          Type.String({ description: 'Optional parent comment ID for threaded replies.' }),
         ),
       }),
       async execute(_toolCallId, params) {
@@ -386,7 +362,7 @@ function createTeamworkTools(ensureReady: EnsureReadyFn, getProvider: GetProvide
         workspaceId: Type.Optional(
           Type.String({
             description:
-              'Workspace ID. For AMaster provider this is the canonical companyId from workspace_list and is passed to the CLI as -C. Optional when the account has exactly one workspace.',
+              'Workspace ID from workspace_list. Optional when the account has exactly one workspace.',
           }),
         ),
       }),
@@ -397,38 +373,6 @@ function createTeamworkTools(ensureReady: EnsureReadyFn, getProvider: GetProvide
           const projects = await getProvider().listProjects(params.workspaceId);
           if (projects.length === 0) return textResult('No projects found.');
           return textResult(JSON.stringify(projects, null, 2));
-        } catch (error) {
-          return textResult(`Error: ${error instanceof Error ? error.message : String(error)}`);
-        }
-      },
-    }),
-
-    defineTool({
-      name: 'user_directory_list',
-      label: 'Teamwork',
-      description:
-        'List assignable AMaster users or members in the current teamwork workspace. This is read-only and helps choose assignees.',
-      parameters: Type.Object({
-        workspaceId: Type.Optional(
-          Type.String({
-            description:
-              'Workspace ID. For AMaster provider this is the canonical companyId from workspace_list and is passed to the CLI as -C. Optional when the account has exactly one workspace.',
-          }),
-        ),
-        q: Type.Optional(Type.String({ description: 'Optional search text.' })),
-        limit: Type.Optional(Type.Number({ description: 'Max number of results.' })),
-      }),
-      async execute(_toolCallId, params) {
-        const err = await ensureReady();
-        if (err) return textResult(err);
-        const activeProvider = getProvider();
-        if (!activeProvider.listUserDirectory) {
-          return textResult('The current teamwork provider does not support user_directory_list.');
-        }
-        try {
-          const users = await activeProvider.listUserDirectory(params);
-          if (users.length === 0) return textResult('No assignable users found.');
-          return textResult(JSON.stringify(users, null, 2));
         } catch (error) {
           return textResult(`Error: ${error instanceof Error ? error.message : String(error)}`);
         }
@@ -453,12 +397,6 @@ function createTeamworkTools(ensureReady: EnsureReadyFn, getProvider: GetProvide
       },
     }),
   ];
-}
-
-function supportedToolNamesForProvider(provider: TeamworkProvider): Set<string> {
-  const supportedToolNames = new Set<string>(TEAMWORK_TOOL_ORDER);
-  if (!provider.listUserDirectory) supportedToolNames.delete('user_directory_list');
-  return supportedToolNames;
 }
 
 function alignActiveTeamworkTools(
@@ -497,118 +435,6 @@ function alignActiveTeamworkTools(
 
 function textResult(text: string) {
   return { content: [{ type: 'text' as const, text }], details: undefined };
-}
-
-function execWithEnv(
-  command: string,
-  args: string[],
-  env: Record<string, string>,
-  cwd: string,
-): Promise<{ stdout: string; stderr: string; code: number }> {
-  return new Promise((resolve) => {
-    const child = spawn(command, args, {
-      cwd,
-      shell: false,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, ...env },
-    });
-    let stdout = '';
-    let stderr = '';
-    let settled = false;
-
-    const finish = (result: { stdout: string; stderr: string; code: number }) => {
-      if (settled) return;
-      settled = true;
-      resolve(result);
-    };
-
-    child.stdout?.on('data', (chunk) => {
-      stdout += String(chunk);
-    });
-    child.stderr?.on('data', (chunk) => {
-      stderr += String(chunk);
-    });
-    child.on('error', (error) => {
-      finish({ stdout, stderr: error.message, code: 1 });
-    });
-    child.on('close', (code) => {
-      finish({ stdout, stderr, code: code ?? 0 });
-    });
-  });
-}
-
-function applyAmasterRuntimeAuth(config: AmasterAdapterConfig, event: unknown): void {
-  const paperclipApiKey = process.env.PAPERCLIP_API_KEY?.trim();
-  if (paperclipApiKey) {
-    const paperclipApiBase = process.env.PAPERCLIP_API_URL?.trim();
-    if (paperclipApiBase) config.apiBase = paperclipApiBase;
-    const paperclipCompanyId = process.env.PAPERCLIP_COMPANY_ID?.trim();
-    if (paperclipCompanyId) config.companyId = paperclipCompanyId;
-    delete config.apiKey;
-    config.authMode = 'agent_run';
-    config.authEnv = {
-      PAPERCLIP_API_KEY: paperclipApiKey,
-      AMASTER_BOARD_API_KEY: '',
-      ...optionalEnvValue('PAPERCLIP_RUN_ID', process.env.PAPERCLIP_RUN_ID),
-      ...optionalEnvValue('PAPERCLIP_API_URL', process.env.PAPERCLIP_API_URL),
-      ...optionalEnvValue('PAPERCLIP_COMPANY_ID', process.env.PAPERCLIP_COMPANY_ID),
-    };
-    return;
-  }
-
-  const sessionAuth = amasterAuthFromSessionStart(event);
-  const apiKey =
-    sessionAuth.apiKey ?? process.env.AMASTER_BOARD_API_KEY?.trim() ?? config.apiKey?.trim();
-  if (apiKey) {
-    config.apiKey = apiKey;
-    config.authMode = 'board';
-    config.authEnv = {
-      AMASTER_BOARD_API_KEY: apiKey,
-      PAPERCLIP_API_KEY: '',
-      PAPERCLIP_RUN_ID: '',
-      PAPERCLIP_API_URL: '',
-      PAPERCLIP_COMPANY_ID: '',
-    };
-  } else {
-    config.authMode = 'none';
-    delete config.authEnv;
-  }
-  const apiBase = sessionAuth.apiBase ?? process.env.AMASTER_EMPLOYEE_API_BASE?.trim();
-  if (apiBase) config.apiBase = apiBase;
-  const companyId = sessionAuth.companyId ?? process.env.AMASTER_EMPLOYEE_COMPANY_ID?.trim();
-  if (companyId) config.companyId = companyId;
-}
-
-function optionalEnvValue<K extends string>(
-  key: K,
-  value: string | undefined,
-): Partial<Record<K, string>> {
-  const trimmed = value?.trim();
-  return trimmed ? ({ [key]: trimmed } as Record<K, string>) : {};
-}
-
-function amasterAuthFromSessionStart(event: unknown): {
-  apiKey?: string;
-  apiBase?: string;
-  companyId?: string;
-} {
-  if (!event || typeof event !== 'object' || Array.isArray(event)) return {};
-  const amasterEmployee = (event as Record<string, unknown>).amasterEmployee;
-  if (!amasterEmployee || typeof amasterEmployee !== 'object' || Array.isArray(amasterEmployee)) {
-    return {};
-  }
-  const record = amasterEmployee as Record<string, unknown>;
-  return {
-    ...optionalTrimmed('apiKey', record.apiKey),
-    ...optionalTrimmed('apiBase', record.apiBase),
-    ...optionalTrimmed('companyId', record.companyId),
-  };
-}
-
-function optionalTrimmed<K extends string>(key: K, value: unknown): Partial<Record<K, string>> {
-  if (typeof value !== 'string') return {};
-  const trimmed = value.trim();
-  return trimmed ? ({ [key]: trimmed } as Record<K, string>) : {};
 }
 
 function loadConfig(cwd: string, projectTrusted = false): TeamworkConfig {

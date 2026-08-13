@@ -58,15 +58,6 @@ export type Workspace = {
   name: string;
 };
 
-export type UserDirectoryEntry = {
-  id: string;
-  name: string;
-  email?: string;
-  role?: string;
-  type?: string;
-  status?: string;
-};
-
 export interface TeamworkProvider {
   name: string;
   listWorkspaces(): Promise<Workspace[]>;
@@ -86,25 +77,13 @@ export interface TeamworkProvider {
   ): Promise<Comment>;
   listComments(issueId: string, workspaceId?: string): Promise<Comment[]>;
   listProjects(workspaceId?: string): Promise<Project[]>;
-  listUserDirectory?(filter?: {
-    workspaceId?: string;
-    q?: string;
-    limit?: number;
-  }): Promise<UserDirectoryEntry[]>;
   status(): Promise<Record<string, unknown>>;
 }
-
-export type ExecOptions = {
-  env?: Record<string, string>;
-};
 
 export type ExecFn = (
   command: string,
   args: string[],
-  options?: ExecOptions,
 ) => Promise<{ stdout: string; stderr: string; code: number }>;
-
-export type AmasterAuthMode = 'agent_run' | 'board' | 'none';
 
 export type MulticaAdapterConfig = {
   binary?: string;
@@ -115,20 +94,8 @@ export type MulticaAdapterConfig = {
   appUrl?: string;
 };
 
-export type AmasterAdapterConfig = {
-  apiBase?: string;
-  context?: string;
-  profile?: string;
-  authStore?: string;
-  companyId?: string;
-  apiKey?: string;
-  authMode?: AmasterAuthMode;
-  authEnv?: Record<string, string>;
-};
-
 export type TeamworkConfig = {
   enabled?: boolean;
   provider?: string;
   multica?: MulticaAdapterConfig;
-  amaster?: AmasterAdapterConfig;
 };
