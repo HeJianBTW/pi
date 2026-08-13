@@ -32,6 +32,13 @@ const TEAMWORK_GUIDANCE = [
   '</teamwork-guidance>',
 ].join('\n');
 
+const WORKSPACE_ID_PARAM = Type.Optional(
+  Type.String({
+    description:
+      'Workspace ID from workspace_list. Optional when the account has exactly one workspace.',
+  }),
+);
+
 export default function piTeamworkExtension(pi: ExtensionAPI): void {
   let provider: TeamworkProvider | undefined;
   let readyPromise: Promise<void> | undefined;
@@ -194,12 +201,7 @@ function createTeamworkTools(ensureReady: EnsureReadyFn, getProvider: GetProvide
       promptSnippet:
         'List issues from a shared project tracker where humans and agents collaborate.',
       parameters: Type.Object({
-        workspaceId: Type.Optional(
-          Type.String({
-            description:
-              'Workspace ID from workspace_list. Optional when the account has exactly one workspace.',
-          }),
-        ),
+        workspaceId: WORKSPACE_ID_PARAM,
         status: Type.Optional(
           Type.String({ description: 'Filter by status (e.g. todo, in_progress, done, blocked).' }),
         ),
@@ -226,12 +228,7 @@ function createTeamworkTools(ensureReady: EnsureReadyFn, getProvider: GetProvide
       description:
         'Get detailed information about a specific issue (a work item in the shared project tracker).',
       parameters: Type.Object({
-        workspaceId: Type.Optional(
-          Type.String({
-            description:
-              'Workspace ID from workspace_list. Optional when the account has exactly one workspace.',
-          }),
-        ),
+        workspaceId: WORKSPACE_ID_PARAM,
         id: Type.String({ description: 'The issue ID.' }),
       }),
       async execute(_toolCallId, params) {
@@ -255,12 +252,7 @@ function createTeamworkTools(ensureReady: EnsureReadyFn, getProvider: GetProvide
       promptSnippet:
         'Create issues / tickets in a shared project tracker for humans or agents to collaborate on.',
       parameters: Type.Object({
-        workspaceId: Type.Optional(
-          Type.String({
-            description:
-              'Workspace ID from workspace_list. Optional when the account has exactly one workspace.',
-          }),
-        ),
+        workspaceId: WORKSPACE_ID_PARAM,
         title: Type.String({ description: 'Issue title.' }),
         description: Type.Optional(Type.String({ description: 'Issue description.' })),
         priority: Type.Optional(
@@ -287,12 +279,7 @@ function createTeamworkTools(ensureReady: EnsureReadyFn, getProvider: GetProvide
       description:
         'Update an existing issue in the shared project tracker. Can change title, description, status, priority, or assignee.',
       parameters: Type.Object({
-        workspaceId: Type.Optional(
-          Type.String({
-            description:
-              'Workspace ID from workspace_list. Optional when the account has exactly one workspace.',
-          }),
-        ),
+        workspaceId: WORKSPACE_ID_PARAM,
         id: Type.String({ description: 'The issue ID to update.' }),
         title: Type.Optional(Type.String({ description: 'New title.' })),
         description: Type.Optional(Type.String({ description: 'New description.' })),
@@ -325,12 +312,7 @@ function createTeamworkTools(ensureReady: EnsureReadyFn, getProvider: GetProvide
       description:
         'Add a comment to an issue in the shared project tracker. Use for progress updates, questions, or blockers visible to other collaborators (humans or agents).',
       parameters: Type.Object({
-        workspaceId: Type.Optional(
-          Type.String({
-            description:
-              'Workspace ID from workspace_list. Optional when the account has exactly one workspace.',
-          }),
-        ),
+        workspaceId: WORKSPACE_ID_PARAM,
         issueId: Type.String({ description: 'The issue ID to comment on.' }),
         content: Type.String({ description: 'Comment content.' }),
         parentId: Type.Optional(
@@ -359,12 +341,7 @@ function createTeamworkTools(ensureReady: EnsureReadyFn, getProvider: GetProvide
       label: 'Teamwork',
       description: 'List all projects in a workspace.',
       parameters: Type.Object({
-        workspaceId: Type.Optional(
-          Type.String({
-            description:
-              'Workspace ID from workspace_list. Optional when the account has exactly one workspace.',
-          }),
-        ),
+        workspaceId: WORKSPACE_ID_PARAM,
       }),
       async execute(_toolCallId, params) {
         const err = await ensureReady();
