@@ -506,6 +506,61 @@ describe('search - all providers', () => {
     const body = JSON.parse(mockFetch.mock.calls[0]![1].body);
     expect(body.model).toBe('sonar-pro');
   });
+
+  it('dashscope: calls responses API with web_search tool', async () => {
+    const settings: WebToolSettings = {
+      search: { provider: 'dashscope' },
+      providers: { dashscope: { apiKey: 'dashscope-key' } },
+    };
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        status: 'completed',
+        output: [
+          {
+            type: 'message',
+            content: [
+              {
+                type: 'output_text',
+                text: 'DashScope answer',
+                annotations: [{ type: 'url_citation', url: 'https://aliyun.com', title: 'Aliyun' }],
+              },
+            ],
+          },
+        ],
+      }),
+    });
+
+    const result = await search({ query: 'test' }, settings);
+
+    expect(result.provider).toBe('dashscope');
+    expect(result.answer).toBe('DashScope answer');
+    expect(result.results).toHaveLength(1);
+    expect(result.results[0]!.url).toBe('https://aliyun.com');
+
+    const [url, opts] = mockFetch.mock.calls[0]!;
+    expect(url).toBe('https://dashscope.aliyuncs.com/compatible-mode/v1/responses');
+    expect(opts.headers.Authorization).toBe('Bearer dashscope-key');
+    const body = JSON.parse(opts.body);
+    expect(body.model).toBe('qwen3.7-plus');
+    expect(body.tools[0].type).toBe('web_search');
+  });
+
+  it('dashscope: omits domain filters (unsupported by the DashScope Responses API)', async () => {
+    const settings: WebToolSettings = {
+      search: { provider: 'dashscope' },
+      providers: { dashscope: { apiKey: 'key' } },
+    };
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ status: 'completed', output: [] }),
+    });
+
+    await search({ query: 'test', includeDomains: ['example.com'] }, settings);
+
+    const body = JSON.parse(mockFetch.mock.calls[0]![1].body);
+    expect(body.tools[0].filters).toBeUndefined();
+  });
 });
 
 describe('XaiProvider.xsearch', () => {
@@ -623,6 +678,266 @@ describe('XaiProvider.xsearch', () => {
 
     await expect(provider.xsearch({ query: 'test' }, resolved)).rejects.toThrow(
       'xAI API error 429',
+    );
+  });
+});
+
+describe('DashscopeProvider', () => {
+  const resolved = {
+    id: 'dashscope' as const,
+    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    apiKey: 'dashscope-key',
+  };
+
+  beforeEach(() => {
+    mockFetch.mockReset();
+  });
+
+  it('search throws on missing API key', async () => {
+    const { DashscopeProvider } = await import('../providers/dashscope.js');
+    const provider = new DashscopeProvider();
+
+    await expect(
+      provider.search({ query: 'test' }, { id: 'dashscope', baseUrl: resolved.baseUrl }),
+    ).rejects.toThrow('DashScope API key not configured');
+  });
+
+  it('fetch calls responses API with web_search and web_extractor tools', async () => {
+    const { DashscopeProvider } = await import('../providers/dashscope.js');
+    const provider = new DashscopeProvider();
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        status: 'completed',
+        output_text: 'summary',
+        output: [
+          { type: 'web_extractor_call', status: 'completed', output: 'extracted page content' },
+          { type: 'message' },
+        ],
+      }),
+    });
+
+    const result = await provider.fetch('https://example.com', resolved);
+
+    expect(result.url).toBe('https://example.com');
+    expect(result.content).toBe('extracted page content');
+
+    const [url, opts] = mockFetch.mock.calls[0]!;
+    expect(url).toBe('https://dashscope.aliyuncs.com/compatible-mode/v1/responses');
+    expect(opts.headers.Authorization).toBe('Bearer dashscope-key');
+    const body = JSON.parse(opts.body);
+    expect(body.tools).toEqual([{ type: 'web_search' }, { type: 'web_extractor' }]);
+    expect(body.input).toContain('https://example.com');
+  });
+
+  it('fetch falls back to output_text when no extractor output', async () => {
+    const { DashscopeProvider } = await import('../providers/dashscope.js');
+    const provider = new DashscopeProvider();
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ status: 'completed', output_text: 'model answer', output: [] }),
+    });
+
+    const result = await provider.fetch('https://example.com', resolved);
+
+    expect(result.content).toBe('model answer');
+  });
+
+  it('imageSearch parses web_search_image_call output', async () => {
+    const { DashscopeProvider } = await import('../providers/dashscope.js');
+    const provider = new DashscopeProvider();
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        status: 'completed',
+        output_text: 'found images',
+        output: [
+          {
+            type: 'web_search_image_call',
+            status: 'completed',
+            output: JSON.stringify([
+              { index: 1, title: 'Tech background', url: 'https://img.example.com/1.png' },
+              { index: 2, title: 'Blue gradient', url: 'https://img.example.com/2.png' },
+            ]),
+          },
+        ],
+      }),
+    });
+
+    const result = await provider.imageSearch({ query: 'tech background' }, resolved);
+
+    expect(result.provider).toBe('dashscope');
+    expect(result.answer).toBe('found images');
+    expect(result.results).toHaveLength(2);
+    expect(result.results[0]).toEqual({
+      title: 'Tech background',
+      url: 'https://img.example.com/1.png',
+      content: '',
+    });
+
+    const body = JSON.parse(mockFetch.mock.calls[0]![1].body);
+    expect(body.tools).toEqual([{ type: 'web_search_image' }]);
+    expect(body.input).toBe('tech background');
+  });
+
+  it('imageSearch skips malformed tool output', async () => {
+    const { DashscopeProvider } = await import('../providers/dashscope.js');
+    const provider = new DashscopeProvider();
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        status: 'completed',
+        output: [{ type: 'web_search_image_call', output: 'not json' }],
+      }),
+    });
+
+    const result = await provider.imageSearch({ query: 'test' }, resolved);
+
+    expect(result.results).toHaveLength(0);
+    expect(result.answer).toBeUndefined();
+  });
+
+  it('imageSearch throws on missing API key', async () => {
+    const { DashscopeProvider } = await import('../providers/dashscope.js');
+    const provider = new DashscopeProvider();
+
+    await expect(
+      provider.imageSearch({ query: 'test' }, { id: 'dashscope', baseUrl: resolved.baseUrl }),
+    ).rejects.toThrow('DashScope API key not configured');
+  });
+
+  it('throws on HTTP error', async () => {
+    const { DashscopeProvider } = await import('../providers/dashscope.js');
+    const provider = new DashscopeProvider();
+
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 429,
+      text: async () => 'Rate limited',
+    });
+
+    await expect(provider.imageSearch({ query: 'test' }, resolved)).rejects.toThrow(
+      'DashScope API error 429',
+    );
+  });
+
+  it('throws when response status is failed', async () => {
+    const { DashscopeProvider } = await import('../providers/dashscope.js');
+    const provider = new DashscopeProvider();
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ status: 'failed', error: { message: 'tool failed' } }),
+    });
+
+    await expect(provider.imageSearch({ query: 'test' }, resolved)).rejects.toThrow(
+      'DashScope API response failed.',
+    );
+  });
+});
+
+describe('UnsplashProvider.imageSearch', () => {
+  const resolved = {
+    id: 'unsplash' as const,
+    baseUrl: 'https://api.unsplash.com',
+    apiKey: 'unsplash-key',
+  };
+
+  beforeEach(() => {
+    mockFetch.mockReset();
+  });
+
+  it('calls search/photos with Client-ID auth and parses results', async () => {
+    const { UnsplashProvider } = await import('../providers/unsplash.js');
+    const provider = new UnsplashProvider();
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        total: 2,
+        total_pages: 1,
+        results: [
+          {
+            alt_description: 'a cat sitting on a table',
+            urls: { regular: 'https://images.unsplash.com/photo-1?w=1080' },
+            links: { html: 'https://unsplash.com/photos/1' },
+            user: { name: 'Jane Doe' },
+          },
+          {
+            alt_description: null,
+            description: 'city skyline',
+            urls: { regular: 'https://images.unsplash.com/photo-2?w=1080' },
+            links: { html: 'https://unsplash.com/photos/2' },
+            user: { name: 'John Roe' },
+          },
+        ],
+      }),
+    });
+
+    const result = await provider.imageSearch({ query: 'cat' }, resolved);
+
+    expect(result.provider).toBe('unsplash');
+    expect(result.query).toBe('cat');
+    expect(result.results).toHaveLength(2);
+    expect(result.results[0]!.title).toBe('a cat sitting on a table');
+    expect(result.results[0]!.url).toBe('https://images.unsplash.com/photo-1?w=1080');
+    expect(result.results[0]!.content).toBe(
+      'Photo by Jane Doe on Unsplash — https://unsplash.com/photos/1',
+    );
+    expect(result.results[1]!.title).toBe('city skyline');
+
+    const [url, opts] = mockFetch.mock.calls[0]!;
+    expect(String(url)).toContain('https://api.unsplash.com/search/photos');
+    expect(String(url)).toContain('query=cat');
+    expect(String(url)).toContain('per_page=10');
+    expect(opts.headers.Authorization).toBe('Client-ID unsplash-key');
+  });
+
+  it('skips photos without a regular image URL', async () => {
+    const { UnsplashProvider } = await import('../providers/unsplash.js');
+    const provider = new UnsplashProvider();
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        results: [
+          { alt_description: 'no url', urls: {} },
+          { alt_description: 'has url', urls: { regular: 'https://images.unsplash.com/x' } },
+        ],
+      }),
+    });
+
+    const result = await provider.imageSearch({ query: 'test' }, resolved);
+
+    expect(result.results).toHaveLength(1);
+    expect(result.results[0]!.title).toBe('has url');
+  });
+
+  it('throws on missing API key', async () => {
+    const { UnsplashProvider } = await import('../providers/unsplash.js');
+    const provider = new UnsplashProvider();
+
+    await expect(
+      provider.imageSearch({ query: 'test' }, { id: 'unsplash', baseUrl: resolved.baseUrl }),
+    ).rejects.toThrow('Unsplash API key not configured');
+  });
+
+  it('throws on HTTP error', async () => {
+    const { UnsplashProvider } = await import('../providers/unsplash.js');
+    const provider = new UnsplashProvider();
+
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+      text: async () => 'Unauthorized',
+    });
+
+    await expect(provider.imageSearch({ query: 'test' }, resolved)).rejects.toThrow(
+      'Unsplash API error 401',
     );
   });
 });

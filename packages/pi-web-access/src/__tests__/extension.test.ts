@@ -25,13 +25,18 @@ const mockSearch = vi.mocked(search);
 
 function createMockPi() {
   const tools: Array<{ name: string }> = [];
+  const commands: Map<string, unknown> = new Map();
   // biome-ignore lint/complexity/noBannedTypes: mock helper
   const listeners: Record<string, Function> = {};
   return {
     tools,
+    commands,
     listeners,
     registerTool(tool: { name: string }) {
       tools.push(tool);
+    },
+    registerCommand(name: string, opts: unknown) {
+      commands.set(name, opts);
     },
     // biome-ignore lint/complexity/noBannedTypes: mock helper
     on(event: string, handler: Function) {
@@ -201,6 +206,46 @@ describe('piWebToolExtension - tool registration', () => {
 
     expect(pi.tools.map((t) => t.name)).toContain('web_search');
     expect(pi.tools.map((t) => t.name)).toContain('x_search');
+  });
+
+  it('registers image_search when dashscope provider has key', async () => {
+    mockLoadSettings.mockReturnValue({
+      providers: { dashscope: { apiKey: 'dashscope-key' } },
+    });
+
+    const pi = createMockPi();
+    piWebToolExtension(pi as any);
+    await pi.triggerSessionStart();
+
+    expect(pi.tools.map((t) => t.name)).toContain('image_search');
+    expect(pi.commands.has('image-search')).toBe(true);
+  });
+
+  it('registers image_search when unsplash provider has key', async () => {
+    mockLoadSettings.mockReturnValue({
+      providers: { unsplash: { apiKey: 'unsplash-key' } },
+    });
+
+    const pi = createMockPi();
+    piWebToolExtension(pi as any);
+    await pi.triggerSessionStart();
+
+    expect(pi.tools.map((t) => t.name)).toContain('image_search');
+    expect(pi.commands.has('image-search')).toBe(true);
+  });
+
+  it('does not register image_search when dashscope has no key', async () => {
+    mockLoadSettings.mockReturnValue({
+      search: { provider: 'kimi' },
+      providers: { kimi: { apiKey: 'key' } },
+    });
+
+    const pi = createMockPi();
+    piWebToolExtension(pi as any);
+    await pi.triggerSessionStart();
+
+    expect(pi.tools.map((t) => t.name)).not.toContain('image_search');
+    expect(pi.commands.has('image-search')).toBe(false);
   });
 });
 

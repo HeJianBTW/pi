@@ -1,9 +1,14 @@
 import { isProjectTrusted } from '@amaster.ai/pi-shared/settings';
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { Type } from 'typebox';
-import { loadWebToolSettings, resolveProvider, resolveSearchProvider } from './config.js';
+import {
+  loadWebToolSettings,
+  resolveImageSearchProvider,
+  resolveProvider,
+  resolveSearchProvider,
+} from './config.js';
 import { webFetch } from './fetch.js';
-import type { SearchParams } from './providers/index.js';
+import type { ImageSearchParams, SearchParams, SearchResponse } from './providers/index.js';
 import { getProvider } from './providers/index.js';
 import type { XaiProvider } from './providers/xai.js';
 import { search } from './search.js';
@@ -13,6 +18,7 @@ import type { WebToolSettings } from './types.js';
 export {
   loadWebToolSettings,
   resolveFetchProvider,
+  resolveImageSearchProvider,
   resolveProvider,
   resolveSearchProvider,
 } from './config.js';
@@ -20,6 +26,7 @@ export { type WebFetchParams, type WebFetchResponse, webFetch } from './fetch.js
 export {
   type FetchResponse,
   getProvider,
+  type ImageSearchParams,
   type ResolvedProvider,
   type SearchParams,
   type SearchResponse,
@@ -31,6 +38,35 @@ export type {
   ProviderConfig,
   WebToolSettings,
 } from './types.js';
+
+function formatImageSearch(response: SearchResponse): string {
+  const lines: string[] = [];
+  lines.push(`## Image Search Results (${response.provider})`);
+  lines.push(`**Query:** ${response.query}`);
+  lines.push('');
+
+  if (response.answer) {
+    lines.push('### Answer');
+    lines.push(response.answer);
+    lines.push('');
+  }
+
+  if (response.results.length > 0) {
+    lines.push('### Images');
+    for (const r of response.results) {
+      lines.push(`- [${r.title}](${r.url})`);
+      if (r.content) lines.push(`  ${r.content}`);
+    }
+    lines.push('');
+  }
+
+  if (!response.answer && response.results.length === 0) {
+    lines.push('No images returned by the provider. Consider rephrasing the query.');
+    lines.push('');
+  }
+
+  return lines.join('\n');
+}
 
 export default function piWebToolExtension(pi: ExtensionAPI): void {
   let settings: WebToolSettings = {};
@@ -259,6 +295,63 @@ export default function piWebToolExtension(pi: ExtensionAPI): void {
 
           const text = lines.join('\n');
           return { content: [{ type: 'text' as const, text }], details: undefined };
+        },
+      });
+    }
+
+    // image_search: registered when an image search provider (dashscope, unsplash) has an API key
+    const imageSearchResolved = resolveImageSearchProvider(settings);
+    const hasImageSearch = !('error' in imageSearchResolved) && Boolean(imageSearchResolved.apiKey);
+    if (hasImageSearch) {
+      const runImageSearch = async (query: string): Promise<string> => {
+        const provider = getProvider(imageSearchResolved.id);
+        if (!provider) {
+          throw new Error(`Provider "${imageSearchResolved.id}" is not registered.`);
+        }
+        const response = await provider.imageSearch({ query }, imageSearchResolved);
+        return formatImageSearch(response);
+      };
+
+      pi.registerTool({
+        name: 'image_search',
+        label: 'ImageSearch',
+        description: [
+          '- Searches the web for images matching a text description',
+          '- Returns matching image titles and URLs',
+          '- Use this tool when you need to find images, photos, illustrations, or other visual assets',
+        ].join('\n'),
+        parameters: Type.Object({
+          query: Type.String({ description: 'Description of the images to search for.' }),
+        }),
+        async execute(
+          _toolCallId: string,
+          params: Record<string, unknown>,
+          _signal: AbortSignal | undefined,
+          _onUpdate: unknown,
+          _ctx: ExtensionContext,
+        ) {
+          const imageParams = params as unknown as ImageSearchParams;
+          const text = await runImageSearch(imageParams.query);
+          return { content: [{ type: 'text' as const, text }], details: undefined };
+        },
+      });
+
+      pi.registerCommand('image-search', {
+        description: 'Search the web for images. Usage: /image-search <query>',
+        async handler(args, cmdCtx) {
+          const query = args.trim();
+          if (!query) {
+            cmdCtx.ui.notify('Usage: /image-search <query>', 'warning');
+            return;
+          }
+          try {
+            cmdCtx.ui.notify(await runImageSearch(query), 'info');
+          } catch (err) {
+            cmdCtx.ui.notify(
+              `image-search failed: ${err instanceof Error ? err.message : 'unknown error'}`,
+              'error',
+            );
+          }
         },
       });
     }

@@ -20,6 +20,8 @@ const DEFAULT_BASE_URL: Record<BuiltInProviderId, string> = {
   xai: 'https://api.x.ai/v1',
   openai: 'https://api.openai.com/v1',
   anthropic: 'https://api.anthropic.com/v1',
+  dashscope: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+  unsplash: 'https://api.unsplash.com',
 };
 
 const ENV_VARS: Record<BuiltInProviderId, string> = {
@@ -36,6 +38,8 @@ const ENV_VARS: Record<BuiltInProviderId, string> = {
   xai: 'XAI_API_KEY',
   openai: 'OPENAI_API_KEY',
   anthropic: 'ANTHROPIC_API_KEY',
+  dashscope: 'DASHSCOPE_API_KEY',
+  unsplash: 'UNSPLASH_ACCESS_KEY',
 };
 
 const DEFAULT_MODEL: Partial<Record<BuiltInProviderId, string>> = {
@@ -47,6 +51,7 @@ const DEFAULT_MODEL: Partial<Record<BuiltInProviderId, string>> = {
   xai: 'grok-4.3',
   openai: 'gpt-5.5',
   anthropic: 'claude-sonnet-4-6',
+  dashscope: 'qwen3.7-plus',
 };
 
 // ─── Settings loading ────────────────────────────────────────────────────────
@@ -107,6 +112,7 @@ const ALL_SEARCH_PROVIDER_IDS: BuiltInProviderId[] = [
   'gemini',
   'perplexity',
   'deepseek',
+  'dashscope',
 ];
 
 /**
@@ -138,4 +144,31 @@ export function resolveFetchProvider(settings: WebToolSettings): ResolvedProvide
   const resolved = resolveProvider(settings.fetch.provider, settings);
   if ('error' in resolved || !resolved.apiKey) return null;
   return resolved;
+}
+
+const ALL_IMAGE_SEARCH_PROVIDER_IDS: BuiltInProviderId[] = ['dashscope', 'unsplash'];
+
+/**
+ * Resolve the image search provider from settings.
+ * Uses imageSearch.provider if set, otherwise picks the first provider with an API key.
+ */
+export function resolveImageSearchProvider(
+  settings: WebToolSettings,
+): ResolvedProvider | { error: string } {
+  if (settings.imageSearch?.provider) {
+    if (!ALL_IMAGE_SEARCH_PROVIDER_IDS.includes(settings.imageSearch.provider)) {
+      return {
+        error: `Provider "${settings.imageSearch.provider}" does not support image_search.`,
+      };
+    }
+    return resolveProvider(settings.imageSearch.provider, settings);
+  }
+  for (const id of ALL_IMAGE_SEARCH_PROVIDER_IDS) {
+    const resolved = resolveProvider(id, settings);
+    if (!('error' in resolved) && resolved.apiKey) return resolved;
+  }
+  return {
+    error:
+      'No image search provider configured. Set imageSearch.provider or configure a provider with an API key.',
+  };
 }

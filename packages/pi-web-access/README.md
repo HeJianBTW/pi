@@ -40,25 +40,37 @@ Search X (Twitter) for posts and social media content. Only registered when xai 
 | `fromDate` | string | no | Start date (YYYY-MM-DD) |
 | `toDate` | string | no | End date (YYYY-MM-DD) |
 
+### `image_search`
+
+Search the web for images. Only registered when an image search provider (`dashscope` or `unsplash`) has an API key. Also invocable directly via the `/image-search <query>` command.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `query` | string | yes | Description of the images to search for |
+
 ## Providers
 
-| Provider | Search | Fetch | X Search | Default Base URL | Env Var | Default Model |
-|----------|:------:|:-----:|:--------:|------------------|---------|---------------|
-| `tavily` | ✓ | ✓ | ✗ | `https://api.tavily.com` | `TAVILY_API_KEY` | - |
-| `brave` | ✓ | ✗ | ✗ | `https://api.search.brave.com` | `BRAVE_API_KEY` | - |
-| `firecrawl` | ✓ | ✓ | ✗ | `https://api.firecrawl.dev` | `FIRECRAWL_API_KEY` | - |
-| `kimi` | ✓ | ✗ | ✗ | `https://api.moonshot.cn/v1` | `MOONSHOT_API_KEY` | `kimi-k3` |
-| `mimo` | ✓ | ✗ | ✗ | `https://api.xiaomimimo.com/v1` | `MIMO_API_KEY` | `mimo-v2.5-pro` |
-| `zai` | ✓ | ✓ | ✗ | `https://api.z.ai` | `ZAI_API_KEY` | - |
-| `gemini` | ✓ | ✗ | ✗ | `https://generativelanguage.googleapis.com/v1beta` | `GEMINI_API_KEY` | `gemini-2.5-flash` |
-| `perplexity` | ✓ | ✓ | ✗ | `https://api.perplexity.ai` | `PERPLEXITY_API_KEY` | `openai/gpt-5.5` |
-| `deepseek` | ✓ | ✗ | ✗ | `https://api.deepseek.com` | `DEEPSEEK_API_KEY` | `deepseek-v4-flash` |
-| `openrouter` | ✓ | ✓ | ✗ | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` | `openai/gpt-4.1-mini` |
-| `xai` | ✓ | ✗ | ✓ | `https://api.x.ai/v1` | `XAI_API_KEY` | `grok-4.3` |
-| `openai` | ✓ | ✗ | ✗ | `https://api.openai.com/v1` | `OPENAI_API_KEY` | `gpt-5.5` |
-| `anthropic` | ✓ | ✓ | ✗ | `https://api.anthropic.com/v1` | `ANTHROPIC_API_KEY` | `claude-sonnet-4-6` |
+| Provider | Search | Fetch | X Search | Image Search | Default Base URL | Env Var | Default Model |
+|----------|:------:|:-----:|:--------:|:------------:|------------------|---------|---------------|
+| `tavily` | ✓ | ✓ | ✗ | ✗ | `https://api.tavily.com` | `TAVILY_API_KEY` | - |
+| `brave` | ✓ | ✗ | ✗ | ✗ | `https://api.search.brave.com` | `BRAVE_API_KEY` | - |
+| `firecrawl` | ✓ | ✓ | ✗ | ✗ | `https://api.firecrawl.dev` | `FIRECRAWL_API_KEY` | - |
+| `kimi` | ✓ | ✗ | ✗ | ✗ | `https://api.moonshot.cn/v1` | `MOONSHOT_API_KEY` | `kimi-k3` |
+| `mimo` | ✓ | ✗ | ✗ | ✗ | `https://api.xiaomimimo.com/v1` | `MIMO_API_KEY` | `mimo-v2.5-pro` |
+| `zai` | ✓ | ✓ | ✗ | ✗ | `https://api.z.ai` | `ZAI_API_KEY` | - |
+| `gemini` | ✓ | ✗ | ✗ | ✗ | `https://generativelanguage.googleapis.com/v1beta` | `GEMINI_API_KEY` | `gemini-2.5-flash` |
+| `perplexity` | ✓ | ✓ | ✗ | ✗ | `https://api.perplexity.ai` | `PERPLEXITY_API_KEY` | `openai/gpt-5.5` |
+| `deepseek` | ✓ | ✗ | ✗ | ✗ | `https://api.deepseek.com` | `DEEPSEEK_API_KEY` | `deepseek-v4-flash` |
+| `openrouter` | ✓ | ✓ | ✗ | ✗ | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` | `openai/gpt-4.1-mini` |
+| `xai` | ✓ | ✗ | ✓ | ✗ | `https://api.x.ai/v1` | `XAI_API_KEY` | `grok-4.3` |
+| `openai` | ✓ | ✗ | ✗ | ✗ | `https://api.openai.com/v1` | `OPENAI_API_KEY` | `gpt-5.5` |
+| `anthropic` | ✓ | ✓ | ✗ | ✗ | `https://api.anthropic.com/v1` | `ANTHROPIC_API_KEY` | `claude-sonnet-4-6` |
+| `dashscope` | ✓ | ✓ | ✗ | ✓ | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `DASHSCOPE_API_KEY` | `qwen3.7-plus` |
+| `unsplash` | ✗ | ✗ | ✗ | ✓ | `https://api.unsplash.com` | `UNSPLASH_ACCESS_KEY` | - |
 
 Custom Kimi base URLs must support both `/chat/completions` and `/formulas/*`.
+
+Custom DashScope base URLs must point to an OpenAI-compatible Responses API root — `${baseUrl}/responses` is called for all capabilities. For the international site or a dedicated workspace endpoint, use e.g. `https://dashscope-intl.aliyuncs.com/compatible-mode/v1`. DashScope fetch uses the `web_extractor` tool and image search uses `web_search_image`; both are agent-style tools and can take minutes per call (default timeout 5 min, tune via `timeoutMs`). DashScope search supports only basic web search — `includeDomains`/`excludeDomains` filters are ignored.
 
 **Fetch fallback** (when `fetch.provider` is not set): Jina Reader (`r.jina.ai`, free, JS-rendered) → local HTTP GET + turndown.
 
@@ -116,6 +128,12 @@ environment interpolation.
 
 If neither `fetch.provider` nor `fetch.summary` is configured, `web_fetch` is not registered.
 
+### `imageSearch`
+
+| Field | Description |
+|-------|-------------|
+| `provider` | Which provider to use for image search (`dashscope` or `unsplash`). Not set = auto-select first provider with key. No key at all = tool not registered. |
+
 ### `providers`
 
 Per-provider configuration. Each provider supports:
@@ -139,6 +157,7 @@ export interface WebProvider {
   readonly id: BuiltInProviderId;
   search(params: SearchParams, provider: ResolvedProvider): Promise<SearchResponse>;
   fetch(url: string, provider: ResolvedProvider): Promise<FetchResponse>;
+  imageSearch(params: ImageSearchParams, provider: ResolvedProvider): Promise<SearchResponse>;
 }
 
 export abstract class BaseProvider implements WebProvider {
@@ -146,6 +165,7 @@ export abstract class BaseProvider implements WebProvider {
   // Default implementations throw "not supported"
   async search(...) { throw new Error(`${this.id} does not support web_search.`); }
   async fetch(...) { throw new Error(`${this.id} does not support web_fetch.`); }
+  async imageSearch(...) { throw new Error(`${this.id} does not support image_search.`); }
 }
 ```
 
@@ -156,6 +176,7 @@ Providers only override methods they support. Provider-specific capabilities (li
 - `web_search` — registered when a search provider has an API key.
 - `web_fetch` — registered when `fetch.provider` or `fetch.summary` is configured.
 - `x_search` — registered when xai provider has an API key.
+- `image_search` — registered when an image search provider (dashscope, unsplash) has an API key; `/image-search` command is registered alongside it. An `imageSearch.provider` that doesn't support image search (e.g. `"openai"`) is treated as unconfigured.
 - If none are configured, the extension loads silently with no tools registered.
 
 ## Install
