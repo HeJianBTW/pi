@@ -67,21 +67,33 @@ runs:
 
     # Node must come before pnpm: v6's npm-based bootstrap (@pnpm/exe
     # postinstall uses import.meta.dirname) needs Node >= 20.11, and the
-    # self-hosted runner's system Node is 18. Store caching lives on
-    # pnpm/action-setup rather than setup-node's `cache: pnpm`, which probes
-    # `pnpm store path` and would fail with pnpm not yet installed.
+    # self-hosted runner's system Node is 18.
     - name: Setup Node
       uses: actions/setup-node@v7
       with:
         node-version: 24
 
+    # cache: false — this self-hosted runner persists its host disk across
+    # jobs, so a shared host-level pnpm store (pinned in the next step) gives
+    # the same install speedup without per-job cache upload/download.
     - name: Setup pnpm
       uses: pnpm/action-setup@v6
       with:
-        cache: true
+        cache: false
         # Per-job temp dir avoids cwd-deleted races between concurrent matrix
         # jobs sharing the runner's $HOME/setup-pnpm.
         dest: ${{ runner.temp }}/setup-pnpm
+
+    - name: Use the host-persisted shared pnpm store
+      shell: bash
+      run: |
+        # `dest` above relocates PNPM_HOME into the per-job temp dir, which
+        # can drag the default store along with it. Pin store-dir back to the
+        # host so every job shares one content-addressed store (safe for
+        # concurrent matrix jobs). `pnpm store path` echoes the resolved path
+        # into the log so a misconfigured store is visible at a glance.
+        pnpm config set store-dir "$HOME/.local/share/pnpm/store/v10" --global
+        pnpm store path
 
     - name: Install dependencies
       shell: bash
