@@ -51,12 +51,17 @@ export interface FetchResponse {
   content: string;
 }
 
+export interface ImageSearchParams {
+  query: string;
+}
+
 // ─── Provider interface & base class ─────────────────────────────────────────
 
 export interface WebProvider {
   readonly id: BuiltInProviderId;
   search(params: SearchParams, provider: ResolvedProvider): Promise<SearchResponse>;
   fetch(url: string, provider: ResolvedProvider): Promise<FetchResponse>;
+  imageSearch(params: ImageSearchParams, provider: ResolvedProvider): Promise<SearchResponse>;
 }
 
 export abstract class BaseProvider implements WebProvider {
@@ -68,5 +73,12 @@ export abstract class BaseProvider implements WebProvider {
 
   async fetch(_url: string, _provider: ResolvedProvider): Promise<FetchResponse> {
     throw new Error(`${this.id} does not support web_fetch.`);
+  }
+
+  async imageSearch(
+    _params: ImageSearchParams,
+    _provider: ResolvedProvider,
+  ): Promise<SearchResponse> {
+    throw new Error(`${this.id} does not support image_search.`);
   }
 }

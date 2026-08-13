@@ -20,6 +20,13 @@ describe('BaseProvider', () => {
       provider.fetch('https://example.com', { id: 'tavily', baseUrl: '' }),
     ).rejects.toThrow('tavily does not support web_fetch');
   });
+
+  it('imageSearch throws not supported by default', async () => {
+    const provider = new TestProvider();
+    await expect(
+      provider.imageSearch({ query: 'test' }, { id: 'tavily', baseUrl: '' }),
+    ).rejects.toThrow('tavily does not support image_search');
+  });
 });
 
 describe('getProvider registry', () => {
@@ -35,6 +42,8 @@ describe('getProvider registry', () => {
     'xai',
     'openai',
     'anthropic',
+    'dashscope',
+    'unsplash',
   ];
 
   it('returns a provider for every registered id', () => {
@@ -50,9 +59,17 @@ describe('getProvider registry', () => {
     expect(provider).toBeUndefined();
   });
 
-  it('search-only providers throw on fetch', async () => {
-    const searchOnly: BuiltInProviderId[] = ['kimi', 'mimo', 'gemini', 'xai', 'openai', 'deepseek'];
-    for (const id of searchOnly) {
+  it('providers without fetch support throw on fetch', async () => {
+    const fetchUnsupported: BuiltInProviderId[] = [
+      'kimi',
+      'mimo',
+      'gemini',
+      'xai',
+      'openai',
+      'deepseek',
+      'unsplash',
+    ];
+    for (const id of fetchUnsupported) {
       const provider = getProvider(id)!;
       await expect(provider.fetch('https://example.com', { id, baseUrl: '' })).rejects.toThrow(
         'does not support web_fetch',
@@ -74,6 +91,7 @@ describe('getProvider registry', () => {
       'perplexity',
       'openrouter',
       'anthropic',
+      'dashscope',
     ];
     for (const id of fetchCapable) {
       const provider = getProvider(id)!;

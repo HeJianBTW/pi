@@ -1,18 +1,21 @@
 {
   "name": "@amaster.ai/pi-web-access",
   "version": "0.1.2-beta.15",
-  "description": "Pi extension for web search (Tavily, Kimi, DeepSeek, Mimo, Z.AI) and URL content extraction",
+  "description": "Pi extension for web search, URL content extraction, and image search (Tavily, Kimi, DeepSeek, Mimo, Z.AI, DashScope, Unsplash, and more)",
   "keywords": [
     "pi-package",
     "pi",
     "extension",
     "web-search",
     "web-access",
+    "image-search",
     "tavily",
     "kimi",
     "deepseek",
     "mimo",
-    "zai"
+    "zai",
+    "dashscope",
+    "unsplash"
   ],
   "license": "Apache-2.0",
   "type": "module",

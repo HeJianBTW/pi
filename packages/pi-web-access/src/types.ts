@@ -12,7 +12,9 @@ export type BuiltInProviderId =
   | 'openrouter'
   | 'xai'
   | 'openai'
-  | 'anthropic';
+  | 'anthropic'
+  | 'dashscope'
+  | 'unsplash';
 
 // ─── Settings ────────────────────────────────────────────────────────────────
 
@@ -37,13 +39,19 @@ export interface FetchConfig {
   summary?: SummaryModelConfig;
 }
 
+export interface ImageSearchConfig {
+  provider?: BuiltInProviderId;
+}
+
 export interface WebToolSettings {
-  /** Request timeout in milliseconds (default varies by provider: 30s-60s). */
+  /** Request timeout in milliseconds (default varies by provider: 30s-5min). */
   timeoutMs?: number;
   /** Search tool config. */
   search?: SearchConfig;
   /** Fetch tool config. */
   fetch?: FetchConfig;
+  /** Image search tool config. */
+  imageSearch?: ImageSearchConfig;
   /** Per-provider config. */
   providers?: Partial<Record<BuiltInProviderId, ProviderConfig>>;
 }

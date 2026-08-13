@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { resolveFetchProvider, resolveProvider, resolveSearchProvider } from '../config.js';
+import {
+  resolveFetchProvider,
+  resolveImageSearchProvider,
+  resolveProvider,
+  resolveSearchProvider,
+} from '../config.js';
 import type { WebToolSettings } from '../types.js';
 
 describe('resolveProvider', () => {
@@ -103,6 +108,29 @@ describe('resolveProvider', () => {
       expect(result.baseUrl).toBe('https://api.deepseek.com');
       expect(result.apiKey).toBe('test-deepseek-key');
       expect(result.model).toBe('deepseek-v4-flash');
+    }
+  });
+
+  it('resolves dashscope with env var and default model', () => {
+    process.env.DASHSCOPE_API_KEY = 'test-dashscope-key';
+    const result = resolveProvider('dashscope', {});
+    expect(result).not.toHaveProperty('error');
+    if (!('error' in result)) {
+      expect(result.id).toBe('dashscope');
+      expect(result.baseUrl).toBe('https://dashscope.aliyuncs.com/compatible-mode/v1');
+      expect(result.apiKey).toBe('test-dashscope-key');
+      expect(result.model).toBe('qwen3.7-plus');
+    }
+  });
+
+  it('resolves unsplash with env var', () => {
+    process.env.UNSPLASH_ACCESS_KEY = 'test-unsplash-key';
+    const result = resolveProvider('unsplash', {});
+    expect(result).not.toHaveProperty('error');
+    if (!('error' in result)) {
+      expect(result.id).toBe('unsplash');
+      expect(result.baseUrl).toBe('https://api.unsplash.com');
+      expect(result.apiKey).toBe('test-unsplash-key');
     }
   });
 
@@ -355,5 +383,70 @@ describe('resolveFetchProvider', () => {
     const result = resolveFetchProvider(settings);
     expect(result).not.toBeNull();
     expect(result!.id).toBe('firecrawl');
+  });
+});
+
+describe('resolveImageSearchProvider', () => {
+  let originalEnv: NodeJS.ProcessEnv;
+
+  beforeEach(() => {
+    originalEnv = { ...process.env };
+    delete process.env.DASHSCOPE_API_KEY;
+    delete process.env.UNSPLASH_ACCESS_KEY;
+  });
+
+  afterEach(() => {
+    process.env = originalEnv;
+  });
+
+  it('uses imageSearch.provider when set', () => {
+    const settings: WebToolSettings = {
+      imageSearch: { provider: 'unsplash' },
+      providers: { unsplash: { apiKey: 'key' } },
+    };
+    const result = resolveImageSearchProvider(settings);
+    expect(result).not.toHaveProperty('error');
+    if (!('error' in result)) {
+      expect(result.id).toBe('unsplash');
+    }
+  });
+
+  it('auto-selects dashscope first when both have keys', () => {
+    const settings: WebToolSettings = {
+      providers: {
+        dashscope: { apiKey: 'dashscope-key' },
+        unsplash: { apiKey: 'unsplash-key' },
+      },
+    };
+    const result = resolveImageSearchProvider(settings);
+    expect(result).not.toHaveProperty('error');
+    if (!('error' in result)) {
+      expect(result.id).toBe('dashscope');
+    }
+  });
+
+  it('auto-selects unsplash when only it has a key', () => {
+    const settings: WebToolSettings = {
+      providers: { unsplash: { apiKey: 'unsplash-key' } },
+    };
+    const result = resolveImageSearchProvider(settings);
+    expect(result).not.toHaveProperty('error');
+    if (!('error' in result)) {
+      expect(result.id).toBe('unsplash');
+    }
+  });
+
+  it('returns error when no image search provider has key', () => {
+    const result = resolveImageSearchProvider({});
+    expect(result).toHaveProperty('error');
+  });
+
+  it('returns error when imageSearch.provider does not support image search', () => {
+    const settings: WebToolSettings = {
+      imageSearch: { provider: 'openai' },
+      providers: { openai: { apiKey: 'key' } },
+    };
+    const result = resolveImageSearchProvider(settings);
+    expect(result).toHaveProperty('error');
   });
 });

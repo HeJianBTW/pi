@@ -3,33 +3,42 @@ import type { ResolvedProvider, SearchParams, SearchResponse, SearchResult } fro
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 
+const VARIANTS = {
+  openai: { name: 'OpenAI', envVar: 'OPENAI_API_KEY', model: 'gpt-5.5' },
+  deepseek: { name: 'DeepSeek', envVar: 'DEEPSEEK_API_KEY', model: 'deepseek-v4-flash' },
+  dashscope: { name: 'DashScope', envVar: 'DASHSCOPE_API_KEY', model: 'qwen3.7-plus' },
+} as const;
+
+export interface ResponsesApiStatus {
+  status?: string;
+  error?: { message?: string } | null;
+}
+
 export class OpenAIProvider extends BaseProvider {
-  constructor(readonly id: 'openai' | 'deepseek' = 'openai') {
+  protected readonly defaultTimeoutMs: number = DEFAULT_TIMEOUT_MS;
+
+  constructor(readonly id: keyof typeof VARIANTS = 'openai') {
     super();
   }
 
-  override async search(params: SearchParams, provider: ResolvedProvider): Promise<SearchResponse> {
-    const name = this.id === 'deepseek' ? 'DeepSeek' : 'OpenAI';
-    const envVar = this.id === 'deepseek' ? 'DEEPSEEK_API_KEY' : 'OPENAI_API_KEY';
+  protected get defaultModel(): string {
+    return VARIANTS[this.id].model;
+  }
+
+  /** POST the Responses API with shared auth, HTTP-error, and failed-status handling. */
+  protected async postResponses<T extends ResponsesApiStatus>(
+    provider: ResolvedProvider,
+    body: unknown,
+  ): Promise<T> {
+    const variant = VARIANTS[this.id];
+    const name = variant.name;
     if (!provider.apiKey) {
-      throw new Error(`${name} API key not configured. Set ${envVar} or configure settings.json.`);
+      throw new Error(
+        `${name} API key not configured. Set ${variant.envVar} or configure settings.json.`,
+      );
     }
 
     const url = `${provider.baseUrl.replace(/\/$/, '')}/responses`;
-    const tool: Record<string, unknown> = { type: 'web_search' };
-    if (params.includeDomains?.length || params.excludeDomains?.length) {
-      const filters: Record<string, unknown> = {};
-      if (params.includeDomains?.length) filters.allowed_domains = params.includeDomains;
-      if (params.excludeDomains?.length) filters.blocked_domains = params.excludeDomains;
-      tool.filters = filters;
-    }
-
-    const body = {
-      model: provider.model ?? (this.id === 'deepseek' ? 'deepseek-v4-flash' : 'gpt-5.5'),
-      instructions: SEARCH_SYSTEM_PROMPT,
-      input: `${getEnvironmentContext()}\n\n${params.query}`,
-      tools: [tool],
-    };
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${provider.apiKey}`,
@@ -40,14 +49,38 @@ export class OpenAIProvider extends BaseProvider {
       method: 'POST',
       headers,
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(provider.timeoutMs ?? DEFAULT_TIMEOUT_MS),
+      signal: AbortSignal.timeout(provider.timeoutMs ?? this.defaultTimeoutMs),
     });
     if (!response.ok) {
       const text = await response.text().catch(() => '');
-      throw new Error(`${name} API error ${response.status}: ${text}`);
+      throw new Error(`${name} API error ${response.status}: ${text.slice(0, 300)}`);
     }
 
-    const data = (await response.json()) as {
+    const data = (await response.json()) as T;
+    if (data.status === 'failed') {
+      const detail = (data.error?.message ?? 'unknown error').slice(0, 300);
+      console.error(`[pi-web-access] ${name} response failed: ${detail}`);
+      throw new Error(`${name} API response failed.`);
+    }
+    return data;
+  }
+
+  override async search(params: SearchParams, provider: ResolvedProvider): Promise<SearchResponse> {
+    const name = VARIANTS[this.id].name;
+
+    const tool: Record<string, unknown> = { type: 'web_search' };
+    // DashScope's Responses API supports only basic web_search; domain filters are unsupported.
+    if (
+      this.id !== 'dashscope' &&
+      (params.includeDomains?.length || params.excludeDomains?.length)
+    ) {
+      const filters: Record<string, unknown> = {};
+      if (params.includeDomains?.length) filters.allowed_domains = params.includeDomains;
+      if (params.excludeDomains?.length) filters.blocked_domains = params.excludeDomains;
+      tool.filters = filters;
+    }
+
+    const data = await this.postResponses<{
       status?: string;
       error?: { message?: string } | null;
       incomplete_details?: { reason?: string } | null;
@@ -61,13 +94,12 @@ export class OpenAIProvider extends BaseProvider {
         }>;
         action?: { type: string; url?: string };
       }>;
-    };
-
-    if (data.status === 'failed') {
-      const detail = (data.error?.message ?? 'unknown error').slice(0, 300);
-      console.error(`[pi-web-access] ${name} response failed: ${detail}`);
-      throw new Error(`${name} API response failed.`);
-    }
+    }>(provider, {
+      model: provider.model ?? this.defaultModel,
+      instructions: SEARCH_SYSTEM_PROMPT,
+      input: `${getEnvironmentContext()}\n\n${params.query}`,
+      tools: [tool],
+    });
 
     let answer = '';
     const results: SearchResult[] = [];
