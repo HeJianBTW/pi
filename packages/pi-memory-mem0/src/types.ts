@@ -3,11 +3,19 @@
  */
 
 export type Mem0Mode = 'platform' | 'embedded' | 'self-hosted';
+export type Mem0MemoryMode = 'hybrid' | 'active' | 'passive';
 export type MemoryUserIdScope = 'project' | 'exact';
 
 export interface Mem0ExtensionConfig {
   /** Mem0 Cloud, in-process OSS, or a remote OSS server. Default: "platform". */
   mode?: Mem0Mode;
+
+  /**
+   * Memory behavior: "passive" = automatic capture + recall injection only,
+   * "active" = LLM-callable mem0_memory tool only, "hybrid" = both.
+   * Default: "hybrid".
+   */
+  memoryMode?: Mem0MemoryMode;
 
   // ── Remote modes ─────────────────────────────────────────────────────────
   /** Mem0 API key. Supports ${MEM0_API_KEY}. */

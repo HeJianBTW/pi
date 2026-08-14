@@ -1,15 +1,23 @@
 /**
- * pi-memory-mem0 — Passive semantic memory extension powered by Mem0.
+ * pi-memory-mem0 — Semantic memory extension powered by Mem0.
  *
- * Modes:
+ * Backend modes:
  * - **platform**: Uses Mem0 Cloud API (needs MEM0_API_KEY)
  * - **embedded**: Runs Mem0 OSS in-process
  * - **self-hosted**: Calls a remote Mem0 OSS REST server
  *
- * After each conversation turn, user + assistant messages are sent to Mem0
- * for fact extraction and storage (credentials are redacted first). Recalled
- * memories are injected as a custom message (delivered to the model on the
- * user channel, never the system prompt) and wrapped as untrusted data.
+ * Memory modes (config "memoryMode"):
+ * - **passive**: automatic capture + recall injection only
+ * - **active**: LLM-callable mem0_memory tool only
+ * - **hybrid** (default): both
+ *
+ * Passive side: after each conversation turn, user + assistant messages are
+ * sent to Mem0 for fact extraction and storage (credentials are redacted
+ * first). Recalled memories are injected as a custom message (delivered to
+ * the model on the user channel, never the system prompt) and wrapped as
+ * untrusted data. Active side: the mem0_memory tool lets the agent search,
+ * add, list, and delete memories on its own initiative, under the same
+ * redaction and untrusted-data boundaries.
  *
  * Configuration via settings.json key "pi-memory-mem0".
  * Supports ${ENV_VAR:-fallback} in user and agent settings.
@@ -20,7 +28,13 @@ import { isProjectTrusted, loadPiSettings } from '@amaster.ai/pi-shared/settings
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Prefetch } from './prefetch.js';
 import { formatRecalledMemory, redactMemoryText, scopeMemoryUserId } from './privacy.js';
-import { createMem0Provider, type Mem0Provider, normalizeMem0Mode } from './provider.js';
+import {
+  createMem0Provider,
+  type Mem0Provider,
+  normalizeMem0Mode,
+  normalizeMemoryMode,
+} from './provider.js';
+import { createMem0MemoryTool } from './tools.js';
 import type { Mem0ExtensionConfig, MemoryUserIdScope } from './types.js';
 
 const SETTINGS_KEY = 'pi-memory-mem0';
@@ -50,21 +64,31 @@ export default function mem0Extension(pi: ExtensionAPI): void {
   let prefetch: Prefetch | undefined;
   let userId = '';
   let activeMode = '';
+  let activeMemoryMode = '';
+  let activeToolEnabled = false;
   let lastUserText = '';
   let pendingWrite: Promise<void> = Promise.resolve();
+  let sessionEpoch = 0;
 
   pi.on('session_start', async (_event, ctx) => {
+    // A newer session_start (or shutdown) can run while this handler is still
+    // awaiting provider init (embedded init takes seconds). The epoch check
+    // after the await keeps the superseded handler from clobbering the live
+    // session's provider, prefetch, and tool-enablement state.
+    const epoch = ++sessionEpoch;
     provider = undefined;
     prefetch = undefined;
+    activeToolEnabled = false;
     const config = loadConfig(ctx.cwd, isProjectTrusted(ctx));
     try {
       const mode = normalizeMem0Mode(config.mode);
+      const memoryMode = normalizeMemoryMode(config.memoryMode);
       if (mode === 'platform' && !config.apiKey?.trim()) {
         ctx.ui.setStatus(STATUS_KEY, 'mem0: disabled (no API key)');
         return;
       }
       const resolvedUserId = resolveUserId(config.userId, config.userIdScope);
-      provider = await createMem0Provider({
+      const newProvider = await createMem0Provider({
         config,
         resolveProvider: async (providerName: string) => {
           const registry = ctx.modelRegistry as {
@@ -91,10 +115,30 @@ export default function mem0Extension(pi: ExtensionAPI): void {
           return result;
         },
       });
+      if (epoch !== sessionEpoch) return;
+      provider = newProvider;
       userId = scopeMemoryUserId(resolvedUserId, ctx.cwd, config.userIdScope);
       activeMode = mode;
-      prefetch = new Prefetch(provider, userId, { topK: config.topK ?? 5 });
+      activeMemoryMode = memoryMode;
+      if (memoryMode !== 'active') {
+        prefetch = new Prefetch(provider, userId, { topK: config.topK ?? 5 });
+      }
+      if (memoryMode !== 'passive') {
+        activeToolEnabled = true;
+        pi.registerTool(
+          createMem0MemoryTool({
+            getProvider: () => provider,
+            getUserId: () => userId,
+            isEnabled: () => activeToolEnabled,
+            topK: config.topK ?? 5,
+          }),
+        );
+      }
     } catch (err) {
+      if (epoch !== sessionEpoch) return;
+      provider = undefined;
+      prefetch = undefined;
+      activeToolEnabled = false;
       ctx.ui.setStatus(STATUS_KEY, 'mem0: init failed');
       ctx.ui.notify(
         `Mem0 init failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -103,7 +147,7 @@ export default function mem0Extension(pi: ExtensionAPI): void {
       return;
     }
 
-    ctx.ui.setStatus(STATUS_KEY, `mem0: ${activeMode}`);
+    ctx.ui.setStatus(STATUS_KEY, `mem0: ${activeMode}/${activeMemoryMode}`);
   });
 
   pi.on('input', async (event) => {
@@ -116,7 +160,7 @@ export default function mem0Extension(pi: ExtensionAPI): void {
   });
 
   pi.on('turn_end', async (event) => {
-    if (!provider || !lastUserText) return;
+    if (!provider || !prefetch || !lastUserText) return;
 
     const msg = event.message as { role?: string; content?: unknown };
     const text = extractText(msg);
@@ -166,15 +210,18 @@ export default function mem0Extension(pi: ExtensionAPI): void {
   });
 
   pi.on('session_shutdown', async () => {
+    sessionEpoch++;
     await pendingWrite;
     provider = undefined;
     prefetch = undefined;
+    activeToolEnabled = false;
     lastUserText = '';
     pendingWrite = Promise.resolve();
   });
 
   pi.registerCommand('mem0', {
-    description: 'Mem0 memory commands. Subcommands: status, search <query>, profile.',
+    description:
+      'Mem0 memory commands. Subcommands: status, search <query>, profile, add <text>, delete <id>.',
     handler: async (args, ctx) => {
       if (!provider) {
         ctx.ui.notify('Mem0 is not active.', 'warning');
@@ -187,7 +234,7 @@ export default function mem0Extension(pi: ExtensionAPI): void {
 
       switch (subcommand) {
         case 'status': {
-          ctx.ui.notify(`Mem0: active (mode: ${activeMode})`, 'info');
+          ctx.ui.notify(`Mem0: active (mode: ${activeMode}/${activeMemoryMode})`, 'info');
           break;
         }
         case 'search': {
@@ -221,8 +268,38 @@ export default function mem0Extension(pi: ExtensionAPI): void {
           }
           break;
         }
+        case 'add': {
+          if (!rest) {
+            ctx.ui.notify('Usage: /mem0 add <text>', 'warning');
+            break;
+          }
+          const result = await provider.add([{ role: 'user', content: redactMemoryText(rest) }], {
+            userId,
+            ...(ctx.signal ? { signal: ctx.signal } : {}),
+          });
+          const created = result?.results ?? [];
+          if (created.length === 0) {
+            ctx.ui.notify('No memory was extracted from the provided text.', 'info');
+          } else {
+            const lines = created.map((m, i) => `${i + 1}. ${formatRecalledMemory(m.memory)}`);
+            ctx.ui.notify(`Mem0 saved ${created.length}:\n${lines.join('\n')}`, 'info');
+          }
+          break;
+        }
+        case 'delete': {
+          if (!rest) {
+            ctx.ui.notify('Usage: /mem0 delete <memory-id>', 'warning');
+            break;
+          }
+          await provider.delete(rest, ctx.signal ? { signal: ctx.signal } : {});
+          ctx.ui.notify(`Deleted memory ${rest}.`, 'info');
+          break;
+        }
         default:
-          ctx.ui.notify('Unknown subcommand. Available: status, search, profile.', 'warning');
+          ctx.ui.notify(
+            'Unknown subcommand. Available: status, search, profile, add, delete.',
+            'warning',
+          );
       }
     },
   });

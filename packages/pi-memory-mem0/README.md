@@ -2,11 +2,13 @@
 
 ![pi-memory-mem0 preview](https://raw.githubusercontent.com/TGYD-helige/pi/master/packages/pi-memory-mem0/preview.png)
 
-Passive semantic memory extension powered by [Mem0](https://mem0.ai), with Platform, embedded, and self-hosted modes.
+Semantic memory extension powered by [Mem0](https://mem0.ai), with Platform, embedded, and self-hosted backends and three memory modes (hybrid, active, passive).
 
 ## How It Works
 
-After each conversation turn, the user + assistant messages are automatically sent to Mem0 for fact extraction and storage. When you send a prompt, a semantic search is prefetched in the background and relevant memories are recalled before the agent starts — **zero effort required**.
+**Passive side**: after each conversation turn, the user + assistant messages are automatically sent to Mem0 for fact extraction and storage. When you send a prompt, a semantic search is prefetched in the background and relevant memories are recalled before the agent starts — **zero effort required**.
+
+**Active side**: the agent gets a `mem0_memory` tool (`search` / `add` / `get_all` / `delete`) so it can look up and manage memories on its own initiative — same idea as the official `@mem0/pi-agent-plugin`, but backed by this package's provider abstraction, so it works with Platform, embedded, **and** self-hosted Mem0.
 
 Safety boundaries:
 
@@ -17,11 +19,30 @@ Safety boundaries:
 
 ## Modes
 
+### Backend Modes
+
 | Mode | Vector Store | Persistence | Dependencies | Use Case |
 |------|-------------|-------------|--------------|----------|
 | `platform` | Mem0 Cloud | Cloud-managed | `MEM0_API_KEY` | Quick start, multi-device sync |
 | `embedded` | Mem0 OSS vector store | Vector-store managed | LLM + Embedding API | Data privacy, no Mem0 Cloud |
 | `self-hosted` | Mem0 OSS REST server | Server-managed | Server URL, optional API key | Shared infrastructure |
+
+### Memory Modes
+
+| `memoryMode` | Auto capture + recall | `mem0_memory` tool | Use Case |
+|--------------|----------------------|--------------------|----------|
+| `hybrid` (default) | ✅ | ✅ | Best recall: automatic context plus agent-driven lookup |
+| `active` | ❌ | ✅ | No background traffic; the agent decides every read/write |
+| `passive` | ✅ | ❌ | Zero tool surface; fully automatic memory |
+
+```json
+{
+  "pi-memory-mem0": {
+    "mode": "embedded",
+    "memoryMode": "hybrid"
+  }
+}
+```
 
 ## Architecture (Embedded Mode)
 
@@ -165,6 +186,7 @@ The configured vector store always owns persistence. To request an intentionally
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `mode` | `"platform"` \| `"embedded"` \| `"self-hosted"` | `"platform"` | Operating mode |
+| `memoryMode` | `"hybrid"` \| `"active"` \| `"passive"` | `"hybrid"` | Memory behavior: tool + automation, tool only, or automation only |
 | `apiKey` | string | — | Platform or self-hosted API key. Supports `${MEM0_API_KEY}` |
 | `baseUrl` | string | `https://api.mem0.ai` | Platform override; required for self-hosted mode |
 | `requestTimeoutMs` | number | `30000` | Self-hosted request timeout |
@@ -222,22 +244,39 @@ The default Embedded configuration depends on `better-sqlite3` (native addon, tr
 
 If `better-sqlite3` fails to load (for example, because of a Node ABI mismatch), the default `memory` vector store cannot start. An external vector store can still be used with history disabled or configured to a working provider.
 
+## Tools
+
+When `memoryMode` is `hybrid` or `active`, the agent gets one action-dispatched tool:
+
+```
+mem0_memory(action="search", query="...")        # Semantic search over memories
+mem0_memory(action="add", content="...")         # Store a durable fact
+mem0_memory(action="get_all")                    # List every stored memory
+mem0_memory(action="delete", memory_id="...")    # Remove a memory by id
+```
+
+Stored content is credential-redacted first; results are returned with the same
+`[UNTRUSTED MEMORY DATA]` wrapping as passive recall, including the memory ids
+needed for `delete`.
+
 ## Commands
 
 ```
 /mem0 status          # Show current status
 /mem0 search <query>  # Semantic search
 /mem0 profile         # List all memories
+/mem0 add <text>      # Store a memory manually
+/mem0 delete <id>     # Remove a memory by id
 ```
 
 ## Relationship with pi-memory
 
 `pi-memory-mem0` and `pi-memory` run **independently in parallel** as separate extensions:
 
-- `pi-memory`: Active memory — the agent explicitly manages memories via tools, local `.md` files, hard char limits
-- `pi-memory-mem0`: Passive memory — automatic extraction/storage and semantic recall, no capacity limits
+- `pi-memory`: Curated memory — the agent explicitly manages memories via the `memory_add` / `memory_replace` / `memory_remove` / `memory_read` tools, local `.md` files, hard char limits
+- `pi-memory-mem0`: Semantic memory — automatic extraction/storage and semantic recall (passive), plus the `mem0_memory` tool for agent-driven semantic lookup (active); no capacity limits
 
-They do not interfere with each other. `pi-memory-mem0` injects recalled text as a
+They do not interfere with each other, and their tool names do not collide. `pi-memory-mem0` injects recalled text as a
 custom user-channel message (never the system prompt); `pi-memory` injects its own
 context separately.
 

@@ -1,7 +1,7 @@
 {
   "name": "@amaster.ai/pi-memory-mem0",
   "version": "0.1.2-beta.15",
-  "description": "Passive Mem0 semantic memory for pi — automatic capture, semantic recall. Platform, embedded, or self-hosted.",
+  "description": "Mem0 semantic memory for pi — automatic capture, semantic recall, and an agent-callable memory tool. Platform, embedded, or self-hosted.",
   "keywords": ["pi-package", "pi", "extension", "memory", "mem0", "semantic-search", "sqlite"],
   "license": "Apache-2.0",
   "type": "module",
@@ -54,10 +54,14 @@
     "mem0ai": "3.0.7"
   },
   "peerDependencies": {
+    "@earendil-works/pi-ai": ">=0.80.10",
     "@earendil-works/pi-coding-agent": ">=0.79.1",
     "typebox": "*"
   },
   "peerDependenciesMeta": {
+    "@earendil-works/pi-ai": {
+      "optional": true
+    },
     "@earendil-works/pi-coding-agent": {
       "optional": true
     },
@@ -66,6 +70,7 @@
     }
   },
   "devDependencies": {
+    "@earendil-works/pi-ai": "0.80.10",
     "@earendil-works/pi-coding-agent": "0.80.10",
     "typebox": "*",
     "vitest": "^4.0.0"

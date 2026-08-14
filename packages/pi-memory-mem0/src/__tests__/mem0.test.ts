@@ -2,7 +2,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { KeyResolver, ProviderResolver } from '../provider.js';
-import { formatObservedAt, mapApiToMem0Provider, rewriteObservationDate } from '../provider.js';
+import {
+  formatObservedAt,
+  mapApiToMem0Provider,
+  normalizeMemoryMode,
+  rewriteObservationDate,
+} from '../provider.js';
 
 vi.mock('@amaster.ai/pi-shared/settings', async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
@@ -468,5 +473,26 @@ describe('rewriteObservationDate', () => {
   it('is a no-op when the sections are absent', () => {
     const plain = 'no date sections here';
     expect(rewriteObservationDate(plain, '2023-05-08')).toBe(plain);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// normalizeMemoryMode
+// ---------------------------------------------------------------------------
+
+describe('normalizeMemoryMode', () => {
+  it('defaults to hybrid when unset', () => {
+    expect(normalizeMemoryMode(undefined)).toBe('hybrid');
+    expect(normalizeMemoryMode(null)).toBe('hybrid');
+  });
+
+  it('accepts the three supported memory modes', () => {
+    expect(normalizeMemoryMode('hybrid')).toBe('hybrid');
+    expect(normalizeMemoryMode('active')).toBe('active');
+    expect(normalizeMemoryMode('passive')).toBe('passive');
+  });
+
+  it('rejects an unsupported memory mode', () => {
+    expect(() => normalizeMemoryMode('auto')).toThrow('Unsupported memory mode: auto');
   });
 });
