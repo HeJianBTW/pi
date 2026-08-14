@@ -15,7 +15,13 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { resolveHome } from '@amaster.ai/pi-shared/settings';
-import type { AddResult, Mem0ExtensionConfig, Mem0Mode, MemoryItem } from './types.js';
+import type {
+  AddResult,
+  Mem0ExtensionConfig,
+  Mem0MemoryMode,
+  Mem0Mode,
+  MemoryItem,
+} from './types.js';
 
 // ---------------------------------------------------------------------------
 // Provider Interface
@@ -42,6 +48,14 @@ export function normalizeMem0Mode(mode: unknown): Mem0Mode {
   if (mode === 'open-source') return 'embedded';
   if (mode === 'platform' || mode === 'embedded' || mode === 'self-hosted') return mode;
   throw new Error(`Unsupported Mem0 mode: ${String(mode)}`);
+}
+
+export function normalizeMemoryMode(memoryMode: unknown): Mem0MemoryMode {
+  if (memoryMode === undefined || memoryMode === null) return 'hybrid';
+  if (memoryMode === 'hybrid' || memoryMode === 'active' || memoryMode === 'passive') {
+    return memoryMode;
+  }
+  throw new Error(`Unsupported memory mode: ${String(memoryMode)}`);
 }
 
 // ---------------------------------------------------------------------------

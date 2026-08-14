@@ -22,6 +22,20 @@ export const fullMatrix = [
     assert_pattern: 'ci-probe=alpha',
   },
   {
+    extension: 'pi-memory-mem0',
+    tools: 'mem0_memory',
+    // Standalone mem0 job, default memoryMode=hybrid: the mem0_memory tool is
+    // registered (active side, asserted here) while turn_end capture keeps
+    // writing to the embedded store (passive side, asserted by the sqlite
+    // verify steps). "codeword" avoids the capture-path credential redaction.
+    // The trailing "my X is Y" fact gives the passive extractor something to
+    // keep — bare instructions extract nothing.
+    prompt: 'Step 1 — call mem0_memory with action=add and content="my CI probe codeword is ci-mem0-active-3315". Step 2 — call mem0_memory with action=search and query="CI probe codeword", then quote the codeword you found. Use the tool exactly once per step. A fact about me: my CI probe codeword is ci-mem0-active-3315.',
+    assert_pattern: 'ci-mem0-active',
+    assert_tool: 'mem0_memory',
+    assert_tool_pattern: 'ci-mem0-active',
+  },
+  {
     extension: 'pi-task-scheduler',
     tools: 'scheduler_list',
     prompt: 'Use the scheduler_list tool exactly once to list scheduled tasks, then tell me how many tasks there are.',
@@ -138,6 +152,9 @@ export function selectIntegrationMatrix(changedFiles, { forceAll = false } = {})
     const packageName = /^packages\/([^/]+)\//.exec(file)?.[1];
     const extension = packageAliases.get(packageName) || packageName;
     if (testedExtensions.has(extension)) selected.add(extension);
+    // A package with its own dedicated entry runs it alongside any aliased
+    // companion job (pi-memory-mem0 runs both pi-memory and its own).
+    if (testedExtensions.has(packageName)) selected.add(packageName);
     if (file === 'tests/computer-use-owner-exit.mjs') selected.add('pi-computer-use');
   }
   return fullMatrix.filter((entry) => selected.has(entry.extension));

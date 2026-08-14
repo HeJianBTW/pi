@@ -20,7 +20,7 @@ test('selects every scenario for a changed extension', () => {
 test('routes companion packages and package-specific integration tests', () => {
   assert.deepEqual(
     selectIntegrationMatrix(['packages/pi-memory-mem0/src/index.ts']).map(({ extension }) => extension),
-    ['pi-memory'],
+    ['pi-memory', 'pi-memory-mem0'],
   );
   assert.deepEqual(
     selectIntegrationMatrix(['tests/computer-use-owner-exit.mjs']).map(({ extension }) => extension),
