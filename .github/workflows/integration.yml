@@ -412,6 +412,10 @@ jobs:
 
           # 2. settings.json — extension-specific configuration. Every matrix
           #    entry carries any keys it needs; absent extensions ignore them.
+          #    pi-memory-mem0's historyDbPath MUST stay on the per-job temp dir:
+          #    its default (~/.pi/agent/memories/) is shared by every matrix job
+          #    on this self-hosted host, and concurrent better-sqlite3 writers
+          #    on one file segfault the pi process (exit 139).
           cat > "$PI_CODING_AGENT_DIR/settings.json" <<EOF
           {
             "pi-teamwork": {
@@ -445,6 +449,7 @@ jobs:
                     "dbPath": "${RUNNER_TEMP}/pi-mem0/mem0-vectors.db"
                   }
                 },
+                "historyDbPath": "${RUNNER_TEMP}/pi-mem0/mem0-history.db",
                 "embedder": {
                   "provider": "deepseek-integration",
                   "config": { "model": "text-embedding-v4" }
