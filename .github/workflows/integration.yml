@@ -787,11 +787,16 @@ jobs:
             echo "::error::pi exited non-zero ($rc) for ${{ matrix.extension }}"
             exit 1
           fi
+          # The stream can carry non-JSON stderr lines from extensions (e.g.
+          # pi-memory-mem0's DEBUG capture diagnostic, enabled step-wide below)
+          # — every jq consumption filters to parseable events first, or slurp
+          # assertions die with a parse error instead of testing anything.
+          EVENTS_JSON="$(jq -R 'fromjson? // empty' <<<"$output" 2>/dev/null || true)"
           # Pretty-print the salient events so failures are diagnosable at a
           # glance. `jq` is preinstalled on the runner image.
           if command -v jq >/dev/null 2>&1; then
             echo "--- tool calls ---"
-            jq -rc 'select(.type == "tool_execution_start" or .type == "tool_execution_end") | .' <<<"$output" || true
+            jq -rc 'select(.type == "tool_execution_start" or .type == "tool_execution_end") | .' <<<"$EVENTS_JSON" || true
             echo "--- tool errors (isError=true OR result text starts with Error:) ---"
             # Match both proper isError tool results AND tools that smuggle
             # errors into a normal text result (e.g. multica adapter today).
@@ -805,13 +810,13 @@ jobs:
                   )
                 )
               | {tool: .toolName, isError: .isError, result: .result}
-            ' <<<"$output" || true
+            ' <<<"$EVENTS_JSON" || true
             echo "--- final assistant text ---"
             ASSISTANT_TEXT=$(jq -rs '
               map(select(.type == "message_end" and .message.role == "assistant") | .message.content[]?
                 | select(.type == "text") | .text)
               | join("\n")
-            ' <<<"$output" 2>/dev/null || echo "")
+            ' <<<"$EVENTS_JSON" 2>/dev/null || echo "")
             echo "$ASSISTANT_TEXT"
             echo "------------------"
           else
@@ -858,7 +863,7 @@ jobs:
                     or ((.result.details // {}) | tostring | test($pattern; "i"))
                   )
                 )
-              ' <<<"$output" >/dev/null; then
+              ' <<<"$EVENTS_JSON" >/dev/null; then
               echo "::error::${{ matrix.assert_tool }} did not return '${{ matrix.assert_tool_pattern || matrix.assert_pattern }}' successfully"
               exit 1
             fi
@@ -870,7 +875,7 @@ jobs:
               --argjson expected_count '${{ matrix.assert_tool_count || 0 }}' '
                 ([.[] | select(.type == "tool_execution_start" and .toolName == $tool)] | length)
                 == $expected_count
-              ' <<<"$output" >/dev/null; then
+              ' <<<"$EVENTS_JSON" >/dev/null; then
               echo "::error::${{ matrix.assert_tool }} was not called exactly ${{ matrix.assert_tool_count }} time(s)"
               exit 1
             fi

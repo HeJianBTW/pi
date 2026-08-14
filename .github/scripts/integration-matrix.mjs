@@ -28,7 +28,9 @@ export const fullMatrix = [
     // registered (active side, asserted here) while turn_end capture keeps
     // writing to the embedded store (passive side, asserted by the sqlite
     // verify steps). "codeword" avoids the capture-path credential redaction.
-    prompt: 'Step 1 — call mem0_memory with action=add and content="my CI probe codeword is ci-mem0-active-3315". Step 2 — call mem0_memory with action=search and query="CI probe codeword", then quote the codeword you found. Use the tool exactly once per step.',
+    // The trailing "my X is Y" fact gives the passive extractor something to
+    // keep — bare instructions extract nothing.
+    prompt: 'Step 1 — call mem0_memory with action=add and content="my CI probe codeword is ci-mem0-active-3315". Step 2 — call mem0_memory with action=search and query="CI probe codeword", then quote the codeword you found. Use the tool exactly once per step. A fact about me: my CI probe codeword is ci-mem0-active-3315.',
     assert_pattern: 'ci-mem0-active',
     assert_tool: 'mem0_memory',
     assert_tool_pattern: 'ci-mem0-active',
