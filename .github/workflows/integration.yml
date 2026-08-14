@@ -436,6 +436,7 @@ jobs:
             },
             "pi-memory-mem0": {
               "mode": "open-source",
+              "memoryMode": "hybrid",
               "userId": "ci-integration",
               "oss": {
                 "vectorStore": {
@@ -979,11 +980,11 @@ jobs:
             rm -f "$GOAL_FILE"
           fi
 
-      - name: Verify pi-memory-mem0 captured turn (memory job only)
-        if: matrix.extension == 'pi-memory' && env.PI_INTEGRATION_BASE_URL != ''
+      - name: Verify pi-memory-mem0 captured turn (mem0 jobs only)
+        if: (matrix.extension == 'pi-memory' || matrix.extension == 'pi-memory-mem0') && env.PI_INTEGRATION_BASE_URL != ''
         run: |
           set -euo pipefail
-          # pi-memory-mem0 is passive: its turn_end hook sends each
+          # pi-memory-mem0's passive side: its turn_end hook sends each
           # user+assistant turn to mem0 (embedded mode) for fact extraction,
           # and session_shutdown flushes the pending write before pi exits.
           # Vectors land in the SQLite path configured in settings.json
@@ -1029,8 +1030,8 @@ jobs:
           fi
           echo "✓ mem0 OSS pipeline verified end-to-end."
 
-      - name: Verify pi-memory mem0 vector dedup (memory job only)
-        if: matrix.extension == 'pi-memory' && env.PI_INTEGRATION_BASE_URL != '' && env.PI_INTEGRATION_API_KEY != ''
+      - name: Verify pi-memory mem0 vector dedup (mem0 jobs only)
+        if: (matrix.extension == 'pi-memory' || matrix.extension == 'pi-memory-mem0') && env.PI_INTEGRATION_BASE_URL != '' && env.PI_INTEGRATION_API_KEY != ''
         run: |
           set -euo pipefail
           if ! command -v sqlite3 >/dev/null 2>&1; then
