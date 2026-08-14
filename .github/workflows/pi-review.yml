@@ -69,6 +69,10 @@ jobs:
       - name: Install latest Pi review runtime
         run: |
           set -euo pipefail
+          # The runner's host-level proxy refuses npmmirror CDN subdomains;
+          # bypass it for the mirror (same as setup-pi-build).
+          export NO_PROXY="${NO_PROXY:+$NO_PROXY,}registry.npmmirror.com,npmmirror.com,.npmmirror.com"
+          export no_proxy="${no_proxy:+$no_proxy,}registry.npmmirror.com,npmmirror.com,.npmmirror.com"
           npm install --global --ignore-scripts @earendil-works/pi-coding-agent@latest
           npm install --prefix "$PI_CODING_AGENT_DIR/review-runtime" --ignore-scripts pi-subagents@latest
           pi --version
