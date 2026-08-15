@@ -120,6 +120,21 @@ jobs:
           }
           EOF
 
+      # The pi-video-gen test suites execute real FFmpeg binaries (ffmpeg +
+      # ffprobe). Unpack the exact published linux-x64 platform package the
+      # release will pin, so checks validate the binaries users will install.
+      - name: Unpack published FFmpeg binaries for checks
+        run: |
+          platform_dir="packages/pi-video-gen/platforms/ffmpeg-linux-x64"
+          name="$(node -p "require('./${platform_dir}/package.json').name")"
+          version="$(node -p "require('./${platform_dir}/package.json').version")"
+          tarball="$(npm pack "${name}@${version}" --silent)"
+          mkdir -p "${platform_dir}/bin"
+          tar -xzf "${tarball}" -C "${platform_dir}/bin" --strip-components=2 package/bin
+          rm -f "${tarball}"
+          "${platform_dir}/bin/ffmpeg" -version
+          "${platform_dir}/bin/ffprobe" -version
+
       - name: Ensure release branch
         run: |
           if [ "${GITHUB_REF_NAME}" != "master" ]; then
