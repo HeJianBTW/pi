@@ -141,6 +141,8 @@ describe('pi-video-gen package artifacts', () => {
     expect(publishWorkflow).not.toContain('pi-video-gen-ffmpeg-');
     expect(publishWorkflow).not.toContain('platformPackageFiles');
     expect(publishWorkflow).toContain('Verify FFmpeg platform packages are published');
+    expect(publishWorkflow).toContain('Unpack published FFmpeg binaries for checks');
+    expect(publishWorkflow).toContain('npm pack');
     expect(publishWorkflow).toContain('build_ffmpeg');
     expect(publishWorkflow).toContain('uses: ./.github/workflows/ffmpeg-build.yml');
   });
