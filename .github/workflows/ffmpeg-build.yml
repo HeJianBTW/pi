@@ -1,0 +1,335 @@
+name: Build pi-video-gen FFmpeg
+
+# FFmpeg platform packages (@amaster.ai/pi-video-gen-ffmpeg-*) are versioned
+# and published independently of the monorepo release: this workflow builds the
+# binaries, verifies them, and publishes the five platform packages at the
+# version committed in each platforms/ffmpeg-*/package.json. Committed versions
+# that already exist on npm are reused as-is and nothing is rebuilt. To ship
+# new FFmpeg binaries, bump those five versions in the same PR that changes
+# the build.
+
+on:
+  workflow_dispatch: {}
+  workflow_call: {}
+  push:
+    branches: [master]
+    paths:
+      - "packages/pi-video-gen/scripts/**"
+      - "packages/pi-video-gen/platforms/**"
+      - ".github/workflows/ffmpeg-build.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ffmpeg-build
+  cancel-in-progress: false
+
+jobs:
+  decide:
+    name: check for unpublished platform versions
+    runs-on:
+      - instance-hnpsq9go
+      - linux
+      - x64
+    timeout-minutes: 5
+    outputs:
+      missing: ${{ steps.check.outputs.missing }}
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+
+      - name: Compare committed versions with npm
+        id: check
+        run: |
+          missing=false
+          for dir in packages/pi-video-gen/platforms/ffmpeg-*; do
+            name="$(node -p "require('./${dir}/package.json').name")"
+            version="$(node -p "require('./${dir}/package.json').version")"
+            if npm view "${name}@${version}" version >/dev/null 2>&1; then
+              echo "already on npm: ${name}@${version}"
+            else
+              echo "to publish: ${name}@${version}"
+              missing=true
+            fi
+          done
+          echo "missing=${missing}" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: build pi-video-gen FFmpeg (${{ matrix.target }})
+    needs: decide
+    if: needs.decide.outputs.missing == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # darwin targets need macOS hosts; linux-* targets keep the pinned
+          # ubuntu-22.04 image for the published glibc baseline. win32-x64
+          # produces PE binaries via mingw (host-glibc-agnostic), so it runs
+          # on the accelerated self-hosted runner for reliable source
+          # downloads (ffmpeg.org, zlib.net, code.videolan.org).
+          - target: darwin-arm64
+            runner: macos-15
+          - target: darwin-x64
+            runner: macos-15-intel
+          - target: linux-x64
+            runner: ubuntu-22.04
+          - target: linux-arm64
+            runner: ubuntu-22.04
+          - target: win32-x64
+            runner: [instance-hnpsq9go, linux, x64]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+
+      - name: Install build dependencies
+        run: |
+          case "${{ matrix.target }}" in
+            darwin-*)
+              brew install nasm pkg-config
+              ;;
+            linux-x64)
+              sudo apt-get update
+              sudo apt-get install -y nasm pkg-config
+              ;;
+            linux-arm64)
+              sudo apt-get update
+              sudo apt-get install -y gcc-aarch64-linux-gnu pkg-config qemu-user
+              ;;
+            win32-x64)
+              # The self-hosted runner has Docker access but intentionally has
+              # no passwordless sudo. Install the cross toolchain inside an
+              # ephemeral container without mutating the host.
+              win_container="pi-video-gen-win32-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+              docker pull ubuntu:22.04
+              docker run --detach --rm --name "$win_container" \
+                --env HTTP_PROXY --env HTTPS_PROXY --env NO_PROXY \
+                --env http_proxy --env https_proxy --env no_proxy \
+                --volume "$GITHUB_WORKSPACE:/workspace" --workdir /workspace \
+                ubuntu:22.04 sleep infinity
+              docker exec "$win_container" sh -c '
+                export DEBIAN_FRONTEND=noninteractive
+                apt-get update
+                apt-get install -y --no-install-recommends \
+                  ca-certificates curl gcc gcc-mingw-w64-x86-64 libc6-dev make nasm pkg-config wine64 xz-utils
+              '
+              docker exec "$win_container" install -d \
+                -o "$(id -u)" -g "$(id -g)" /tmp/runner-home
+              ;;
+          esac
+
+      - name: Build minimal LGPL FFmpeg
+        run: |
+          if [ "${{ matrix.target }}" = win32-x64 ]; then
+            win_container="pi-video-gen-win32-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+            docker exec --user "$(id -u):$(id -g)" --env HOME=/tmp/runner-home \
+              "$win_container" packages/pi-video-gen/scripts/build-ffmpeg.sh win32-x64
+          else
+            packages/pi-video-gen/scripts/build-ffmpeg.sh "${{ matrix.target }}"
+          fi
+
+      - name: Build GPL FFmpeg variant (x264 for h264)
+        run: |
+          if [ "${{ matrix.target }}" = win32-x64 ]; then
+            win_container="pi-video-gen-win32-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+            docker exec --user "$(id -u):$(id -g)" --env HOME=/tmp/runner-home --env GPL_VARIANT=1 \
+              "$win_container" packages/pi-video-gen/scripts/build-ffmpeg.sh win32-x64
+          else
+            GPL_VARIANT=1 packages/pi-video-gen/scripts/build-ffmpeg.sh "${{ matrix.target }}"
+          fi
+
+      - name: Verify FFmpeg binary
+        shell: bash
+        run: |
+          bin="packages/pi-video-gen/platforms/ffmpeg-${{ matrix.target }}/bin/ffmpeg"
+          gpl="packages/pi-video-gen/platforms/ffmpeg-${{ matrix.target }}/bin/ffmpeg-gpl"
+          probe="${bin%/*}/ffprobe"
+          gpl_probe="${gpl%/*}/ffprobe-gpl"
+          win_container="pi-video-gen-win32-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          run_win_container() {
+            docker exec --user "$(id -u):$(id -g)" --env HOME=/tmp/runner-home --env WINEDEBUG=-all \
+              "$win_container" "$@"
+          }
+          run_ffmpeg() {
+            executable="$1"
+            shift
+            case "${{ matrix.target }}" in
+              darwin-*|linux-x64) "$executable" "$@" ;;
+              linux-arm64) qemu-aarch64 -L /usr/aarch64-linux-gnu "$executable" "$@" ;;
+              win32-x64) run_win_container /usr/lib/wine/wine64 "${executable}.exe" "$@" ;;
+            esac
+          }
+          case "${{ matrix.target }}" in
+            darwin-*)
+              "$bin" -version
+              "$probe" -version
+              "$gpl" -version
+              "$gpl_probe" -version
+              xcrun vtool -show-build "$bin" | grep -q 'minos 11.0'
+              ;;
+            linux-x64)
+              "$bin" -version
+              "$probe" -version
+              "$gpl" -version
+              "$gpl_probe" -version
+              ldd "$bin"
+              ;;
+            linux-arm64)
+              qemu-aarch64 -L /usr/aarch64-linux-gnu "$bin" -version
+              qemu-aarch64 -L /usr/aarch64-linux-gnu "$probe" -version
+              qemu-aarch64 -L /usr/aarch64-linux-gnu "$gpl" -version
+              qemu-aarch64 -L /usr/aarch64-linux-gnu "$gpl_probe" -version
+              aarch64-linux-gnu-readelf -h "$bin" | grep -q 'AArch64'
+              ;;
+            win32-x64)
+              run_win_container /usr/lib/wine/wine64 "${bin}.exe" -version
+              run_win_container /usr/lib/wine/wine64 "${probe}.exe" -version
+              run_win_container /usr/lib/wine/wine64 "${gpl}.exe" -version
+              run_win_container /usr/lib/wine/wine64 "${gpl_probe}.exe" -version
+              run_win_container x86_64-w64-mingw32-objdump -f "${bin}.exe" | grep -q 'pei-x86-64'
+              ;;
+          esac
+          cat > timeline-smoke.srt <<'EOF'
+          1
+          00:00:00,000 --> 00:00:00,500
+          Timeline smoke
+          EOF
+          smoke_args=(
+            -nostdin -xerror
+            -loop 1 -framerate 25 -t 0.5 -i packages/pi-video-gen/preview.png
+            -loop 1 -framerate 25 -t 0.5 -i packages/pi-video-gen/preview.png
+            -loop 1 -framerate 25 -t 0.5 -i packages/pi-video-gen/preview.png
+            -f lavfi -i anullsrc=r=48000:cl=stereo
+            -f lavfi -i anullsrc=r=48000:cl=stereo
+            -f lavfi -i sine=frequency=440:sample_rate=48000
+            -i timeline-smoke.srt
+            -filter_complex "
+              [0:v]scale=64:64,zoompan=z='min(zoom+0.001,1.1)':d=1:s=64x64:fps=25,settb=AVTB[v0];
+              [1:v]scale=64:64,settb=AVTB[v1];
+              [2:v]scale=16:16,format=rgba[ovr];
+              [v0][ovr]overlay=0:0:shortest=1[vo];
+              [vo][v1]xfade=transition=fade:duration=0.1:offset=0.4[v];
+              [3:a]atrim=0:0.25[a0];
+              [4:a]atrim=0:0.25[a1];
+              [a0][a1]concat=n=2:v=0:a=1[voice];
+              [5:a]atrim=0:0.5[bgm];
+              [voice][bgm]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.95:level=false[a]"
+            -map "[v]" -map "[a]" -map 6:s
+            -t 0.8 -c:a aac -c:s mov_text -y
+          )
+          run_ffmpeg "$bin" "${smoke_args[@]}" -c:v mpeg4 \
+            "timeline-smoke-${{ matrix.target }}.mp4"
+          run_ffmpeg "$gpl" "${smoke_args[@]}" -c:v libx264 \
+            "timeline-smoke-${{ matrix.target }}-h264.mp4"
+          run_ffmpeg "$bin" \
+            -ss 0.1 -t 0.3 -i "timeline-smoke-${{ matrix.target }}.mp4" \
+            -f lavfi -i anullsrc=r=48000:cl=stereo \
+            -filter_complex "
+              [0:v]scale=64:64:force_original_aspect_ratio=increase,crop=64:64,fps=25[v];
+              [0:a]volume=0.5[src];
+              [src][1:a]amix=inputs=2:duration=first:normalize=0,alimiter=limit=0.95:level=false[a]" \
+            -map "[v]" -map "[a]" -t 0.3 -c:v mpeg4 -c:a aac -y \
+            "mixed-media-smoke-${{ matrix.target }}.mp4"
+          run_ffmpeg "$bin" -ss 0.2 \
+            -i "mixed-media-smoke-${{ matrix.target }}.mp4" \
+            -frames:v 1 -y timeline-smoke-qc.png
+
+      - name: Stop Windows build container
+        if: always() && matrix.target == 'win32-x64'
+        run: docker rm --force "pi-video-gen-win32-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" || true
+
+      - name: Preserve executable permissions
+        run: |
+          tar -czf "pi-video-gen-ffmpeg-${{ matrix.target }}.tar.gz" \
+            -C "packages/pi-video-gen/platforms/ffmpeg-${{ matrix.target }}" \
+            bin LICENSE GPLv2.txt ZLIB_LICENSE.txt SOURCE.md source
+
+      - name: Upload platform package payload
+        uses: actions/upload-artifact@v7
+        with:
+          name: pi-video-gen-ffmpeg-${{ matrix.target }}
+          path: pi-video-gen-ffmpeg-${{ matrix.target }}.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+  publish-ffmpeg:
+    name: publish FFmpeg platform packages
+    needs: [decide, build]
+    if: needs.decide.outputs.missing == 'true'
+    runs-on:
+      - instance-hnpsq9go
+      - linux
+      - x64
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+
+      - name: Download FFmpeg platform artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: pi-video-gen-ffmpeg-*
+          path: .release-artifacts
+
+      - name: Prepare FFmpeg platform packages
+        run: |
+          for target in darwin-arm64 darwin-x64 linux-arm64 linux-x64 win32-x64; do
+            tar -xzf ".release-artifacts/pi-video-gen-ffmpeg-${target}/pi-video-gen-ffmpeg-${target}.tar.gz" \
+              -C "packages/pi-video-gen/platforms/ffmpeg-${target}"
+          done
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Setup pnpm
+        run: corepack install -g pnpm@10.18.3
+
+      - name: Check npm token
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "NPM_TOKEN repository secret is not configured."
+            exit 1
+          fi
+
+      - name: Publish platform packages to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          published=()
+          skipped=()
+          for dir in packages/pi-video-gen/platforms/ffmpeg-*; do
+            name="$(node -p "require('./${dir}/package.json').name")"
+            version="$(node -p "require('./${dir}/package.json').version")"
+            if npm view "${name}@${version}" version >/dev/null 2>&1; then
+              echo "skip ${name}@${version} (already on npm)"
+              skipped+=("${name}@${version}")
+            else
+              (cd "$dir" && pnpm publish --access public --no-git-checks)
+              published+=("${name}@${version}")
+            fi
+          done
+          echo "published: ${published[*]:-none}"
+          echo "skipped (already on npm): ${skipped[*]:-none}"
+          if [ "${#published[@]}" -eq 0 ]; then
+            echo "::notice::All FFmpeg platform package versions already exist on npm. To ship new FFmpeg binaries, bump the version in packages/pi-video-gen/platforms/*/package.json."
+          fi
