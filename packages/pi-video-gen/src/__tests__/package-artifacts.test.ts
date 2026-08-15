@@ -9,6 +9,10 @@ const publishWorkflow = readFileSync(
   join(packageRoot, '..', '..', '.github', 'workflows', 'npm-publish.yml'),
   'utf-8',
 );
+const ffmpegBuildWorkflow = readFileSync(
+  join(packageRoot, '..', '..', '.github', 'workflows', 'ffmpeg-build.yml'),
+  'utf-8',
+);
 const mainPackage = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf-8')) as {
   files: string[];
   optionalDependencies?: Record<string, string>;
@@ -76,50 +80,69 @@ describe('pi-video-gen package artifacts', () => {
   });
 
   it('builds against declared platform baselines and verifies release binaries', () => {
-    expect(publishWorkflow).toContain('fail-fast: false');
-    expect(publishWorkflow).toContain('runner: ubuntu-22.04');
-    expect(publishWorkflow).toMatch(
+    expect(ffmpegBuildWorkflow).toContain('fail-fast: false');
+    expect(ffmpegBuildWorkflow).toContain('runner: ubuntu-22.04');
+    expect(ffmpegBuildWorkflow).toMatch(
       /- target: win32-x64\n\s+runner: \[instance-hnpsq9go, linux, x64\]/,
     );
-    expect(publishWorkflow).not.toContain('sudo -n');
-    expect(publishWorkflow).toContain('docker run --detach');
-    expect(publishWorkflow).toContain('ubuntu:22.04 sleep infinity');
-    expect(publishWorkflow).toContain('docker exec --user');
-    expect(publishWorkflow).toContain('gcc gcc-mingw-w64-x86-64');
-    expect(publishWorkflow).toContain('libc6-dev');
-    expect(publishWorkflow).toContain('/tmp/runner-home');
-    expect(publishWorkflow).toContain('/usr/lib/wine/wine64');
-    expect(publishWorkflow).toContain('Verify FFmpeg binary');
-    expect(publishWorkflow).toContain('vtool -show-build');
-    expect(publishWorkflow).not.toContain('vars.X264_SHA256');
-    expect(publishWorkflow).toContain('timeline-smoke');
-    expect(publishWorkflow).not.toContain('timeline-smoke.jpg');
-    expect(publishWorkflow).toContain('-i packages/pi-video-gen/preview.png');
-    expect(publishWorkflow).toContain('-nostdin -xerror');
-    expect(publishWorkflow).toContain('atrim=0:0.2');
-    expect(publishWorkflow).toContain('zoompan=');
-    expect(publishWorkflow).toContain('xfade=');
-    expect(publishWorkflow).toContain('overlay=');
-    expect(publishWorkflow).toContain('concat=n=2:v=0:a=1');
-    expect(publishWorkflow).toContain('amix=inputs=2');
-    expect(publishWorkflow).toContain('mov_text');
-    expect(publishWorkflow).toContain('timeline-smoke-qc.png');
-    expect(publishWorkflow).toContain('mixed-media-smoke');
-    expect(publishWorkflow).toContain('volume=0.5[src]');
-    expect(publishWorkflow).toContain('duration=first:normalize=0');
-    expect(publishWorkflow).toContain('alimiter=limit=0.95:level=false');
-    expect(publishWorkflow).toContain('libx264');
+    expect(ffmpegBuildWorkflow).not.toContain('sudo -n');
+    expect(ffmpegBuildWorkflow).toContain('docker run --detach');
+    expect(ffmpegBuildWorkflow).toContain('ubuntu:22.04 sleep infinity');
+    expect(ffmpegBuildWorkflow).toContain('docker exec --user');
+    expect(ffmpegBuildWorkflow).toContain('gcc gcc-mingw-w64-x86-64');
+    expect(ffmpegBuildWorkflow).toContain('libc6-dev');
+    expect(ffmpegBuildWorkflow).toContain('/tmp/runner-home');
+    expect(ffmpegBuildWorkflow).toContain('/usr/lib/wine/wine64');
+    expect(ffmpegBuildWorkflow).toContain('Verify FFmpeg binary');
+    expect(ffmpegBuildWorkflow).toContain('vtool -show-build');
+    expect(ffmpegBuildWorkflow).not.toContain('vars.X264_SHA256');
+    expect(ffmpegBuildWorkflow).toContain('timeline-smoke');
+    expect(ffmpegBuildWorkflow).not.toContain('timeline-smoke.jpg');
+    expect(ffmpegBuildWorkflow).toContain('-i packages/pi-video-gen/preview.png');
+    expect(ffmpegBuildWorkflow).toContain('-nostdin -xerror');
+    expect(ffmpegBuildWorkflow).toContain('atrim=0:0.2');
+    expect(ffmpegBuildWorkflow).toContain('zoompan=');
+    expect(ffmpegBuildWorkflow).toContain('xfade=');
+    expect(ffmpegBuildWorkflow).toContain('overlay=');
+    expect(ffmpegBuildWorkflow).toContain('concat=n=2:v=0:a=1');
+    expect(ffmpegBuildWorkflow).toContain('amix=inputs=2');
+    expect(ffmpegBuildWorkflow).toContain('mov_text');
+    expect(ffmpegBuildWorkflow).toContain('timeline-smoke-qc.png');
+    expect(ffmpegBuildWorkflow).toContain('mixed-media-smoke');
+    expect(ffmpegBuildWorkflow).toContain('volume=0.5[src]');
+    expect(ffmpegBuildWorkflow).toContain('duration=first:normalize=0');
+    expect(ffmpegBuildWorkflow).toContain('alimiter=limit=0.95:level=false');
+    expect(ffmpegBuildWorkflow).toContain('libx264');
   });
 
   it('executes cross-compiled release binaries before publishing them', () => {
-    expect(publishWorkflow).toContain('qemu-aarch64 -L /usr/aarch64-linux-gnu "$bin" -version');
-    expect(publishWorkflow).toContain(
+    expect(ffmpegBuildWorkflow).toContain('qemu-aarch64 -L /usr/aarch64-linux-gnu "$bin" -version');
+    expect(ffmpegBuildWorkflow).toContain(
       `run_win_container /usr/lib/wine/wine64 "\${bin}.exe" -version`,
     );
-    expect(publishWorkflow).toContain(`probe="\${bin%/*}/ffprobe"`);
-    expect(publishWorkflow).toContain(`gpl_probe="\${gpl%/*}/ffprobe-gpl"`);
-    expect(publishWorkflow).not.toContain(`\${bin/ffmpeg/ffprobe}`);
-    expect(publishWorkflow).not.toContain(`\${gpl/ffmpeg/ffprobe}`);
+    expect(ffmpegBuildWorkflow).toContain(`probe="\${bin%/*}/ffprobe"`);
+    expect(ffmpegBuildWorkflow).toContain(`gpl_probe="\${gpl%/*}/ffprobe-gpl"`);
+    expect(ffmpegBuildWorkflow).not.toContain(`\${bin/ffmpeg/ffprobe}`);
+    expect(ffmpegBuildWorkflow).not.toContain(`\${gpl/ffmpeg/ffprobe}`);
+  });
+
+  it('publishes FFmpeg platform packages from the dedicated ffmpeg-build workflow only', () => {
+    // ffmpeg-build.yml builds the binaries and publishes the five platform
+    // packages at their committed versions. npm-publish.yml never builds
+    // FFmpeg itself: it may invoke ffmpeg-build.yml as a reusable workflow
+    // (build_ffmpeg input), and otherwise reuses the committed platform
+    // versions already published on npm.
+    expect(ffmpegBuildWorkflow).toContain('workflow_dispatch');
+    expect(ffmpegBuildWorkflow).toContain('workflow_call');
+    expect(ffmpegBuildWorkflow).toContain('packages/pi-video-gen/scripts/**');
+    expect(ffmpegBuildWorkflow).toContain('packages/pi-video-gen/platforms/**');
+    expect(ffmpegBuildWorkflow).toContain('pnpm publish --access public --no-git-checks');
+    expect(publishWorkflow).not.toContain('build-video-ffmpeg');
+    expect(publishWorkflow).not.toContain('pi-video-gen-ffmpeg-');
+    expect(publishWorkflow).not.toContain('platformPackageFiles');
+    expect(publishWorkflow).toContain('Verify FFmpeg platform packages are published');
+    expect(publishWorkflow).toContain('build_ffmpeg');
+    expect(publishWorkflow).toContain('uses: ./.github/workflows/ffmpeg-build.yml');
   });
 
   for (const target of targets) {

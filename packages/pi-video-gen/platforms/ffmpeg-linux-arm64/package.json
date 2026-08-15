@@ -1,6 +1,6 @@
 {
   "name": "@amaster.ai/pi-video-gen-ffmpeg-linux-arm64",
-  "version": "0.1.0",
+  "version": "0.1.8",
   "description": "LGPL FFmpeg + GPL FFmpeg (libx264) runtime for pi-video-gen on linux arm64",
   "license": "SEE LICENSE IN SOURCE.md",
   "files": [
