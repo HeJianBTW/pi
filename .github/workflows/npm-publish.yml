@@ -129,7 +129,9 @@ jobs:
           name="$(node -p "require('./${platform_dir}/package.json').name")"
           version="$(node -p "require('./${platform_dir}/package.json').version")"
           tarball="$(npm pack "${name}@${version}" --silent)"
-          tar -xzf "${tarball}" -C "${platform_dir}" --strip-components=1
+          mkdir -p "${platform_dir}/bin"
+          tar -xzf "${tarball}" -C "${platform_dir}/bin" --strip-components=2 package/bin
+          rm -f "${tarball}"
           "${platform_dir}/bin/ffmpeg" -version
           "${platform_dir}/bin/ffprobe" -version
 
